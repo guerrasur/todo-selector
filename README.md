@@ -134,12 +134,9 @@ indefinidamente".
 
 URL: `https://partners.rappi.com/menu?brandId=AR75000&storeIds=...`
 
-**DECIDIDO:** se opera solo sobre **Carabelas - Turbo**. Al apagar ahí, también
-se apaga en Rappi normal. Ver `STORE_ID_TURBO`.
+**DECIDIDO:** se opera solo sobre **Carabelas - Turbo** (`AR221056`, confirmado).
+Al apagar ahí, también se apaga en Rappi normal.
 
-- [ ] **Confirmar cuál de los 5 storeIds es Turbo Carabelas.** Ahora está
-      puesto `AR221056` (el que venía como `storeId` en la URL), pero hay que
-      verificarlo en el portal.
 - [ ] `_tarjeta()`: confirmar el contenedor de la tarjeta del producto.
 - [ ] `leer_estado()`: el badge "Apagados" ya está previsto; confirmar el
       texto exacto y cómo se lee el toggle.
@@ -148,26 +145,35 @@ se apaga en Rappi normal. Ver `STORE_ID_TURBO`.
 
 ## 3. Revisar el mapeo de nombres
 
-`app/seed.py` ya tiene el catálogo cargado con los nombres de cada plataforma.
-**Hay dudas marcadas con `DUDA` en el archivo que hay que resolver:**
+`app/seed.py` tiene el catálogo cargado con los nombres de cada plataforma.
 
-### Productos que aparecen en una sola plataforma
+### Resuelto
 
-| Producto | PedidosYa | Rappi |
-|---|---|---|
-| Mexicana | sí | **no aparece** |
-| Ensalada con Peras | **no aparece** | sí |
-| Wrap de atun (sin guarnición) | **no aparece** | sí |
-| Wrap Brie con ensalada | **no aparece** | sí |
-| Suprema a la Crema de Limón con Puré | **no aparece** | sí |
+- **Mexicana**: ya no se usa, sacada del catálogo (queda comentada por si vuelve).
+- **"Coca Coca Zero"**: no es un typo de esta lista — se cargó mal en PedidosYa
+  y quedó así en el portal. El nombre es correcto.
+- **storeId de Rappi**: `AR221056` es Carabelas - Turbo. Confirmado.
 
-¿Son productos que realmente no están en esa plataforma, o faltaron en la
-lista? La UI los muestra con un chip gris "—" en la plataforma donde no existen.
+### Pendiente de confirmar en vivo
 
-### "con batatas" vs "con ensalada"
+**Productos que aparecen solo en Rappi.** Verificar si realmente no están en
+PedidosYa o si faltaron en la lista original:
 
-En PedidosYa los wraps con guarnición dicen **"con batatas"**; en Rappi dicen
-**"con ensalada"**. Asumí que son el mismo producto:
+| Producto | En PedidosYa? |
+|---|---|
+| Ensalada con Peras | verificar |
+| Wrap de atun (sin guarnición) | verificar |
+| Wrap Brie con ensalada | verificar |
+| Suprema a la Crema de Limón con Puré | verificar |
+
+La UI los muestra con un chip gris "—" en PedidosYa. Si aparecen en el portal,
+agregar el nombre correspondiente en `seed.py`.
+
+### Pendiente de decisión del usuario
+
+**"con batatas" vs "con ensalada".** En PedidosYa los wraps con guarnición
+dicen "con batatas"; en Rappi dicen "con ensalada". Están mapeados como el
+mismo producto:
 
 | Canónico | PedidosYa | Rappi |
 |---|---|---|
@@ -176,20 +182,16 @@ En PedidosYa los wraps con guarnición dicen **"con batatas"**; en Rappi dicen
 | Wrap hummus con batatas | Wrap hummus con batatas | Wrap Hummus con ensalada |
 | Wrap toscano con batatas | Wrap toscano con batatas | Wrap Toscano con ensalada |
 
-**Si son platos distintos**, hay que separarlos.
+**Si son platos distintos, hay que separarlos.** Preguntarle al usuario.
 
-### "Coca Coca Zero"
-
-En la lista de PedidosYa figura literalmente "Coca Coca Zero". Parece un typo,
-pero puede estar así en el portal. **Confirmar el nombre exacto** — si no
-coincide con el texto real, el script no va a encontrar el producto.
+Ojo también: en Rappi existen "Wrap de atun" y "Wrap de atun con ensalada"
+como ítems separados; en PedidosYa solo figura "Wrap de Atun con batatas".
 
 ### Categorías
 
 En PedidosYa, los platos (Risotto, Pastel de papa, Guisos, Ravioles, Arroz
 Chaufa) están bajo **"Ensaladas"**. En Rappi están bajo **"Plato del Día"**.
-En StockSwitch los agrupé en una categoría "Platos" propia para verlos juntos.
-Esto es solo visual, no afecta la búsqueda.
+En StockSwitch se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
 
 ## 4. Integración con Suipacha Loader
 
