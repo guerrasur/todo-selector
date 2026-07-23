@@ -134,12 +134,9 @@ indefinidamente".
 
 URL: `https://partners.rappi.com/menu?brandId=BRAND_ID&storeIds=...`
 
-**DECIDIDO:** se opera solo sobre **la tienda Turbo**. Al apagar ahí, también
-se apaga en Rappi normal. Ver `STORE_ID_TURBO`.
+**DECIDIDO:** se opera solo sobre **la tienda Turbo** (`STORE_ID`, confirmado).
+Al apagar ahí, también se apaga en Rappi normal.
 
-- [ ] **Confirmar cuál de los 5 storeIds es Turbo el local.** Ahora está
-      puesto `STORE_ID` (el que venía como `storeId` en la URL), pero hay que
-      verificarlo en el portal.
 - [ ] `_tarjeta()`: confirmar el contenedor de la tarjeta del producto.
 - [ ] `leer_estado()`: el badge "Apagados" ya está previsto; confirmar el
       texto exacto y cómo se lee el toggle.
@@ -148,26 +145,35 @@ se apaga en Rappi normal. Ver `STORE_ID_TURBO`.
 
 ## 3. Revisar el mapeo de nombres
 
-`app/seed.py` ya tiene el catálogo cargado con los nombres de cada plataforma.
-**Hay dudas marcadas con `DUDA` en el archivo que hay que resolver:**
+`app/seed.py` tiene el catálogo cargado con los nombres de cada plataforma.
 
-### Productos que aparecen en una sola plataforma
+### Resuelto
 
-| Producto | PedidosYa | Rappi |
-|---|---|---|
-| Mixta | sí | **no aparece** |
-| Ñoquis del 29 | **no aparece** | sí |
-| Tarta de zapallo (sin guarnición) | **no aparece** | sí |
-| Tarta de choclo individual | **no aparece** | sí |
-| Locro del sábado | **no aparece** | sí |
+- **Mixta**: ya no se usa, sacada del catálogo (queda comentada por si vuelve).
+- **"Gaseosa cola cero"**: no es un typo de esta lista — se cargó mal en PedidosYa
+  y quedó así en el portal. El nombre es correcto.
+- **storeId de Rappi**: `STORE_ID` es la tienda Turbo. Confirmado.
 
-¿Son productos que realmente no están en esa plataforma, o faltaron en la
-lista? La UI los muestra con un chip gris "—" en la plataforma donde no existen.
+### Pendiente de confirmar en vivo
 
-### "chica" vs "individual"
+**Productos que aparecen solo en Rappi.** Verificar si realmente no están en
+PedidosYa o si faltaron en la lista original:
 
-En PedidosYa los tartas con guarnición dicen **"chica"**; en Rappi dicen
-**"individual"**. Asumí que son el mismo producto:
+| Producto | En PedidosYa? |
+|---|---|
+| Ñoquis del 29 | verificar |
+| Tarta de zapallo (sin guarnición) | verificar |
+| Tarta de choclo individual | verificar |
+| Locro del sábado | verificar |
+
+La UI los muestra con un chip gris "—" en PedidosYa. Si aparecen en el portal,
+agregar el nombre correspondiente en `seed.py`.
+
+### Pendiente de decisión del usuario
+
+**"chica" vs "individual".** En PedidosYa los tartas con guarnición
+dicen "chica"; en Rappi dicen "individual". Están mapeados como el
+mismo producto:
 
 | Canónico | PedidosYa | Rappi |
 |---|---|---|
@@ -176,20 +182,16 @@ En PedidosYa los tartas con guarnición dicen **"chica"**; en Rappi dicen
 | Tarta de cebolla chica | Tarta de cebolla chica | Tarta de cebolla individual |
 | Tarta de espinaca chica | Tarta de espinaca chica | Tarta de espinaca individual |
 
-**Si son platos distintos**, hay que separarlos.
+**Si son platos distintos, hay que separarlos.** Preguntarle al usuario.
 
-### "Gaseosa cola cero"
-
-En la lista de PedidosYa figura literalmente "Gaseosa cola cero". Parece un typo,
-pero puede estar así en el portal. **Confirmar el nombre exacto** — si no
-coincide con el texto real, el script no va a encontrar el producto.
+Ojo también: en Rappi existen "Tarta de zapallo" y "Tarta de zapallo individual"
+como ítems separados; en PedidosYa solo figura "Tarta de zapallo chica".
 
 ### Categorías
 
 En PedidosYa, los platos (Ensalada mixta, Tarta de jamon y queso, Guisos, fideos, Arroz
 Empanada) están bajo **"Platos"**. En Rappi están bajo **"Plato del Día"**.
-En StockSwitch los agrupé en una categoría "Platos" propia para verlos juntos.
-Esto es solo visual, no afecta la búsqueda.
+En StockSwitch se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
 
 ## 4. Integración con Suipacha Loader
 
