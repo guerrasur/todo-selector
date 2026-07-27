@@ -229,6 +229,15 @@ async def buscar_texto(plataforma: str, fragmento: str):
     return await worker.buscar_textos(plataforma, fragmento)
 
 
+@app.get("/api/verificar-catalogo")
+async def verificar_catalogo(plataforma: str):
+    """Diagnostico: busca toda la carta en el portal y dice que no coincide.
+
+    Ej: /api/verificar-catalogo?plataforma=rappi
+    """
+    return await worker.verificar_catalogo(plataforma)
+
+
 @app.get("/api/diagnostico")
 async def diagnostico(plataforma: str, nombre: str):
     """Diagnostico: prueba leer un producto por nombre exacto, sin tocar nada.

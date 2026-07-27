@@ -34,9 +34,13 @@ aria-checked ("true"/"false") sobre el <input>.
 =========================================================================
 """
 
+import logging
+import re
 from typing import Optional
 
 from .base import PlataformaBase, ResultadoEstado
+
+log = logging.getLogger("pedidosya")
 
 
 class PedidosYa(PlataformaBase):
@@ -47,8 +51,51 @@ class PedidosYa(PlataformaBase):
     TXT_POR_HOY = "No disponible por hoy"
     TXT_INDEFINIDO = "No disponible indefinidamente"
 
+    # Popup de "Let's make sure the application can play sounds" que sale
+    # al reloguear (una vez por dia).
+    RE_PLAY_SOUND = re.compile(r"play\s*sound", re.I)
+
+    async def _cerrar_popups(self) -> bool:
+        """Cierra el popup de sonido que PedidosYa muestra al reloguear.
+
+        Aparece una vez por dia. Mientras esta abierto tapa parte de la
+        lista, y un click sobre lo que quede debajo falla con "intercepts
+        pointer events" hasta el timeout.
+
+        OJO: esto NO explica el "element is not enabled" que se vio el
+        2026-07-27. Ese mensaje solo lo produce un `disabled`, un
+        `aria-disabled="true"` o un <fieldset disabled> padre (verificado
+        contra Playwright 1.61). Ver inspeccionar().
+        """
+        boton = self.page.get_by_role("button", name=self.RE_PLAY_SOUND)
+        if await boton.count() == 0:
+            return False
+
+        try:
+            await boton.first.click(timeout=5000)
+            await self.page.wait_for_timeout(1000)
+            log.info("Popup de sonido cerrado")
+            return True
+        except Exception as e:
+            log.warning("No pude cerrar el popup de sonido: %s", e)
+            return False
+
+    async def _hay_overlay(self) -> bool:
+        """Queda algun dialogo tapando el menu? Solo para avisar en el log."""
+        try:
+            return await self.page.locator(".cdk-overlay-backdrop").count() > 0
+        except Exception:
+            return False
+
     async def asegurar_sesion(self) -> bool:
         await self.ir_al_menu()
+
+        # Antes que nada: si hay un popup abierto, tapa parte de la lista
+        # y los clicks que caigan debajo van a fallar por timeout.
+        await self._cerrar_popups()
+        if await self._hay_overlay():
+            log.warning("Hay un dialogo abierto en la pestaña de PedidosYa "
+                        "que no supe cerrar: los clicks pueden fallar")
 
         # CONFIRMADO: PedidosYa no muestra pantalla de sesion expirada,
         # se re-loguea solo. Dejamos el chequeo de password como red de
@@ -72,16 +119,14 @@ class PedidosYa(PlataformaBase):
         """Clickea el toggle de la fila.
 
         OJO: el <input> tiene la clase cdk-visually-hidden de Angular
-        Material. Clickearlo directo NO funciona: Playwright espera a que
-        sea interactuable, la barra del toggle le tapa el punto de click,
-        y a los 30s tira timeout. Hay que clickear la barra visible.
+        Material y clickearlo directo NO funciona. Verificado contra una
+        pagina de prueba con este mismo HTML: el click al input tarda
+        30.0s exactos y falla. Hay que clickear la barra visible.
         """
         barra = fila.locator("span.mat-slide-toggle-bar").first
-        if await barra.count() > 0:
-            await barra.click(timeout=10000)
-        else:
-            # El <label> entero tambien togglea (semantica de label).
-            await fila.click(timeout=10000)
+        # El <label> entero tambien togglea (semantica de label).
+        objetivo = barra if await barra.count() > 0 else fila
+        await self.clickear(objetivo, timeout=10000, que="toggle")
 
     def _fila(self, nombre_remoto: str):
         """Devuelve el locator de la fila del producto.
@@ -96,6 +141,12 @@ class PedidosYa(PlataformaBase):
         return texto.locator(
             "xpath=ancestor::label[contains(@class,'mat-slide-toggle-label')][1]"
         )
+
+    async def inspeccionar(self, nombre_remoto: str) -> dict:
+        await self.ir_al_menu()
+        datos = await self._html_de(self._fila(nombre_remoto))
+        datos["popup_abierto"] = await self._hay_overlay()
+        return datos
 
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
         await self.ir_al_menu()
@@ -138,7 +189,8 @@ class PedidosYa(PlataformaBase):
         # El popup ofrece las dos opciones
         opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
         try:
-            await self.page.get_by_text(opcion, exact=False).first.click(timeout=8000)
+            await self.clickear(self.page.get_by_text(opcion, exact=False),
+                                que=f"opcion '{opcion}'")
         except Exception:
             return False
 

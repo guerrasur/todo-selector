@@ -38,9 +38,12 @@ indefinidamente" aparece un SEGUNDO modal de confirmacion,
 =========================================================================
 """
 
+import logging
 from typing import Optional
 
 from .base import PlataformaBase, ResultadoEstado
+
+log = logging.getLogger("rappi")
 
 
 class Rappi(PlataformaBase):
@@ -126,6 +129,12 @@ class Rappi(PlataformaBase):
             'input[type="checkbox"], [role="switch"], button[aria-checked]'
         ).first
 
+    async def inspeccionar(self, nombre_remoto: str) -> dict:
+        # De paso resuelve el TODO-SELECTOR de _tarjeta(): con esto vemos
+        # por fin el HTML completo de la tarjeta de Rappi.
+        await self.ir_al_menu()
+        return await self._html_de(self._tarjeta(nombre_remoto))
+
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
         await self.ir_al_menu()
         tarjeta = self._tarjeta(nombre_remoto)
@@ -163,15 +172,15 @@ class Rappi(PlataformaBase):
             return True
 
         tarjeta = self._tarjeta(nombre_remoto)
-        toggle = self._toggle_clickeable(tarjeta)
-        await toggle.click()
+        await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
         await self.page.wait_for_timeout(1500)
 
         # El dialogo ofrece 2 radios utiles (la 3ra, "Personalizar
         # disponibilidad", no se usa: pide elegir una fecha).
         opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
         try:
-            await self.page.get_by_text(opcion, exact=True).first.click(timeout=8000)
+            await self.clickear(self.page.get_by_text(opcion, exact=True),
+                                que=f"radio '{opcion}'")
             await self.page.wait_for_timeout(1000)
         except Exception:
             return False
@@ -182,7 +191,7 @@ class Rappi(PlataformaBase):
         for txt in ["Sí, desactivar", "Guardar", "Confirmar", "Aceptar", "Aplicar"]:
             btn = self.page.get_by_role("button", name=txt)
             if await btn.count() > 0:
-                await btn.first.click()
+                await self.clickear(btn, que=f"boton '{txt}'")
                 break
 
         await self.page.wait_for_timeout(3000)
@@ -196,8 +205,7 @@ class Rappi(PlataformaBase):
             return True
 
         tarjeta = self._tarjeta(nombre_remoto)
-        toggle = self._toggle_clickeable(tarjeta)
-        await toggle.click()
+        await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
         await self.page.wait_for_timeout(2500)
 
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
