@@ -7,8 +7,10 @@ Diseño:
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from playwright.async_api import async_playwright
 
@@ -27,6 +29,26 @@ def _resumen(e: Exception, largo: int = 300) -> str:
     """
     texto = " ".join(str(e).split())
     return texto[:largo] + ("…" if len(texto) > largo else "")
+
+MUESTRA_CARTA = (Path(__file__).resolve().parent.parent
+                 / "pruebas" / "carta_2026-07-27.json")
+
+
+def _carta_de_muestra() -> dict:
+    """La lectura real del 2026-07-27, para probar la pantalla sin navegador.
+
+    En modo simulado no hay portales que leer, pero la pantalla Carta es lo
+    que mas conviene poder probar sin depender de estar en el local.
+    """
+    try:
+        with open(MUESTRA_CARTA, encoding="utf-8") as f:
+            carta = json.load(f)
+    except Exception as e:
+        return {"error": f"modo simulado y no pude leer la muestra: {e}"}
+
+    carta["simulado"] = True
+    return carta
+
 
 INTERVALO_COLA = 2               # segundos entre chequeos de la cola
 VERIFICACION_RAPIDA = 120        # 2 min: confirma lo recien apagado
@@ -420,7 +442,7 @@ class Worker:
         No toca la base: propone, y la confirmacion es del usuario.
         """
         if self.modo_simulado:
-            return {"error": "modo simulado: no hay navegador"}
+            return _carta_de_muestra()
 
         cartas, errores = {}, {}
         for nombre in ("pedidosya", "rappi"):

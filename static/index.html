@@ -85,6 +85,27 @@
     display: flex; align-items: center; gap: 14px; justify-content: space-between;
   }
   .aviso-platos.ok { border-color: var(--borde); border-left-color: var(--on); }
+
+  /* ---- Pantalla Carta: lo que dicen los portales vs lo que hay cargado ---- */
+  .carta { background: var(--panel); border: 1px solid var(--borde);
+           border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .carta h2 { font-size: 15px; margin: 0 0 4px; }
+  .carta .ayuda { color: var(--tenue); font-size: 13px; margin-bottom: 14px; }
+  .grupo { margin-top: 18px; }
+  .grupo > h3 { font-size: 12px; letter-spacing: 1.1px; text-transform: uppercase;
+                color: var(--tenue); margin: 0 0 8px; font-weight: 600; }
+  .par { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px;
+         align-items: center; padding: 8px 10px; border-radius: 8px;
+         background: var(--panel-2); margin-bottom: 6px; font-size: 14px; }
+  .par .lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .par .quien { font-size: 11px; color: var(--tenue); }
+  .par .qué { overflow-wrap: anywhere; }
+  .par .nada { color: var(--tenue); font-style: italic; }
+  .par .alt { font-size: 11px; color: var(--curso); }
+  .par .conf { font-size: 11px; color: var(--tenue); }
+  .par.ok { border-left: 3px solid var(--on); }
+  .par .hecho { color: var(--on); font-size: 12px; }
+  .carta .cargando { color: var(--curso); }
 </style>
 </head>
 <body>
@@ -93,11 +114,13 @@
   <h1>Todo-Selector</h1>
   <span class="badge" id="estado-sistema">cargando…</span>
   <span class="badge" id="pendientes"></span>
-  <button id="btn-revalidar" style="margin-left:auto">Revalidar sesión</button>
+  <button id="btn-carta" style="margin-left:auto">Carta</button>
+  <button id="btn-revalidar">Revalidar sesión</button>
 </header>
 
 <main>
   <div id="panel-platos" style="display:none"></div>
+  <div id="panel-carta" class="carta" style="display:none"></div>
   <div id="lista" class="vacio">Cargando productos…</div>
 </main>
 
@@ -334,6 +357,243 @@ function pedirPlatos(actuales) {
 
   document.getElementById('inp-platos').focus();
 }
+
+// ---------------------------------------------------------------- Carta
+//
+// Muestra lo que dicen los dos portales y lo cruza con lo que hay cargado.
+// Los emparejamientos dudosos quedan SEPARADOS: cada uno con su botón. Si
+// son el mismo plato, "Vincular" los deja bajo un solo botón de apagado.
+
+let carta = null;        // ultimo /api/carta
+let catalogo = null;     // ultimo /api/catalogo
+
+function panelCarta() { return document.getElementById('panel-carta'); }
+
+async function abrirCarta() {
+  const panel = panelCarta();
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  if (!carta) pintarCarta();
+  else await refrescarCarta();
+}
+
+async function refrescarCarta() {
+  catalogo = await fetch('/api/catalogo').then(r => r.json());
+  pintarCarta();
+}
+
+async function leerCarta() {
+  const panel = panelCarta();
+  panel.innerHTML = `<h2>Carta</h2>
+    <div class="ayuda cargando">Leyendo los dos portales… tarda como un minuto:
+    recorre todas las categorías de PedidosYa y la lista de Rappi.</div>`;
+  try {
+    carta = await fetch('/api/carta').then(r => r.json());
+  } catch (e) {
+    panel.innerHTML = `<h2>Carta</h2><div class="ayuda">No pude leer: ${e}</div>`;
+    return;
+  }
+  await refrescarCarta();
+}
+
+// Con que producto del catalogo se corresponde un nombre de portal
+function productoDe(plataforma, remoto) {
+  if (!catalogo) return null;
+  return catalogo.productos.find(p => p.plataformas[plataforma] === remoto) || null;
+}
+
+function pintarCarta() {
+  const panel = panelCarta();
+  panel.innerHTML = `
+    <h2>Carta</h2>
+    <div class="ayuda">
+      Lo que muestran los portales hoy, cruzado con lo que tiene cargado la app.
+      Lo que no es claramente el mismo plato queda separado, con un botón cada uno.
+    </div>
+    <button id="btn-leer-carta">${carta ? 'Volver a leer los portales' : 'Leer los portales'}</button>
+    <div id="carta-cuerpo"></div>`;
+  document.getElementById('btn-leer-carta').onclick = leerCarta;
+
+  if (!carta) return;
+  const cuerpo = document.getElementById('carta-cuerpo');
+
+  if (carta.error || carta.errores) {
+    const aviso = document.createElement('div');
+    aviso.className = 'ayuda';
+    aviso.style.color = 'var(--error)';
+    aviso.textContent = 'Lectura incompleta: ' +
+      JSON.stringify(carta.errores || carta.error);
+    cuerpo.appendChild(aviso);
+  }
+
+  cuerpo.appendChild(grupo(
+    `A confirmar — ${(carta.a_confirmar || []).length}`,
+    (carta.a_confirmar || []).map(filaPar)));
+
+  cuerpo.appendChild(grupo(
+    `Emparejados solos — ${(carta.pares || []).length}`,
+    (carta.pares || []).map(filaPar)));
+
+  cuerpo.appendChild(grupo(
+    `Solo en PedidosYa — ${(carta.solo_pedidosya || []).length}`,
+    (carta.solo_pedidosya || []).map(n => filaSuelto('pedidosya', n))));
+
+  cuerpo.appendChild(grupo(
+    `Solo en Rappi — ${(carta.solo_rappi || []).length}`,
+    (carta.solo_rappi || []).map(n => filaSuelto('rappi', n))));
+
+  if (carta.leidos) {
+    const pie = document.createElement('div');
+    pie.className = 'ayuda';
+    pie.style.marginTop = '16px';
+    pie.textContent = `Leídos: ${carta.leidos.pedidosya || 0} en PedidosYa, ` +
+                      `${carta.leidos.rappi || 0} en Rappi.` +
+                      (catalogo && catalogo.manual
+                        ? ' El catálogo lo manejás vos desde acá.' : '');
+    cuerpo.appendChild(pie);
+  }
+}
+
+function grupo(titulo, filas) {
+  const div = document.createElement('div');
+  div.className = 'grupo';
+  const h = document.createElement('h3');
+  h.textContent = titulo;
+  div.appendChild(h);
+  if (!filas.length) {
+    const vacio = document.createElement('div');
+    vacio.className = 'ayuda';
+    vacio.textContent = 'Nada.';
+    div.appendChild(vacio);
+  }
+  filas.forEach(f => div.appendChild(f));
+  return div;
+}
+
+function lado(plataforma, nombre, extra) {
+  const d = document.createElement('div');
+  d.className = 'lado';
+  const quien = document.createElement('div');
+  quien.className = 'quien';
+  quien.textContent = NOMBRE_PLAT[plataforma];
+  const qué = document.createElement('div');
+  qué.className = nombre ? 'qué' : 'qué nada';
+  qué.textContent = nombre || 'no está';
+  d.append(quien, qué);
+  if (extra) {
+    const e = document.createElement('div');
+    e.className = 'alt';
+    e.textContent = extra;
+    d.appendChild(e);
+  }
+  return d;
+}
+
+function filaPar(par) {
+  const div = document.createElement('div');
+  div.className = 'par';
+
+  const pPy = productoDe('pedidosya', par.pedidosya);
+  const pRappi = productoDe('rappi', par.rappi);
+  const vinculado = pPy && pRappi && pPy.id === pRappi.id;
+  if (vinculado) div.classList.add('ok');
+
+  const alternativas = (par.alternativas || []).length
+    ? 'ojo, también existe: ' + par.alternativas.join(' · ') : '';
+
+  div.append(lado('pedidosya', par.pedidosya),
+             lado('rappi', par.rappi, alternativas));
+
+  const acc = document.createElement('div');
+  acc.className = 'acciones';
+
+  const conf = document.createElement('span');
+  conf.className = 'conf';
+  conf.textContent = par.confianza != null ? par.confianza.toFixed(2) : '';
+  acc.appendChild(conf);
+
+  if (vinculado) {
+    const b = document.createElement('button');
+    b.textContent = 'Separar';
+    b.title = `Dejar "${par.pedidosya}" y "${par.rappi}" como dos productos`;
+    b.onclick = () => accionCarta('/api/separar',
+                                  { producto_id: pPy.id, plataforma: 'rappi' }, b);
+    acc.append(etiquetaHecho('un solo botón'), b);
+  } else {
+    const b = document.createElement('button');
+    b.className = 'on';
+    b.textContent = 'Vincular';
+    b.title = 'Que los dos se apaguen con el mismo botón';
+    b.onclick = () => accionCarta('/api/vincular',
+                                  { pedidosya: par.pedidosya, rappi: par.rappi }, b);
+    acc.appendChild(b);
+  }
+
+  div.appendChild(acc);
+  return div;
+}
+
+function filaSuelto(plataforma, nombre) {
+  const div = document.createElement('div');
+  div.className = 'par';
+  const otra = plataforma === 'rappi' ? 'pedidosya' : 'rappi';
+
+  div.append(lado(plataforma, nombre), lado(otra, null));
+
+  const acc = document.createElement('div');
+  acc.className = 'acciones';
+  const cargado = productoDe(plataforma, nombre);
+
+  if (cargado) {
+    div.classList.add('ok');
+    acc.appendChild(etiquetaHecho('cargado'));
+  } else {
+    const b = document.createElement('button');
+    b.textContent = 'Agregar';
+    b.title = 'Cargarlo en la app para poder apagarlo desde acá';
+    b.onclick = () => accionCarta('/api/agregar',
+                                  { plataforma, nombre_remoto: nombre }, b);
+    acc.appendChild(b);
+  }
+
+  div.appendChild(acc);
+  return div;
+}
+
+function etiquetaHecho(texto) {
+  const s = document.createElement('span');
+  s.className = 'hecho';
+  s.textContent = texto;
+  return s;
+}
+
+async function accionCarta(url, cuerpo, boton) {
+  boton.disabled = true;
+  const antes = boton.textContent;
+  boton.textContent = '…';
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cuerpo),
+    });
+    if (!r.ok) {
+      const detalle = await r.json().catch(() => ({}));
+      alert('No se pudo: ' + (detalle.detail || r.status));
+      boton.disabled = false;
+      boton.textContent = antes;
+      return;
+    }
+    await refrescarCarta();
+    await cargar();
+  } catch (e) {
+    alert('No se pudo: ' + e);
+    boton.disabled = false;
+    boton.textContent = antes;
+  }
+}
+
+document.getElementById('btn-carta').onclick = abrirCarta;
 
 document.getElementById('btn-revalidar').onclick = async (e) => {
   const b = e.target;
