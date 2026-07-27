@@ -9,12 +9,19 @@ REVISAR LAS MARCAS "DUDA" ANTES DE USAR EN PRODUCCION.
 Las tildes de los nombres de Rappi salen del portal mismo, via /api/nombres
 (2026-07-27). Sin tilde no se encuentran: se buscan con exact=True.
 
-OJO: esta lista esta INCOMPLETA. El portal de Rappi muestra 45 productos y
-aca hay 30. Ver la lista de faltantes en el README.
+OJO: esta lista esta INCOMPLETA a proposito. El portal de Rappi muestra 45
+productos y aca hay 31. El usuario decidio (2026-07-27) NO cargar los ~18
+que estan solo en Rappi ni la Mexicana: prefiere que la app lea las cartas
+y que el vinculo lo decida el desde la pantalla Carta. Ver app/catalogo.py.
+
+Esto es la carga INICIAL, no el catalogo definitivo. En cuanto el usuario
+vincula o separa algo desde la app, la base pasa a mandar y este archivo
+deja de tocar los alias (ver sembrar()).
 """
 
 import logging
 
+from .catalogo import es_manual
 from .database import SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem
 
@@ -45,11 +52,16 @@ PRODUCTOS = [
     ("Wrap de pollo a la Toscana", "Wraps",
      "Wrap de pollo a la Toscana", "Wrap de pollo a la toscana"),
 
-    # DUDA IMPORTANTE: en PedidosYa dice "con batatas", en Rappi "con ensalada".
-    # Asumo que son el mismo producto con distinta guarnicion en el nombre.
-    # CONFIRMAR: son el mismo plato o son distintos?
-    ("Wrap caesar con batatas", "Wraps",
-     "Wrap caesar con batatas", "Wrap caesar con ensalada"),
+    # RESUELTO POR EL USUARIO (2026-07-27): el "Wrap caesar con batatas" de
+    # PedidosYa NO es ninguno de los dos wraps caesar con guarnicion de
+    # Rappi ("con papas" y "con ensalada"): son platos distintos. Antes
+    # estaban vinculados, asi que apagar uno apagaba el que no era.
+    ("Wrap caesar con batatas", "Wraps", "Wrap caesar con batatas", None),
+    ("Wrap caesar con ensalada", "Wraps", None, "Wrap caesar con ensalada"),
+
+    # Los otros tres wraps con guarnicion siguen vinculados: el usuario dijo
+    # que le es indiferente y que prefiere decidirlo desde la app. Si no son
+    # el mismo plato, el boton "Separar" de la pantalla Carta los desarma.
     ("Wrap de Atun con batatas", "Wraps",
      "Wrap de Atun con batatas", "Wrap de atun con ensalada"),
     ("Wrap hummus con batatas", "Wraps",
@@ -102,31 +114,69 @@ def sembrar():
             # catalogo, y como la sesion es autoflush=False, sincronizar
             # aca no veria lo que acaba de agregarse y los duplicaria.
             _crear_todo(db)
+        elif es_manual(db):
+            # El usuario vinculo o separo productos desde la app. Desde ese
+            # momento manda la base: si siguieramos sincronizando, cada
+            # reinicio deshacia sus decisiones.
+            log.info("Catalogo manejado desde la app: no toco los alias")
         else:
-            _sincronizar_alias(db)
+            _sincronizar(db)
         db.commit()
     finally:
         db.close()
 
 
-def _sincronizar_alias(db):
-    """Corre en cada arranque: el catalogo manda sobre los nombres remotos.
+def _sincronizar(db):
+    """Corre en cada arranque: el catalogo manda sobre el mapeo de nombres.
 
     Este proyecto no tiene migraciones. Sin esto, corregir un nombre en
     PRODUCTOS no servia de nada en una base ya sembrada: los alias viejos
     quedaban para siempre y el producto seguia sin encontrarse en el portal.
+
+    Sincroniza en los dos sentidos:
+      - agrega o corrige el alias cuando el catalogo trae un nombre
+      - lo SACA cuando el catalogo dice None, que es como se escribe "este
+        producto no existe en esa plataforma"
+
+    Lo segundo hacia falta para poder desvincular: al marcar el "Wrap caesar
+    con batatas" como exclusivo de PedidosYa, sin esto la base se quedaba
+    con el alias de Rappi y lo seguia apagando alla.
     """
-    for canonico, _categoria, n_py, n_rappi in PRODUCTOS:
+    for canonico, categoria, n_py, n_rappi in PRODUCTOS:
         p = db.query(Producto).filter_by(nombre=canonico).first()
         if p is None:
+            p = _crear_producto(db, canonico, categoria, n_py, n_rappi,
+                                orden=len(PRODUCTOS))
+            log.info("producto nuevo del catalogo: '%s'", canonico)
             continue
 
         for plataforma, remoto in (("pedidosya", n_py), ("rappi", n_rappi)):
-            if not remoto or remoto == canonico:
-                continue
-
             al = (db.query(AliasPlataforma)
                   .filter_by(producto_id=p.id, plataforma=plataforma).first())
+
+            if not remoto:
+                # El catalogo dice que no existe alla: se va el alias y se va
+                # el estado, que es lo que hace que la UI muestre el chip "—".
+                if al is not None:
+                    log.info("alias %s/%s: '%s' -> (ya no existe ahi)",
+                             canonico, plataforma, al.nombre_remoto)
+                    db.delete(al)
+                est = (db.query(EstadoItem)
+                       .filter_by(producto_id=p.id, plataforma=plataforma).first())
+                if est is not None:
+                    db.delete(est)
+                continue
+
+            # Existe en esa plataforma: nos aseguramos de que tenga estado.
+            if not any(e.plataforma == plataforma for e in p.estados):
+                db.add(EstadoItem(producto_id=p.id, plataforma=plataforma,
+                                  estado=EstadoItem.DESCONOCIDO))
+
+            if remoto == canonico:
+                if al is not None:
+                    db.delete(al)       # el canonico ya alcanza
+                continue
+
             if al is None:
                 db.add(AliasPlataforma(producto_id=p.id, plataforma=plataforma,
                                        nombre_remoto=remoto))
@@ -139,21 +189,22 @@ def _sincronizar_alias(db):
 
 def _crear_todo(db):
     for i, (canonico, categoria, n_py, n_rappi) in enumerate(PRODUCTOS):
-        p = Producto(nombre=canonico, categoria=categoria, orden=i)
-        db.add(p)
-        db.flush()
+        _crear_producto(db, canonico, categoria, n_py, n_rappi, orden=i)
 
-        # Alias solo si difiere del canonico
-        if n_py and n_py != canonico:
-            db.add(AliasPlataforma(producto_id=p.id, plataforma="pedidosya",
-                                   nombre_remoto=n_py))
-        if n_rappi and n_rappi != canonico:
-            db.add(AliasPlataforma(producto_id=p.id, plataforma="rappi",
-                                   nombre_remoto=n_rappi))
 
-        # Solo creamos estado en las plataformas donde el producto existe
-        for plat, nombre in (("pedidosya", n_py), ("rappi", n_rappi)):
-            if nombre is None:
-                continue
-            db.add(EstadoItem(producto_id=p.id, plataforma=plat,
-                              estado=EstadoItem.DESCONOCIDO))
+def _crear_producto(db, canonico, categoria, n_py, n_rappi, orden):
+    p = Producto(nombre=canonico, categoria=categoria, orden=orden)
+    db.add(p)
+    db.flush()
+
+    for plat, nombre in (("pedidosya", n_py), ("rappi", n_rappi)):
+        # Sin nombre, el producto no existe en esa plataforma: ni alias ni
+        # estado. La UI lo muestra con el chip gris "—".
+        if nombre is None:
+            continue
+        if nombre != canonico:
+            db.add(AliasPlataforma(producto_id=p.id, plataforma=plat,
+                                   nombre_remoto=nombre))
+        db.add(EstadoItem(producto_id=p.id, plataforma=plat,
+                          estado=EstadoItem.DESCONOCIDO))
+    return p
