@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -25,6 +25,11 @@ RAIZ = Path(__file__).resolve().parent.parent
 STATIC = RAIZ / "static"
 
 MODO_SIMULADO = os.environ.get("STOCKSWITCH_SIMULADO", "0") == "1"
+
+# El .bat actualiza ANTES de levantar el server: si la ventana queda abierta,
+# segui corriendo el codigo viejo aunque los archivos ya esten nuevos. Esto
+# lo hace visible en vez de que se note como un 404 raro.
+ARRANCADO_EN = datetime.now()
 
 
 @app.on_event("startup")
@@ -131,6 +136,7 @@ def estado_sistema(db: Session = Depends(get_db)):
                   .count())
     return {
         "simulado": MODO_SIMULADO,
+        "arrancado_en": ARRANCADO_EN.isoformat(timespec="seconds"),
         "sesiones": worker.sesion_ok,
         "operaciones_pendientes": pendientes,
         "ultimo_chequeo": (worker.ultimo_chequeo.isoformat()

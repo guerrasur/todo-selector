@@ -215,7 +215,8 @@ class PedidosYa(PlataformaBase):
         if estado is None:
             return False
         if not estado.disponible:
-            return True  # ya estaba apagado
+            log.info("'%s' ya estaba apagado, no toco nada", nombre_remoto)
+            return True
 
         fila = self._fila(nombre_remoto)
         await self._click_toggle(fila)
@@ -242,6 +243,7 @@ class PedidosYa(PlataformaBase):
         if estado is None:
             return False
         if estado.disponible:
+            log.info("'%s' ya estaba prendido, no toco nada", nombre_remoto)
             return True
 
         fila = self._fila(nombre_remoto)
