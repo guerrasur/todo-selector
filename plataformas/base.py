@@ -62,11 +62,42 @@ class PlataformaBase(ABC):
 
     # ---------- Helpers comunes ----------
 
+    def en_el_menu(self) -> bool:
+        """Estamos parados en la pantalla del menu?
+
+        Se chequea por partes y no comparando la URL entera porque los
+        portales la reescriben: Rappi le agrega los storeIds de las cinco
+        tiendas. Comparando el string completo NUNCA coincidia, asi que
+        ir_al_menu() navegaba de nuevo en cada lectura. Eso era 30 recargas
+        para verificar el catalogo, y navegaciones pisandose entre si
+        (net::ERR_ABORTED en el log del 2026-07-27).
+        """
+        return bool(self.url_menu) and self.url_menu in self.page.url
+
     async def ir_al_menu(self):
         """Navega a la pantalla del menu si no estamos ahi."""
-        if self.url_menu and self.url_menu not in self.page.url:
+        if self.url_menu and not self.en_el_menu():
             await self.page.goto(self.url_menu, wait_until="domcontentloaded")
             await self.page.wait_for_timeout(3000)
+
+    async def texto_overlay(self, limite: int = 500) -> str:
+        """Que dice el dialogo que hay abierto, si hay alguno.
+
+        Cuando no encontramos un boton dentro de un popup, lo unico util es
+        saber que decia el popup que si estaba abierto.
+        """
+        for selector in (".cdk-overlay-container", "[role='dialog']"):
+            try:
+                cont = self.page.locator(selector)
+                if await cont.count() == 0:
+                    continue
+                texto = await cont.first.inner_text()
+            except Exception:
+                continue
+            texto = " | ".join(l.strip() for l in texto.split("\n") if l.strip())
+            if texto:
+                return texto[:limite]
+        return ""
 
     async def clickear(self, locator, timeout: int = 8000, que: str = "elemento"):
         """Click que aguanta lo que los portales dejan flotando por encima.

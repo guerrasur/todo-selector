@@ -78,6 +78,13 @@ class Rappi(PlataformaBase):
             f"?brandId={self.BRAND_ID}&storeIds={ids}&storeId={self.store_id}"
         )
 
+    def en_el_menu(self) -> bool:
+        # Rappi reescribe la URL con los storeIds de TODAS las tiendas, asi
+        # que la nuestra nunca coincide entera. Alcanza con estar en /menu
+        # y con la tienda correcta seleccionada.
+        u = self.page.url
+        return "partners.rappi.com/menu" in u and f"storeId={self.store_id}" in u
+
     async def asegurar_sesion(self) -> bool:
         await self.ir_al_menu()
 
