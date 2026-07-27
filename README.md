@@ -5,11 +5,19 @@ sola pantalla, sin entrar a cada portal.
 
 Corre en `http://127.0.0.1:8001/` (Suipacha Loader usa el 8000).
 
-## Estado: PROTOTIPO
+## Estado: EN USO
 
-El esqueleto está completo y probado en modo simulado. **Faltan los selectores
-reales** de las dos plataformas — están marcados como `TODO-SELECTOR` en
-`plataformas/rappi.py` y `plataformas/pedidosya.py`.
+Las cuatro operaciones corrieron en vivo contra los dos portales.
+
+| | leer la carta | apagar | prender |
+|---|---|---|---|
+| **PedidosYa** | ✅ 29 productos, las 3 categorías | ✅ | ✅ (op#17, 2026-07-27) |
+| **Rappi** | ✅ 45 productos | ✅ | ✅ (op#18, 2026-07-27) |
+
+Queda un `TODO-SELECTOR` en `plataformas/rappi.py`: falta el HTML completo de
+la tarjeta y el selector de la pantalla de sesión expirada.
+
+Hay pruebas que corren sin tocar los portales, ver `pruebas/LEEME.md`.
 
 ## Arranque
 
@@ -108,6 +116,30 @@ los del día anterior desaparecen de la lista.
 **Pendiente:** tomar este dato de Suipacha Loader en vez de preguntarlo dos
 veces. Ver tareas pendientes.
 
+## La pantalla Carta
+
+El botón **Carta** (arriba a la derecha) lee lo que muestran los dos portales
+y lo cruza con lo que tiene cargado la app. Tarda como un minuto: recorre
+todas las categorías de PedidosYa y la lista de Rappi.
+
+Muestra cuatro grupos: **a confirmar** (el emparejamiento automático no está
+seguro), **emparejados solos**, y los que están **solo en un portal**.
+
+- **Vincular**: los dos nombres pasan a ser el mismo producto, con un solo
+  botón de apagado. Si estaban cargados por separado, se fusionan.
+- **Separar**: lo contrario. Cada portal queda con su propio botón.
+- **Agregar**: carga en la app un producto que está en un portal y no en el
+  catálogo.
+
+El criterio es que **si no está claro que sea el mismo plato, van separados**,
+y vincularlos es una decisión explícita tuya. Cuando la app no está segura
+avisa qué otro producto parecido existe en el otro portal — que es justo el
+caso del "Tarta de verdura chica", que en Rappi tiene dos candidatos.
+
+**Importante:** en cuanto vinculás o separás algo, el catálogo pasa a
+manejarse desde la app y `app/seed.py` deja de pisar los nombres en cada
+arranque. Si no, un reinicio deshacía lo que acababas de decidir.
+
 ## Diagnóstico cuando algo "falla"
 
 El motivo del fallo ahora sale en tres lugares: en la consola (`op#N fallo: ...`),
@@ -152,12 +184,15 @@ app/
   database.py             # SQLite en %LOCALAPPDATA%\TodoSelector
   models.py               # Producto, AliasPlataforma, EstadoItem, Operacion
   seed.py                 # carga inicial de productos
+  carta.py                # cruza la carta de los dos portales
+  catalogo.py             # vincular / separar / agregar productos
   worker.py               # navegador persistente + cola + reverificación
 plataformas/
   base.py                 # contrato: 4 métodos por plataforma
-  pedidosya.py            # TODO-SELECTOR
-  rappi.py                # TODO-SELECTOR
+  pedidosya.py            # confirmado en vivo
+  rappi.py                # TODO-SELECTOR (tarjeta y sesión expirada)
 static/index.html         # UI
+pruebas/                  # corren sin tocar los portales, ver pruebas/LEEME.md
 ```
 
 ## Modelo de nombres
@@ -169,8 +204,18 @@ un **alias por plataforma**, porque en Rappi algunos difieren:
 |-----------|-----------|--------------------|
 | Ensalada mixta   | Ensalada mixta   | Ensalada mixta de hojas  |
 
-Si no hay alias cargado, se usa el nombre canónico en ambas. Los alias se
-editan por `POST /api/alias`.
+Si no hay alias cargado, se usa el nombre canónico en ambas.
+
+**Un producto con alias en las dos plataformas es un plato que se apaga con un
+solo botón; uno con alias en una sola existe solo ahí** (la UI le muestra el
+chip gris "—" en la otra). Eso se cambia desde la pantalla Carta, o por API:
+
+```
+POST /api/vincular   {"pedidosya": "Budín de pan", "rappi": "Budín de pan"}
+POST /api/separar    {"producto_id": 12, "plataforma": "rappi"}
+POST /api/agregar    {"plataforma": "rappi", "nombre_remoto": "Guiso de garbanzos"}
+GET  /api/catalogo   qué nombre tiene cada producto en cada portal
+```
 
 ---
 
@@ -178,22 +223,19 @@ editan por `POST /api/alias`.
 
 Con Chrome abierto en los dos portales, hay que:
 
-## 0. PedidosYa solo expone una categoría a la vez  ← BLOQUEANTE
+## 0. PedidosYa solo expone una categoría a la vez  ← RESUELTO
 
-Medido el 2026-07-27: `verificar-catalogo` da **4/26**, y esos 4 son exactamente
-las Bebidas (Agua chica, Agua chica con gas, Gaseosa cola, Gaseosa cola cero). Ninguna
-ensalada, ningún producto, ningún plato. Apagar "Budín de pan" falla en 74 ms — ni siquiera
-intenta clickear, `leer_estado` no lo encuentra en el DOM.
+Se recorren las categorías (`wk-menu-list wk-menu-list-category-item`) y se
+recuerda en cuál apareció cada producto. Confirmado en vivo el 2026-07-27:
+`/api/carta` leyó los 29 productos de las 3 categorías, y op#17 encontró
+"Budín de pan" en "Platos".
 
-Sobre las Bebidas la app funciona de punta a punta: apagar, confirmar releyendo
-y reverificar a los 2 minutos. El problema es el alcance, no el mecanismo.
-
-Falta correr `/api/nombres?plataforma=pedidosya` para ver qué muestra la página,
-y de ahí sacar cómo llegar al resto: seleccionar la categoría, expandirla, o
-scrollear si la lista es virtualizada.
-
-Hasta que esto se resuelva, PedidosYa solo sirve para bebidas, y el rediseño de
-leer las dos cartas no se puede hacer.
+**Cuidado con una trampa que ya mordió:** el fallback JS de `clickear()` no
+sirve tal cual para las categorías. El listener no está en el custom element
+sino en un hijo, y los eventos suben pero no bajan: un `el.click()` sobre
+`<wk-menu-list-category-item>` no hace nada. Por eso existe el click
+"profundo", que dispara sobre el descendiente más profundo del centro.
+Está cubierto por `pruebas/probar_pedidosya.py`.
 
 ## 1. PedidosYa (`plataformas/pedidosya.py`)
 
@@ -209,12 +251,21 @@ URL: `https://web-ar.us.restaurant-partners.com/menus/PY_AR/MENU_ID`
       expirada — se re-loguea solo. Se deja el chequeo de password como red
       de seguridad. El elemento que prueba que el menú cargó espera
       `input.mat-slide-toggle-input`.
-- [ ] `prender()`: sigue sin confirmar si al prender aparece un popup de
-      confirmación o si es directo (todavía no se probó en vivo).
+- [x] `prender()`: **confirmado en vivo** (op#17, 2026-07-27). No abre ningún
+      popup: el click sobre el toggle apagado lo prende y queda guardado. El
+      popup de dos opciones es solo del lado de apagar, porque ahí hay que
+      elegir "por hoy" o "indefinidamente".
 
 El popup de apagado ya está confirmado por captura: al clickear el toggle de
 un producto prendido aparece un único popup con "No disponible por hoy" y
 "No disponible indefinidamente" (sin paso de confirmación extra).
+
+**Reconfirmar después de recargar.** `_confirmar()` (en `base.py`, compartido
+con Rappi) rehace la preparación del arranque después del reload: cierra el
+popup de sonido —que vuelve en cada carga— y espera a que el menú exista.
+Dormir 4 segundos no alcanzaba: la relectura caía sobre la página tapada y en
+la primera categoría, no encontraba el producto, y daba por fallado un cambio
+que sí había entrado (op#17 dio "fallo" y el reintento lo encontró prendido).
 
 ## 2. Rappi (`plataformas/rappi.py`)
 
@@ -256,49 +307,36 @@ Al apagar ahí, también se apaga en Rappi normal.
   cargados solo para Rappi en `seed.py` (la UI los muestra con un chip gris
   "—" en PedidosYa).
 
-### El catálogo está incompleto (medido 2026-07-27)
+### El catálogo está incompleto A PROPÓSITO
 
-`/api/nombres?plataforma=rappi` devuelve **45 productos**; `seed.py` tiene 30.
-Faltan estos 15, que existen en Rappi y no están cargados:
+`/api/nombres?plataforma=rappi` devuelve **45 productos**; `seed.py` tiene 31.
+Los ~18 que faltan (Wok de vegetales, Wok de pollo, los Bowls, Polenta con
+Estofado, Tarta de acelga, Plato del dia, varias ensaladas, "Ensalda mixta"
+con el typo del portal…) **no se cargan a mano**: el usuario decidió el
+2026-07-27 dejar el catálogo como está y agregar desde la pantalla Carta lo
+que necesite. `seed.py` es la carga inicial, no el catálogo definitivo.
 
-```
-Wok de vegetales            Ensalada de tomate       Guiso de garbanzos
-Wok de pollo            Plato del dia               Wok de vegetales
-Ensalda mixta (sic)      Ensalada de hongos       Sopa de Sopa del diabaza y Vainilla
-Ensalada mixta         Ensalada mixta           Polenta con salsa
-Tarta de verdura porción     Ensalada verde         Tarta de acelga y Batata
-```
+Lo mismo con **"Ensalada mixta"**: está viva en los dos portales pero queda
+fuera del catálogo por decisión del usuario. Si algún día la quiere, la
+pantalla Carta la propone con 0.97 de confianza y alcanza con "Vincular".
 
-Dos cosas para decidir sobre esa lista:
+Ojo con **"Ensalda mixta"**: el typo es del portal. Como los nombres se
+buscan con `exact=True`, hay que copiarlo con el typo o no se encuentra. La
+pantalla Carta ya toma el nombre tal cual lo escribe el portal, así que
+agregándolo desde ahí no hay riesgo de equivocarse.
 
-- **"Ensalada mixta" está en el portal.** En `seed.py` figura comentada como
-  descontinuada. Una de las dos cosas está desactualizada.
-- **"Ensalada mixta" y "Ensalda mixta"**: el segundo tiene un typo en el
-  portal ("Ensalda"). Como los nombres se buscan con `exact=True`, hay que
-  copiarlo con el typo incluido o no se encuentra.
+### "chica" vs "individual"  ← RESUELTO por el usuario (2026-07-27)
 
-Mantener esto a mano es exactamente lo que el rediseño (leer las dos cartas y
-machearlas) viene a eliminar.
+En PedidosYa los tartas con guarnición dicen "chica"; en Rappi "con
+ensalada", y para el de verdura Rappi tiene **dos**: "en porcion" y "individual".
 
-### Pendiente de decisión del usuario
-
-**"chica" vs "individual".** En PedidosYa los tartas con guarnición
-dicen "chica"; en Rappi dicen "individual". Están mapeados como el
-mismo producto:
-
-| Canónico | PedidosYa | Rappi |
-|---|---|---|
-| Tarta de verdura chica | Tarta de verdura chica | Tarta de verdura individual |
-| Tarta de zapallo chica | Tarta de zapallo chica | Tarta de zapallo individual |
-| Tarta de cebolla chica | Tarta de cebolla chica | Tarta de cebolla individual |
-| Tarta de espinaca chica | Tarta de espinaca chica | Tarta de espinaca individual |
-
-**Si son platos distintos, hay que separarlos.** Preguntarle al usuario.
-
-**Se complica más:** `/api/nombres` (2026-07-27) muestra que en Rappi existen
-**"Tarta de verdura porción" Y "Tarta de verdura individual"** como ítems separados.
-O sea que la guarnición sí distingue productos distintos en Rappi, y hay que
-decidir a cuál de los dos corresponde el "chica" de PedidosYa.
+- **"Tarta de verdura chica" NO es ninguno de los dos.** Son platos
+  distintos. Estaban vinculados a "Tarta de verdura individual": apagar uno
+  apagaba el que no era. Ya está corregido en `seed.py`, y una base ya
+  sembrada se corrige sola en el próximo arranque.
+- **Los otros tres** (zapallo, cebolla, espinaca) siguen vinculados. El usuario
+  dijo que le es indiferente y que prefiere decidirlo desde la app: si no son
+  el mismo plato, el botón "Separar" de la pantalla Carta los desarma.
 
 Ojo también: en Rappi existen "Tarta de zapallo" y "Tarta de zapallo individual"
 como ítems separados; en PedidosYa solo figura "Tarta de zapallo chica".
@@ -329,8 +367,12 @@ hay que agregarle ese modelo primero.
 
 - [ ] Botón de "apagar todo" al cierre.
 - [ ] Sincronizar el estado real al arrancar (hoy arranca en "desconocido"
-      hasta que se toque algo).
+      hasta que se toque algo). La pantalla Carta ya lee los dos portales:
+      falta guardar lo que lee como estado inicial.
 - [ ] Mostrar el historial en pantalla (la API ya lo devuelve).
+- [ ] **Sacar del código el id de menú de PedidosYa (`MENU_ID`) y el `storeId`
+      de Rappi (`STORE_ID`).** Hasta que sean configurables, "sirve para otro
+      local" está a medias.
 
 ## Nota sobre términos de servicio
 

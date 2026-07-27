@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from . import catalogo
 from .database import init_db, get_db
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
 from .seed import sembrar
@@ -306,6 +307,89 @@ def historial(limite: int = 50, db: Session = Depends(get_db)):
         "detalle": o.detalle,
         "creada_en": o.creada_en.isoformat() if o.creada_en else None,
     } for o in ops]
+
+
+class VincularIn(BaseModel):
+    pedidosya: str                   # nombre tal cual figura en ese portal
+    rappi: str
+    nombre: str | None = None        # canonico, si querés uno distinto
+    categoria: str = ""
+
+
+class SepararIn(BaseModel):
+    producto_id: int
+    plataforma: str
+
+
+class AgregarIn(BaseModel):
+    plataforma: str
+    nombre_remoto: str
+    categoria: str = ""
+
+
+def _ver_producto(p) -> dict:
+    return {
+        "id": p.id,
+        "nombre": p.nombre,
+        "categoria": p.categoria,
+        "plataformas": {plat: catalogo.nombre_remoto(p, plat)
+                        for plat in catalogo.PLATAFORMAS},
+    }
+
+
+@app.post("/api/vincular")
+def vincular(data: VincularIn, db: Session = Depends(get_db)):
+    """Los dos nombres pasan a ser el mismo producto: un solo botón.
+
+    Es la respuesta a "dejame linkear opciones al mismo botón de apagado".
+    Fusiona si ya estaban cargados por separado.
+    """
+    try:
+        producto = catalogo.vincular(db, data.pedidosya, data.rappi,
+                                     nombre=data.nombre, categoria=data.categoria)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.commit()
+    return {"ok": True, "producto": _ver_producto(producto)}
+
+
+@app.post("/api/separar")
+def separar(data: SepararIn, db: Session = Depends(get_db)):
+    """Saca una plataforma del producto y la deja como producto aparte."""
+    try:
+        nuevo = catalogo.separar(db, data.producto_id, data.plataforma)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.commit()
+    return {"ok": True, "producto": _ver_producto(nuevo)}
+
+
+@app.post("/api/agregar")
+def agregar(data: AgregarIn, db: Session = Depends(get_db)):
+    """Carga un producto que existe en una sola plataforma."""
+    try:
+        producto = catalogo.agregar(db, data.plataforma, data.nombre_remoto,
+                                    categoria=data.categoria)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.commit()
+    return {"ok": True, "producto": _ver_producto(producto)}
+
+
+@app.get("/api/catalogo")
+def ver_catalogo(db: Session = Depends(get_db)):
+    """Qué nombre tiene cada producto en cada portal, y quién manda.
+
+    La pantalla Carta lo cruza con lo que leen los portales para saber qué
+    está vinculado, qué está suelto y qué no está cargado.
+    """
+    productos = (db.query(Producto)
+                 .filter(Producto.activo == True)  # noqa: E712
+                 .order_by(Producto.orden).all())
+    return {
+        "manual": catalogo.es_manual(db),
+        "productos": [_ver_producto(p) for p in productos],
+    }
 
 
 @app.post("/api/alias")
