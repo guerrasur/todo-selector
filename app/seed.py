@@ -7,8 +7,12 @@ Si un nombre es None, ese producto NO existe en esa plataforma.
 REVISAR LAS MARCAS "DUDA" ANTES DE USAR EN PRODUCCION.
 """
 
+import logging
+
 from .database import SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem
+
+log = logging.getLogger("seed")
 
 # (canonico, categoria, pedidosya, rappi)
 PRODUCTOS = [
@@ -75,7 +79,10 @@ PRODUCTOS = [
 
     # CONFIRMADO: en PedidosYa se cargo mal y quedo "Gaseosa cola cero".
     # El nombre esta asi en el portal, no es un typo de esta lista.
-    ("Gaseosa cola cero", "Bebidas", "Gaseosa cola cero", "Gaseosa cola sin azucar 500 ml"),
+    # CONFIRMADO POR /api/buscar-texto (2026-07-27): en Rappi lleva tilde,
+    # "almibar". Los nombres se buscan con exact=True, asi que sin la tilde
+    # no lo encontraba.
+    ("Gaseosa cola cero", "Bebidas", "Gaseosa cola cero", "Gaseosa cola cero 500 ml"),
 ]
 
 PLATAFORMAS = ["pedidosya", "rappi"]
@@ -84,29 +91,59 @@ PLATAFORMAS = ["pedidosya", "rappi"]
 def sembrar():
     db = SessionLocal()
     try:
-        if db.query(Producto).count() > 0:
-            return  # ya sembrado
-
-        for i, (canonico, categoria, n_py, n_rappi) in enumerate(PRODUCTOS):
-            p = Producto(nombre=canonico, categoria=categoria, orden=i)
-            db.add(p)
-            db.flush()
-
-            # Alias solo si difiere del canonico
-            if n_py and n_py != canonico:
-                db.add(AliasPlataforma(producto_id=p.id, plataforma="pedidosya",
-                                       nombre_remoto=n_py))
-            if n_rappi and n_rappi != canonico:
-                db.add(AliasPlataforma(producto_id=p.id, plataforma="rappi",
-                                       nombre_remoto=n_rappi))
-
-            # Solo creamos estado en las plataformas donde el producto existe
-            for plat, nombre in (("pedidosya", n_py), ("rappi", n_rappi)):
-                if nombre is None:
-                    continue
-                db.add(EstadoItem(producto_id=p.id, plataforma=plat,
-                                  estado=EstadoItem.DESCONOCIDO))
-
+        if db.query(Producto).count() == 0:
+            _crear_todo(db)
+        _sincronizar_alias(db)
         db.commit()
     finally:
         db.close()
+
+
+def _sincronizar_alias(db):
+    """Corre en cada arranque: el catalogo manda sobre los nombres remotos.
+
+    Este proyecto no tiene migraciones. Sin esto, corregir un nombre en
+    PRODUCTOS no servia de nada en una base ya sembrada: los alias viejos
+    quedaban para siempre y el producto seguia sin encontrarse en el portal.
+    """
+    for canonico, _categoria, n_py, n_rappi in PRODUCTOS:
+        p = db.query(Producto).filter_by(nombre=canonico).first()
+        if p is None:
+            continue
+
+        for plataforma, remoto in (("pedidosya", n_py), ("rappi", n_rappi)):
+            if not remoto or remoto == canonico:
+                continue
+
+            al = (db.query(AliasPlataforma)
+                  .filter_by(producto_id=p.id, plataforma=plataforma).first())
+            if al is None:
+                db.add(AliasPlataforma(producto_id=p.id, plataforma=plataforma,
+                                       nombre_remoto=remoto))
+                log.info("alias nuevo %s/%s: '%s'", canonico, plataforma, remoto)
+            elif al.nombre_remoto != remoto:
+                log.info("alias %s/%s: '%s' -> '%s'",
+                         canonico, plataforma, al.nombre_remoto, remoto)
+                al.nombre_remoto = remoto
+
+
+def _crear_todo(db):
+    for i, (canonico, categoria, n_py, n_rappi) in enumerate(PRODUCTOS):
+        p = Producto(nombre=canonico, categoria=categoria, orden=i)
+        db.add(p)
+        db.flush()
+
+        # Alias solo si difiere del canonico
+        if n_py and n_py != canonico:
+            db.add(AliasPlataforma(producto_id=p.id, plataforma="pedidosya",
+                                   nombre_remoto=n_py))
+        if n_rappi and n_rappi != canonico:
+            db.add(AliasPlataforma(producto_id=p.id, plataforma="rappi",
+                                   nombre_remoto=n_rappi))
+
+        # Solo creamos estado en las plataformas donde el producto existe
+        for plat, nombre in (("pedidosya", n_py), ("rappi", n_rappi)):
+            if nombre is None:
+                continue
+            db.add(EstadoItem(producto_id=p.id, plataforma=plat,
+                              estado=EstadoItem.DESCONOCIDO))

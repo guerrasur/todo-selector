@@ -325,6 +325,60 @@ class Worker:
         return {"url": plat.page.url,
                 "textos": await plat.buscar_textos(fragmento)}
 
+    async def verificar_catalogo(self, plataforma: str) -> dict:
+        """Busca TODOS los productos del catalogo en el portal, sin tocar nada.
+
+        Dice de una cuales nombres de app/seed.py no coinciden con el portal,
+        en vez de ir producto por producto con /api/buscar-texto.
+        """
+        plat = self.plataformas.get(plataforma)
+        if self.modo_simulado or plat is None:
+            return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
+
+        listo, motivo = await self._preparar(plataforma)
+        if not listo:
+            return {"error": motivo}
+
+        db = SessionLocal()
+        try:
+            productos = (db.query(Producto)
+                         .filter(Producto.activo == True)  # noqa: E712
+                         .order_by(Producto.orden).all())
+
+            items = []
+            for p in productos:
+                # Sin EstadoItem, el producto no existe en esa plataforma
+                if not any(e.plataforma == plataforma for e in p.estados):
+                    continue
+
+                buscado = self._nombre_remoto(db, p, plataforma)
+                fila = {"canonico": p.nombre, "buscado": buscado}
+                try:
+                    estado = await plat.leer_estado(buscado)
+                except Exception as e:
+                    fila.update(encontrado=False, error=_resumen(e, 120))
+                    items.append(fila)
+                    continue
+
+                fila["encontrado"] = estado is not None
+                if estado is not None:
+                    fila["disponible"] = estado.disponible
+                items.append(fila)
+        finally:
+            db.close()
+
+        faltantes = [i for i in items if not i["encontrado"]]
+        log.info("Catalogo %s: %s/%s encontrados", plataforma,
+                 len(items) - len(faltantes), len(items))
+
+        return {
+            "url": plat.page.url,
+            "total": len(items),
+            "encontrados": len(items) - len(faltantes),
+            "faltantes": [i["buscado"] for i in faltantes],
+            "items": items,
+        }
+
     async def diagnosticar(self, plataforma: str, nombre_remoto: str) -> dict:
         """Prueba leer un producto por su nombre exacto, sin tocar nada."""
         plat = self.plataformas.get(plataforma)
@@ -341,13 +395,20 @@ class Worker:
             log.exception("Diagnostico %s '%s'", plataforma, nombre_remoto)
             return {"url": plat.page.url, "error": _resumen(e)}
 
+        try:
+            html = await plat.inspeccionar(nombre_remoto)
+        except Exception as e:
+            html = {"error": _resumen(e, 120)}
+
         if estado is None:
             return {"url": plat.page.url, "encontrado": False,
                     "ayuda": "el nombre no aparece tal cual en el portal; "
-                             "probá /api/buscar-texto con una parte del nombre"}
+                             "probá /api/buscar-texto con una parte del nombre",
+                    "inspeccion": html}
 
         return {"url": plat.page.url, "encontrado": True,
-                "disponible": estado.disponible, "detalle": estado.detalle}
+                "disponible": estado.disponible, "detalle": estado.detalle,
+                "inspeccion": html}
 
     # ---------- Reverificacion ----------
 
