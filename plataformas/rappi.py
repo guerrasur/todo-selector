@@ -193,6 +193,7 @@ class Rappi(PlataformaBase):
         if estado is None:
             return False
         if not estado.disponible:
+            log.info("'%s' ya estaba apagado, no toco nada", nombre_remoto)
             return True
 
         tarjeta = self._tarjeta(nombre_remoto)
@@ -226,6 +227,7 @@ class Rappi(PlataformaBase):
         if estado is None:
             return False
         if estado.disponible:
+            log.info("'%s' ya estaba prendido, no toco nada", nombre_remoto)
             return True
 
         tarjeta = self._tarjeta(nombre_remoto)
