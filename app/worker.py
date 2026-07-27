@@ -17,6 +17,16 @@ from .models import Producto, AliasPlataforma, EstadoItem, Operacion
 
 log = logging.getLogger("worker")
 
+
+def _resumen(e: Exception, largo: int = 300) -> str:
+    """Mensaje de error en una linea, para guardar en la base y mostrar en la UI.
+
+    Los timeouts de Playwright traen varios parrafos de contexto; el log
+    completo queda igual en la consola via log.exception().
+    """
+    texto = " ".join(str(e).split())
+    return texto[:largo] + ("…" if len(texto) > largo else "")
+
 INTERVALO_COLA = 2               # segundos entre chequeos de la cola
 VERIFICACION_RAPIDA = 120        # 2 min: confirma lo recien apagado
 INTERVALO_REVERIFICACION = 900   # 15 min: ronda general de lo apagado
@@ -114,9 +124,21 @@ class Worker:
             producto = db.query(Producto).get(op.producto_id)
             nombre_remoto = self._nombre_remoto(db, producto, op.plataforma)
 
+            log.info("op#%s %s '%s' en %s (intento %s/%s)",
+                     op.id, op.accion, nombre_remoto, op.plataforma,
+                     op.intentos, MAX_INTENTOS)
+
             exito, detalle = await self._ejecutar(
                 op.plataforma, op.accion, nombre_remoto
             )
+
+            if exito:
+                log.info("op#%s OK", op.id)
+            elif op.intentos < MAX_INTENTOS:
+                log.warning("op#%s fallo: %s", op.id, detalle)
+            else:
+                log.error("op#%s ERROR definitivo tras %s intentos: %s",
+                          op.id, op.intentos, detalle)
 
             if exito:
                 op.estado = Operacion.OK
@@ -176,7 +198,8 @@ class Worker:
 
             return ok, "" if ok else "no se pudo confirmar el cambio"
         except Exception as e:
-            return False, str(e)
+            log.exception("Excepcion en %s.%s('%s')", plataforma, accion, nombre_remoto)
+            return False, _resumen(e)
 
     async def _verificar_luego(self, producto_id: int, plataforma: str,
                                accion: str, demora: int):
@@ -249,7 +272,11 @@ class Worker:
                  (datetime.now() - ultimo).total_seconds() > FRESCURA_MAX)
 
         if vieja:
-            log.info("Refrescando %s antes de operar...", plataforma)
+            # La URL importa: si quedaste logueado en otra sucursal, el
+            # portal puede haberte llevado a otro menu y los productos no
+            # van a aparecer.
+            log.info("Refrescando %s antes de operar (%s)...",
+                     plataforma, plat.page.url)
             try:
                 await plat.page.reload(wait_until="domcontentloaded")
                 await plat.page.wait_for_timeout(3000)
@@ -282,6 +309,45 @@ class Worker:
             await self._preparar(nombre)
 
         return self.sesion_ok
+
+    # ---------- Diagnostico ----------
+
+    async def buscar_textos(self, plataforma: str, fragmento: str) -> dict:
+        """Que textos del portal contienen 'fragmento'. Para arreglar alias."""
+        plat = self.plataformas.get(plataforma)
+        if self.modo_simulado or plat is None:
+            return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
+
+        listo, motivo = await self._preparar(plataforma)
+        if not listo:
+            return {"error": motivo}
+
+        return {"url": plat.page.url,
+                "textos": await plat.buscar_textos(fragmento)}
+
+    async def diagnosticar(self, plataforma: str, nombre_remoto: str) -> dict:
+        """Prueba leer un producto por su nombre exacto, sin tocar nada."""
+        plat = self.plataformas.get(plataforma)
+        if self.modo_simulado or plat is None:
+            return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
+
+        listo, motivo = await self._preparar(plataforma)
+        if not listo:
+            return {"error": motivo}
+
+        try:
+            estado = await plat.leer_estado(nombre_remoto)
+        except Exception as e:
+            log.exception("Diagnostico %s '%s'", plataforma, nombre_remoto)
+            return {"url": plat.page.url, "error": _resumen(e)}
+
+        if estado is None:
+            return {"url": plat.page.url, "encontrado": False,
+                    "ayuda": "el nombre no aparece tal cual en el portal; "
+                             "probá /api/buscar-texto con una parte del nombre"}
+
+        return {"url": plat.page.url, "encontrado": True,
+                "disponible": estado.disponible, "detalle": estado.detalle}
 
     # ---------- Reverificacion ----------
 

@@ -64,3 +64,25 @@ class PlataformaBase(ABC):
         if self.url_menu and self.url_menu not in self.page.url:
             await self.page.goto(self.url_menu, wait_until="domcontentloaded")
             await self.page.wait_for_timeout(3000)
+
+    async def buscar_textos(self, fragmento: str, limite: int = 40) -> list[str]:
+        """Diagnostico: textos visibles del portal que contienen 'fragmento'.
+
+        Los nombres se buscan con exact=True, asi que una mayuscula o un
+        guion de diferencia entre el catalogo y el portal hace que no se
+        encuentre nada. Buscando "Coca" con esto se ve como esta escrito
+        realmente el producto y se corrige el alias.
+        """
+        await self.ir_al_menu()
+        loc = self.page.get_by_text(fragmento, exact=False)
+        total = min(await loc.count(), limite)
+
+        vistos = []
+        for i in range(total):
+            try:
+                texto = (await loc.nth(i).inner_text()).strip()
+            except Exception:
+                continue
+            if texto and texto not in vistos:
+                vistos.append(texto)
+        return vistos

@@ -73,6 +73,20 @@ class EstadoItem(Base):
     producto = relationship("Producto", back_populates="estados")
 
 
+class Preferencia(Base):
+    """Clave/valor suelto. Hoy guarda si ya se preguntaron los platos del dia.
+
+    Hace falta porque "hoy no hay platos" es una respuesta valida que no crea
+    ningun Producto: sin esta marca, la app volvia a preguntar en cada recarga.
+    """
+    __tablename__ = "preferencias"
+
+    PLATOS_RESPONDIDO = "platos_dia_respondido"   # valor = fecha YYYY-MM-DD
+
+    clave = Column(String(60), primary_key=True)
+    valor = Column(String(200), default="")
+
+
 class Operacion(Base):
     """Cola de trabajo + historial. El worker toma las pendientes."""
     __tablename__ = "operaciones"
