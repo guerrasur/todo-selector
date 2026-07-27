@@ -1,4 +1,4 @@
-# StockSwitch
+# Todo-Selector
 
 App local para apagar/prender productos en **PedidosYa** y **Rappi** desde una
 sola pantalla, sin entrar a cada portal.
@@ -19,7 +19,11 @@ py -m playwright install chromium
 py run.py
 ```
 
-O doble click en `iniciar_app.bat`.
+O doble click en `iniciar_app.bat`. Si la carpeta es un clon de git (usar
+`git clone`, no bajar el zip), el `.bat` corre `git pull --ff-only` antes de
+arrancar para traer la ultima version del repo automaticamente. Si no hay
+conexion o hay cambios locales que generen conflicto, sigue con la version
+que ya tenias.
 
 ### Modo simulado (sin tocar las plataformas)
 
@@ -33,7 +37,7 @@ Las operaciones tardan 2 segundos y siempre dan OK. Sirve para ver la UI.
 ## Cómo funciona
 
 - **Un navegador persistente** arranca con la app, con una pestaña por
-  plataforma. Queda logueado en `%LOCALAPPDATA%\StockSwitch\chrome-profile`.
+  plataforma. Queda logueado en `%LOCALAPPDATA%\TodoSelector\chrome-profile`.
 - **La UI no espera al navegador**: apretás un botón, se encola una operación,
   y la pantalla se actualiza sola cada 3 segundos.
 - **Todo cambio se confirma releyendo**: después de clickear, recarga la página
@@ -83,7 +87,7 @@ Queda guardado. La UI muestra "Login pendiente" mientras falte alguna.
 run.py                    # arranque
 app/
   main.py                 # FastAPI + endpoints
-  database.py             # SQLite en %LOCALAPPDATA%\StockSwitch
+  database.py             # SQLite en %LOCALAPPDATA%\TodoSelector
   models.py               # Producto, AliasPlataforma, EstadoItem, Operacion
   seed.py                 # carga inicial de productos
   worker.py               # navegador persistente + cola + reverificación
@@ -116,19 +120,22 @@ Con Chrome abierto en los dos portales, hay que:
 
 URL: `https://web-ar.us.restaurant-partners.com/menus/PY_AR/460348`
 
-- [ ] `asegurar_sesion()`: confirmar cómo se ve la pantalla cuando la sesión
-      expiró, y qué elemento prueba que el menú cargó.
-- [ ] `_fila()`: confirmar el contenedor de cada producto. **Cuidado con los
+- [x] `_fila()`: confirmado, es el `<label class="mat-slide-toggle-label">`
+      de Angular Material (envuelve nombre + toggle). **Cuidado con los
       nombres que son prefijo de otros** ("Wrap caesar" vs "Wrap caesar con
       batatas") — por eso se usa `exact=True`.
-- [ ] `leer_estado()`: identificar cómo se distingue el toggle ON del OFF
-      (¿`aria-checked`? ¿clase CSS? ¿`input:checked`?).
-- [ ] `prender()`: verificar si al prender aparece un popup de confirmación
-      o si es directo.
+- [x] `leer_estado()`: confirmado, el toggle es un `<mat-slide-toggle>` con
+      `aria-checked="true"/"false"` sobre el `<input>`.
+- [x] `asegurar_sesion()`: confirmado, PedidosYa no tiene pantalla de sesión
+      expirada — se re-loguea solo. Se deja el chequeo de password como red
+      de seguridad. El elemento que prueba que el menú cargó espera
+      `input.mat-slide-toggle-input`.
+- [ ] `prender()`: sigue sin confirmar si al prender aparece un popup de
+      confirmación o si es directo (todavía no se probó en vivo).
 
 El popup de apagado ya está confirmado por captura: al clickear el toggle de
-un producto prendido aparecen "No disponible por hoy" y "No disponible
-indefinidamente".
+un producto prendido aparece un único popup con "No disponible por hoy" y
+"No disponible indefinidamente" (sin paso de confirmación extra).
 
 ## 2. Rappi (`plataformas/rappi.py`)
 
@@ -137,11 +144,22 @@ URL: `https://partners.rappi.com/menu?brandId=AR75000&storeIds=...`
 **DECIDIDO:** se opera solo sobre **Carabelas - Turbo** (`AR221056`, confirmado).
 Al apagar ahí, también se apaga en Rappi normal.
 
-- [ ] `_tarjeta()`: confirmar el contenedor de la tarjeta del producto.
-- [ ] `leer_estado()`: el badge "Apagados" ya está previsto; confirmar el
-      texto exacto y cómo se lee el toggle.
-- [ ] `apagar()`: confirmar los textos del diálogo "por hoy" vs
-      "indefinidamente", y si hay un botón final de Guardar.
+- [x] `_tarjeta()`: sin el HTML completo de la tarjeta, se resolvió subiendo
+      desde el nombre hasta el primer ancestro que también contiene el
+      toggle (localizado por su `data-testid`).
+- [x] `leer_estado()`: badge "Apagados" confirmado (fuente 1); el toggle es
+      un `<label data-testid="...-availability-switch-control">` con un
+      `<input readonly>` oculto adentro, sin `aria-checked` (fuente 2, via
+      `is_checked()`).
+- [x] `apagar()`: confirmado por captura — el diálogo tiene 3 radios: "Sólo
+      por hoy", "No disponible indefinidamente" y "Personalizar
+      disponibilidad" (esta última no se usa, pide elegir fecha). Elegido
+      el radio, aparece un segundo modal "¿Desactivar producto?" con
+      botones "Cancelar" y "Sí, desactivar" — confirmado, el código
+      clickea "Sí, desactivar".
+- [ ] Pantalla de sesión expirada de Rappi: se sabe que existe (Rappi se
+      desloguea por inactividad) pero falta confirmar el selector exacto
+      para `asegurar_sesion()`.
 
 ## 3. Revisar el mapeo de nombres
 
@@ -153,21 +171,11 @@ Al apagar ahí, también se apaga en Rappi normal.
 - **"Coca Coca Zero"**: no es un typo de esta lista — se cargó mal en PedidosYa
   y quedó así en el portal. El nombre es correcto.
 - **storeId de Rappi**: `AR221056` es Carabelas - Turbo. Confirmado.
-
-### Pendiente de confirmar en vivo
-
-**Productos que aparecen solo en Rappi.** Verificar si realmente no están en
-PedidosYa o si faltaron en la lista original:
-
-| Producto | En PedidosYa? |
-|---|---|
-| Ensalada con Peras | verificar |
-| Wrap de atun (sin guarnición) | verificar |
-| Wrap Brie con ensalada | verificar |
-| Suprema a la Crema de Limón con Puré | verificar |
-
-La UI los muestra con un chip gris "—" en PedidosYa. Si aparecen en el portal,
-agregar el nombre correspondiente en `seed.py`.
+- **Productos que aparecen solo en Rappi**: confirmado que "Ensalada con
+  Peras", "Wrap de atun" (sin guarnición), "Wrap Brie con ensalada" y
+  "Suprema a la Crema de Limón con Puré" no existen en PedidosYa. Quedan
+  cargados solo para Rappi en `seed.py` (la UI los muestra con un chip gris
+  "—" en PedidosYa).
 
 ### Pendiente de decisión del usuario
 
@@ -191,18 +199,18 @@ como ítems separados; en PedidosYa solo figura "Wrap de Atun con batatas".
 
 En PedidosYa, los platos (Risotto, Pastel de papa, Guisos, Ravioles, Arroz
 Chaufa) están bajo **"Ensaladas"**. En Rappi están bajo **"Plato del Día"**.
-En StockSwitch se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
+En Todo-Selector se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
 
 ## 4. Integración con Suipacha Loader
 
 Suipacha Loader también pregunta los platos del día al inicio de la jornada.
-Hoy StockSwitch los pregunta por separado — habría que tomarlos de ahí.
+Hoy Todo-Selector los pregunta por separado — habría que tomarlos de ahí.
 
 Suipacha Loader corre en `http://127.0.0.1:8000` con FastAPI y SQLite.
 Opciones:
 
 - [ ] **Leer su API** (si expone un endpoint con los platos del día), es lo
-      más limpio: StockSwitch consulta `localhost:8000` al arrancar.
+      más limpio: Todo-Selector consulta `localhost:8000` al arrancar.
 - [ ] **Leer su base directo** (`%LOCALAPPDATA%\SuipachaLoader\carabelas.db`)
       en modo solo-lectura. Más frágil pero no requiere tocar la otra app.
 
