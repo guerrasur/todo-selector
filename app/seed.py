@@ -5,6 +5,12 @@ Formato: (nombre_canonico, categoria, nombre_en_pedidosya, nombre_en_rappi)
 Si un nombre es None, ese producto NO existe en esa plataforma.
 
 REVISAR LAS MARCAS "DUDA" ANTES DE USAR EN PRODUCCION.
+
+Las tildes de los nombres de Rappi salen del portal mismo, via /api/nombres
+(2026-07-27). Sin tilde no se encuentran: se buscan con exact=True.
+
+OJO: esta lista esta INCOMPLETA. El portal de Rappi muestra 45 productos y
+aca hay 30. Ver la lista de faltantes en el README.
 """
 
 import logging
@@ -19,9 +25,9 @@ PRODUCTOS = [
     # ---------------- Ensaladas ----------------
     ("Caesar", "Ensaladas", "Caesar", "Ensalada caesar"),
     ("Cobb", "Ensaladas", "Cobb", "Cobb"),
-    ("Clasica", "Ensaladas", "Clasica", "Ensalada clasica"),
+    ("Clasica", "Ensaladas", "Clasica", "Ensalada clásica"),
     ("Brie", "Ensaladas", "Brie", "Ensalada Brie"),
-    ("Atun", "Ensaladas", "Atun", "Ensalada con atun"),
+    ("Atun", "Ensaladas", "Atun", "Ensalada con atún"),
     ("Falafel", "Ensaladas", "Falafel", "Ensalada de falafel"),
     ("Cala", "Ensaladas", "Cala", "Ensalada cala"),
     ("Porto", "Ensaladas", "Porto", "Ensalada porto"),
@@ -70,7 +76,7 @@ PRODUCTOS = [
 
     # CONFIRMADO: la Suprema no existe en PedidosYa.
     ("Suprema a la Crema de Limon con Pure", "Platos",
-     None, "Suprema a la Crema de Limon con Pure"),
+     None, "Suprema a la Crema de Limón con Puré"),
 
     # ---------------- Bebidas ----------------
     ("Agua sin gas", "Bebidas", "Agua sin gas", "Villavicencio sin gas 500 ml"),
