@@ -13,17 +13,55 @@ reales** de las dos plataformas — están marcados como `TODO-SELECTOR` en
 
 ## Arranque
 
+**Doble click en `iniciar_app.bat`.** No hace falta tener git, ni Python, ni
+haber preparado nada: el `.bat` se encarga de todo en cualquier PC con Windows.
+
+En cada arranque:
+
+1. **Se autoactualiza.** Si la carpeta es un clon de git usa `git pull
+   --ff-only`; si no lo es (bajaste el zip y listo) baja el zip del repo y
+   copia solo los archivos que cambiaron. Sin internet, sigue con la version
+   que ya tenias.
+2. **Instala Python si falta** (via `winget`, sin pedir permisos de admin). Si
+   la PC no tiene `winget`, te abre la pagina de descarga y te dice que tildes
+   "Add python.exe to PATH".
+3. **Instala las dependencias y Chromium**, pero solo la primera vez o cuando
+   cambia `requirements.txt` — despues arranca directo.
+4. **Levanta la app** en `http://127.0.0.1:8001/`.
+
+La unica vez que hay que hacer algo a mano es la primera: bajar el zip desde
+GitHub (botón verde **Code → Download ZIP**), descomprimirlo, y de ahi en mas
+el `.bat` se actualiza solo.
+
+Variantes:
+
+```
+iniciar_app.bat              arranque normal
+iniciar_app.bat simulado     modo simulado, no toca las plataformas
+iniciar_app.bat reinstalar   fuerza reinstalar dependencias y Chromium
+```
+
+A mano, si preferis:
+
 ```
 py -m pip install -r requirements.txt
 py -m playwright install chromium
 py run.py
 ```
 
-O doble click en `iniciar_app.bat`. Si la carpeta es un clon de git (usar
-`git clone`, no bajar el zip), el `.bat` corre `git pull --ff-only` antes de
-arrancar para traer la ultima version del repo automaticamente. Si no hay
-conexion o hay cambios locales que generen conflicto, sigue con la version
-que ya tenias.
+### Detalles del autoupdate
+
+- La logica esta en `actualizar.ps1`. El `.bat` solo la invoca.
+- La actualizacion por zip **agrega y pisa, nunca borra**: tus archivos locales
+  (`.venv`, notas, lo que sea) quedan donde estan. Un archivo que se elimine en
+  el repo no se elimina de tu carpeta.
+- Un `.bat` no se puede sobrescribir mientras corre, asi que si el lanzador
+  cambio se guarda como `iniciar_app.bat.nuevo` y un ayudante lo aplica al
+  cerrar la ventana, reabriendo la app sola.
+- Si la carpeta es un clon de git pero git no esta instalado, no se actualiza
+  nada a proposito: pisar por zip borraria cambios locales sin aviso.
+- Para probar una rama que no sea `main`:
+  `powershell -ExecutionPolicy Bypass -File actualizar.ps1 -Rama nombre-de-la-rama`
 
 ### Modo simulado (sin tocar las plataformas)
 
