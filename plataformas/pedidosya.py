@@ -79,26 +79,28 @@ class PedidosYa(PlataformaBase):
     # al reloguear (una vez por dia).
     RE_PLAY_SOUND = re.compile(r"play\s*sound", re.I)
 
-    # La columna del medio lista las categorias del menu. El portal carga
-    # UNA por vez y arranca en la de bebidas: por eso el DOM tiene 4
-    # productos de los 26 del catalogo. Para tocar una ensalada hay que
-    # clickear su categoria primero. Los platos (Arroz Chaufa, Guisos,
-    # Pastel de papa, Risotto, Ravioles) viven adentro de "Ensaladas".
+    # CONFIRMADO POR /api/esqueleto (2026-07-27): las categorias del menu
+    # son <wk-menu-list-category-item> adentro de <wk-menu-list>:
     #
-    # PROVISORIO: en la captura del usuario las categorias estan en
-    # castellano, pero /api/estructura (2026-07-27) muestra que la sesion
-    # del navegador de la app ve el portal EN INGLES ("Order overview",
-    # "Recent Orders", "Menus"). Se prueban los dos idiomas hasta poder
-    # confirmar los nombres reales con /api/esqueleto.
-    # No hace falta que esta lista sea exacta: _mostrar_producto() solo da
-    # por buena una categoria si el producto aparece despues de clickearla.
-    CATEGORIAS = ["Bebidas", "Ensaladas", "Wraps",
-                  "Drinks", "Beverages", "Salads"]
+    #   wk-menu-list
+    #     div.menus-list-item
+    #       wk-menu-list-category-item.menu-category   -> "Bebidas"
+    #       wk-menu-list-category-item.menu-category   -> "Ensaladas"
+    #       wk-menu-list-category-item.menu-category   -> "Wraps"
+    #
+    # Se toma por estructura y no por nombre a proposito: asi funciona en
+    # cualquier local, con las categorias que sea y en el idioma que sea.
+    #
+    # El "wk-menu-list" del principio importa: afuera de ese contenedor hay
+    # otros dos wk-menu-list-category-item que NO son categorias del menu,
+    # #unavailable-category ("Total unavailable", con el contador de
+    # apagados) y #toppings-category.
+    SELECTOR_CATEGORIAS = "wk-menu-list wk-menu-list-category-item"
 
     def __init__(self, page):
         super().__init__(page)
-        # nombre_remoto -> categoria donde lo encontramos, para no tener que
-        # recorrer las tres cada vez.
+        # nombre_remoto -> indice de la categoria donde lo encontramos, para
+        # no tener que recorrerlas todas cada vez.
         self._categoria_de = {}
 
     async def _cerrar_popups(self) -> bool:
@@ -196,47 +198,62 @@ class PedidosYa(PlataformaBase):
                 nombres.append(texto)
         return nombres
 
-    async def _abrir_categoria(self, categoria: str) -> bool:
-        """Clickea una categoria de la columna del medio.
-
-        El nombre de la categoria aparece mas de una vez en pantalla (en la
-        lista y como titulo de la seccion), asi que se prueban los primeros
-        candidatos y se toma como bueno el que cambie la lista de productos.
-        """
-        antes = await self._nombres_visibles()
-        candidatos = self.page.get_by_text(categoria, exact=True)
-
-        for i in range(min(await candidatos.count(), 3)):
+    async def categorias(self) -> list[str]:
+        """Los nombres de las categorias del menu, en orden."""
+        cats = self.page.locator(self.SELECTOR_CATEGORIAS)
+        nombres = []
+        for i in range(await cats.count()):
             try:
-                await self.clickear(candidatos.nth(i), timeout=4000,
-                                    que=f"categoria '{categoria}'")
+                nombres.append(" ".join((await cats.nth(i).inner_text()).split()))
             except Exception:
-                continue
-            await self.page.wait_for_timeout(1500)
-            if await self._nombres_visibles() != antes:
-                return True
-        return False
+                nombres.append("?")
+        return nombres
+
+    async def _abrir_categoria(self, indice: int) -> bool:
+        """Clickea la categoria numero `indice`. True si cambio la lista."""
+        cats = self.page.locator(self.SELECTOR_CATEGORIAS)
+        if indice >= await cats.count():
+            return False
+
+        antes = await self._nombres_visibles()
+        try:
+            await self.clickear(cats.nth(indice), timeout=5000,
+                                que=f"categoria #{indice}")
+        except Exception as e:
+            log.warning("No pude abrir la categoria #%s: %s",
+                        indice, " ".join(str(e).split())[:100])
+            return False
+
+        await self.page.wait_for_timeout(1500)
+        return await self._nombres_visibles() != antes
 
     async def _mostrar_producto(self, nombre_remoto: str) -> bool:
         """Deja el producto en el DOM, cambiando de categoria si hace falta."""
         if await self._fila(nombre_remoto).count() > 0:
             return True
 
-        recordada = self._categoria_de.get(nombre_remoto)
-        orden = ([recordada] if recordada else [])
-        orden += [c for c in self.CATEGORIAS if c != recordada]
+        total = await self.page.locator(self.SELECTOR_CATEGORIAS).count()
+        if total == 0:
+            log.warning("No encuentro la lista de categorias (%s)",
+                        self.SELECTOR_CATEGORIAS)
+            return False
 
-        for categoria in orden:
-            await self._abrir_categoria(categoria)
+        # Empezamos por donde lo encontramos la vez pasada.
+        recordado = self._categoria_de.get(nombre_remoto)
+        orden = ([recordado] if recordado is not None else [])
+        orden += [i for i in range(total) if i != recordado]
+
+        for indice in orden:
+            await self._abrir_categoria(indice)
             if await self._fila(nombre_remoto).count() > 0:
-                if self._categoria_de.get(nombre_remoto) != categoria:
-                    log.info("'%s' esta en la categoria '%s'",
-                             nombre_remoto, categoria)
-                self._categoria_de[nombre_remoto] = categoria
+                if self._categoria_de.get(nombre_remoto) != indice:
+                    log.info("'%s' esta en la categoria '%s'", nombre_remoto,
+                             (await self.categorias())[indice])
+                self._categoria_de[nombre_remoto] = indice
                 return True
 
-        log.warning("'%s' no aparece en ninguna categoria (%s)",
-                    nombre_remoto, ", ".join(self.CATEGORIAS))
+        log.warning("'%s' no aparece en ninguna de las %s categorias",
+                    nombre_remoto, total)
         return False
 
     def _fila(self, nombre_remoto: str):
@@ -254,11 +271,13 @@ class PedidosYa(PlataformaBase):
         )
 
     async def listar_productos(self) -> list[str]:
-        """Recorre las tres categorias: la carta entera, no solo la abierta."""
+        """Recorre todas las categorias: la carta entera, no solo la abierta."""
         await self.ir_al_menu()
+        total = await self.page.locator(self.SELECTOR_CATEGORIAS).count()
+
         nombres = []
-        for categoria in self.CATEGORIAS:
-            await self._abrir_categoria(categoria)
+        for indice in range(total):
+            await self._abrir_categoria(indice)
             for nombre in await self._nombres_visibles():
                 if nombre not in nombres:
                     nombres.append(nombre)
