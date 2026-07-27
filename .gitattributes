@@ -1,0 +1,6 @@
+# Los scripts de Windows van si o si con CRLF: cmd.exe se rompe con los
+# "goto"/etiquetas de iniciar_app.bat si el archivo tiene saltos de linea Unix.
+# "-text" = git guarda y entrega los bytes tal cual, sin convertir nada.
+*.bat -text
+*.cmd -text
+*.ps1 -text
