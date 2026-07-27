@@ -130,6 +130,16 @@ class PlataformaBase(ABC):
                         self.nombre, que, " ".join(str(e).split())[:110])
             await objetivo.evaluate("el => el.click()", timeout=timeout)
 
+    async def listar_productos(self) -> list[str]:
+        """Todos los nombres de producto que la pagina esta mostrando.
+
+        Hoy es diagnostico: contesta si un producto "no encontrado" no esta
+        en el portal o si el portal simplemente no lo tiene renderizado.
+        Es tambien el primer ladrillo para armar el catalogo leyendo las dos
+        cartas en vez de mantenerlo a mano en seed.py.
+        """
+        return []
+
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         """Diagnostico: el HTML crudo de la fila/tarjeta del producto.
 

@@ -136,6 +136,23 @@ class Rappi(PlataformaBase):
             'input[type="checkbox"], [role="switch"], button[aria-checked]'
         ).first
 
+    async def listar_productos(self) -> list[str]:
+        """Los nombres salen del alt de la foto del producto.
+
+        CONFIRMADO POR HTML (2026-07-27): cada tarjeta arranca con
+        <img data-testid="catalog-item-image" alt="Gaseosa cola sabor original
+        500 ml">. Es mas simple y mas estable que subir desde el nombre.
+        OJO: un producto sin foto no va a aparecer aca.
+        """
+        await self.ir_al_menu()
+        imgs = self.page.locator('img[data-testid="catalog-item-image"]')
+        nombres = []
+        for i in range(await imgs.count()):
+            alt = await imgs.nth(i).get_attribute("alt")
+            if alt and alt.strip():
+                nombres.append(alt.strip())
+        return nombres
+
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         # De paso resuelve el TODO-SELECTOR de _tarjeta(): con esto vemos
         # por fin el HTML completo de la tarjeta de Rappi.

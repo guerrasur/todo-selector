@@ -229,6 +229,15 @@ async def buscar_texto(plataforma: str, fragmento: str):
     return await worker.buscar_textos(plataforma, fragmento)
 
 
+@app.get("/api/nombres")
+async def nombres(plataforma: str):
+    """Diagnostico: la carta tal como la muestra el portal ahora.
+
+    Ej: /api/nombres?plataforma=pedidosya
+    """
+    return await worker.listar_productos(plataforma)
+
+
 @app.get("/api/verificar-catalogo")
 async def verificar_catalogo(plataforma: str):
     """Diagnostico: busca toda la carta en el portal y dice que no coincide.
