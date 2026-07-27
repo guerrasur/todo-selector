@@ -244,6 +244,15 @@ async def nombres(plataforma: str):
     return await worker.listar_productos(plataforma)
 
 
+@app.get("/api/estructura")
+async def estructura(plataforma: str):
+    """Diagnostico: donde vive la navegacion de categorias de la pantalla.
+
+    Ej: /api/estructura?plataforma=pedidosya
+    """
+    return await worker.estructura(plataforma)
+
+
 @app.get("/api/verificar-catalogo")
 async def verificar_catalogo(plataforma: str):
     """Diagnostico: busca toda la carta en el portal y dice que no coincide.
