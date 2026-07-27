@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from playwright.async_api import async_playwright
 
+from .carta import emparejar, resumen
 from .database import SessionLocal, PERFIL_CHROME
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion
 
@@ -410,6 +411,49 @@ class Worker:
                 return {"url": plat.page.url, "error": _resumen(e)}
 
         return {"url": plat.page.url, "nodos": len(lineas), "arbol": lineas}
+
+    async def leer_carta(self) -> dict:
+        """Lee la carta de las dos plataformas y las cruza.
+
+        Es el reemplazo del catalogo a mano de seed.py: cada portal dice
+        como se llaman SUS productos y aca se decide cuales son el mismo.
+        No toca la base: propone, y la confirmacion es del usuario.
+        """
+        if self.modo_simulado:
+            return {"error": "modo simulado: no hay navegador"}
+
+        cartas, errores = {}, {}
+        for nombre in ("pedidosya", "rappi"):
+            plat = self.plataformas.get(nombre)
+            if plat is None:
+                errores[nombre] = "no hay pestaña"
+                continue
+
+            async with self.bloqueo(nombre):
+                listo, motivo = await self._preparar(nombre)
+                if not listo:
+                    errores[nombre] = motivo
+                    continue
+                try:
+                    cartas[nombre] = await plat.listar_productos()
+                except Exception as e:
+                    log.exception("Leyendo la carta de %s", nombre)
+                    errores[nombre] = _resumen(e)
+
+        if errores:
+            log.warning("Carta incompleta: %s", errores)
+
+        pares = emparejar(cartas.get("pedidosya", []), cartas.get("rappi", []))
+        salida = resumen(pares)
+        salida["leidos"] = {k: len(v) for k, v in cartas.items()}
+        if errores:
+            salida["errores"] = errores
+
+        log.info("Carta: %s en PedidosYa, %s en Rappi, %s emparejados solos, "
+                 "%s a confirmar",
+                 len(cartas.get("pedidosya", [])), len(cartas.get("rappi", [])),
+                 salida["emparejados"], len(salida["a_confirmar"]))
+        return salida
 
     async def verificar_catalogo(self, plataforma: str) -> dict:
         """Busca TODOS los productos del catalogo en el portal, sin tocar nada.

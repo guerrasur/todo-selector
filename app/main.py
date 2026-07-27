@@ -253,6 +253,16 @@ async def estructura(plataforma: str):
     return await worker.estructura(plataforma)
 
 
+@app.get("/api/carta")
+async def carta():
+    """Lee la carta de las dos plataformas y propone el emparejamiento.
+
+    No modifica nada: es la propuesta para revisar. Reemplaza el catalogo
+    escrito a mano de app/seed.py.
+    """
+    return await worker.leer_carta()
+
+
 @app.get("/api/esqueleto")
 async def esqueleto(plataforma: str):
     """Diagnostico: el arbol del DOM de la pantalla del menu.
