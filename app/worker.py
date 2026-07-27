@@ -241,6 +241,20 @@ class Worker:
                     if not listo:
                         return
                     real = await plat.leer_estado(nombre_remoto)
+
+                    # Un falso "revivio" no es gratis: reencola un apagado que
+                    # va a clickear el toggle, y si el producto en realidad
+                    # estaba apagado, lo PRENDE. Antes de acusar, releemos:
+                    # la primera lectura puede caer sobre la pagina a medio
+                    # renderizar despues del reload.
+                    if real is not None and real.disponible:
+                        await plat.page.wait_for_timeout(2500)
+                        segunda = await plat.leer_estado(nombre_remoto)
+                        if segunda is not None and not segunda.disponible:
+                            log.info("%s: la primera lectura dijo disponible y la "
+                                     "segunda no. Me quedo con la segunda.",
+                                     producto.nombre)
+                            real = segunda
             except Exception as e:
                 log.error("Error verificando %s: %s", producto.nombre, e)
                 return
