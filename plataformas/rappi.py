@@ -51,6 +51,13 @@ class Rappi(PlataformaBase):
 
     BADGE_APAGADO = "Apagados"
 
+    # CONFIRMADO POR CAPTURA (2026-07-27): al clickear el toggle prendido
+    # aparece un dialogo con 3 radios: "No disponible indefinidamente",
+    # "Sólo por hoy" y "Personalizar disponibilidad" (esta ultima NO se
+    # usa, requiere elegir una fecha).
+    TXT_POR_HOY = "Sólo por hoy"
+    TXT_INDEFINIDO = "No disponible indefinidamente"
+
     def __init__(self, page, store_id: str = None):
         super().__init__(page)
         self.store_id = store_id or self.STORE_IDS[0]
@@ -155,18 +162,14 @@ class Rappi(PlataformaBase):
         await toggle.click()
         await self.page.wait_for_timeout(1500)
 
-        # TODO-SELECTOR: Rappi tambien ofrece "por hoy" vs "indefinidamente".
-        # Confirmar los textos exactos del dialogo y ajustar estos patrones.
-        patron = r"(por hoy|hoy)" if por_hoy else r"(indefinid|siempre)"
+        # El dialogo ofrece 2 radios utiles (la 3ra, "Personalizar
+        # disponibilidad", no se usa: pide elegir una fecha).
+        opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
         try:
-            opcion = self.page.get_by_text(
-                __import__("re").compile(patron, __import__("re").I)
-            ).first
-            if await opcion.count() > 0:
-                await opcion.click(timeout=8000)
-                await self.page.wait_for_timeout(1000)
+            await self.page.get_by_text(opcion, exact=True).first.click(timeout=8000)
+            await self.page.wait_for_timeout(1000)
         except Exception:
-            pass
+            return False
 
         # TODO-SELECTOR: puede haber un boton final de "Guardar"/"Confirmar".
         for txt in ["Guardar", "Confirmar", "Aceptar", "Aplicar"]:

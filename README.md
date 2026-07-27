@@ -116,13 +116,16 @@ Con Chrome abierto en los dos portales, hay que:
 
 URL: `https://web-ar.us.restaurant-partners.com/menus/PY_AR/460348`
 
-- [ ] `asegurar_sesion()`: confirmar cómo se ve la pantalla cuando la sesión
-      expiró, y qué elemento prueba que el menú cargó.
-- [ ] `_fila()`: confirmar el contenedor de cada producto. **Cuidado con los
+- [x] `_fila()`: confirmado, es el `<label class="mat-slide-toggle-label">`
+      de Angular Material (envuelve nombre + toggle). **Cuidado con los
       nombres que son prefijo de otros** ("Wrap caesar" vs "Wrap caesar con
       batatas") — por eso se usa `exact=True`.
-- [ ] `leer_estado()`: identificar cómo se distingue el toggle ON del OFF
-      (¿`aria-checked`? ¿clase CSS? ¿`input:checked`?).
+- [x] `leer_estado()`: confirmado, el toggle es un `<mat-slide-toggle>` con
+      `aria-checked="true"/"false"` sobre el `<input>`.
+- [ ] `asegurar_sesion()`: falta confirmar cómo se ve la pantalla cuando la
+      sesión de **PedidosYa** expiró (la captura que se mandó era la de
+      Rappi). El resto (elemento que prueba que el menú cargó) ya se ajustó
+      a esperar `input.mat-slide-toggle-input`.
 - [ ] `prender()`: verificar si al prender aparece un popup de confirmación
       o si es directo.
 
@@ -137,11 +140,22 @@ URL: `https://partners.rappi.com/menu?brandId=AR75000&storeIds=...`
 **DECIDIDO:** se opera solo sobre **Carabelas - Turbo** (`AR221056`, confirmado).
 Al apagar ahí, también se apaga en Rappi normal.
 
-- [ ] `_tarjeta()`: confirmar el contenedor de la tarjeta del producto.
-- [ ] `leer_estado()`: el badge "Apagados" ya está previsto; confirmar el
-      texto exacto y cómo se lee el toggle.
-- [ ] `apagar()`: confirmar los textos del diálogo "por hoy" vs
-      "indefinidamente", y si hay un botón final de Guardar.
+- [x] `_tarjeta()`: sin el HTML completo de la tarjeta, se resolvió subiendo
+      desde el nombre hasta el primer ancestro que también contiene el
+      toggle (localizado por su `data-testid`).
+- [x] `leer_estado()`: badge "Apagados" confirmado (fuente 1); el toggle es
+      un `<label data-testid="...-availability-switch-control">` con un
+      `<input readonly>` oculto adentro, sin `aria-checked` (fuente 2, via
+      `is_checked()`).
+- [x] `apagar()`: confirmado por captura — el diálogo tiene 3 radios: "Sólo
+      por hoy", "No disponible indefinidamente" y "Personalizar
+      disponibilidad" (esta última no se usa, pide elegir fecha). Falta
+      confirmar si hay un botón final de "Guardar" después de elegir el
+      radio (el código ya intenta clickear "Guardar"/"Confirmar"/"Aceptar"/
+      "Aplicar" si aparece alguno).
+- [ ] Pantalla de sesión expirada de Rappi: se sabe que existe (Rappi se
+      desloguea por inactividad) pero falta confirmar el selector exacto
+      para `asegurar_sesion()`.
 
 ## 3. Revisar el mapeo de nombres
 
@@ -153,21 +167,11 @@ Al apagar ahí, también se apaga en Rappi normal.
 - **"Coca Coca Zero"**: no es un typo de esta lista — se cargó mal en PedidosYa
   y quedó así en el portal. El nombre es correcto.
 - **storeId de Rappi**: `AR221056` es Carabelas - Turbo. Confirmado.
-
-### Pendiente de confirmar en vivo
-
-**Productos que aparecen solo en Rappi.** Verificar si realmente no están en
-PedidosYa o si faltaron en la lista original:
-
-| Producto | En PedidosYa? |
-|---|---|
-| Ensalada con Peras | verificar |
-| Wrap de atun (sin guarnición) | verificar |
-| Wrap Brie con ensalada | verificar |
-| Suprema a la Crema de Limón con Puré | verificar |
-
-La UI los muestra con un chip gris "—" en PedidosYa. Si aparecen en el portal,
-agregar el nombre correspondiente en `seed.py`.
+- **Productos que aparecen solo en Rappi**: confirmado que "Ensalada con
+  Peras", "Wrap de atun" (sin guarnición), "Wrap Brie con ensalada" y
+  "Suprema a la Crema de Limón con Puré" no existen en PedidosYa. Quedan
+  cargados solo para Rappi en `seed.py` (la UI los muestra con un chip gris
+  "—" en PedidosYa).
 
 ### Pendiente de decisión del usuario
 

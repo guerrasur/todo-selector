@@ -25,7 +25,7 @@ PRODUCTOS = [
     # Mexicana: descontinuada, no se usa mas. Se deja comentada por si vuelve.
     # ("Mexicana", "Ensaladas", "Mexicana", None),
 
-    # DUDA: "Ensalada con Peras" figura en Rappi pero no en PedidosYa.
+    # CONFIRMADO: "Ensalada con Peras" no existe en PedidosYa.
     ("Ensalada con Peras", "Ensaladas", None, "Ensalada con Peras"),
 
     # ---------------- Wraps ----------------
@@ -47,9 +47,9 @@ PRODUCTOS = [
     ("Wrap toscano con batatas", "Wraps",
      "Wrap toscano con batatas", "Wrap Toscano con ensalada"),
 
-    # DUDA: "Wrap de atun" (sin guarnicion) solo esta en Rappi.
+    # CONFIRMADO: "Wrap de atun" (sin guarnicion) no existe en PedidosYa.
     ("Wrap de atun", "Wraps", None, "Wrap de atun"),
-    # DUDA: "Wrap Brie con ensalada" solo esta en Rappi.
+    # CONFIRMADO: "Wrap Brie con ensalada" no existe en PedidosYa.
     ("Wrap Brie con ensalada", "Wraps", None, "Wrap Brie con ensalada"),
 
     # ---------------- Platos ----------------
@@ -64,7 +64,7 @@ PRODUCTOS = [
     ("Guiso de lentejas vegetariano", "Platos",
      "Guiso de lentejas vegetariano", "Guiso de lentejas vegetariano"),
 
-    # DUDA: la Suprema solo aparece en Rappi.
+    # CONFIRMADO: la Suprema no existe en PedidosYa.
     ("Suprema a la Crema de Limon con Pure", "Platos",
      None, "Suprema a la Crema de Limon con Pure"),
 
