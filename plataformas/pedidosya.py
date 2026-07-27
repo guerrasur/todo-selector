@@ -5,8 +5,10 @@ FLUJO OBSERVADO (capturas del usuario):
   2. Cada producto tiene un toggle a la izquierda del nombre
   3. Al clickear el toggle de un producto PRENDIDO, se abre un popup con:
        - titulo = nombre del producto
-       - "No disponible por hoy"          (punto amarillo)
-       - "No disponible indefinidamente"  (punto gris)
+       - "Unavailable for today"      (punto amarillo)
+       - "Unavailable indefinitely"   (punto gris)
+     OJO: el portal esta EN INGLES, aunque las capturas iniciales se
+     hubieran leido en castellano. Ver TXT_POR_HOY.
   4. Al clickear el toggle de un producto APAGADO, presumiblemente lo
      prende directo (VERIFICAR en vivo).
 
@@ -51,9 +53,15 @@ class PedidosYa(PlataformaBase):
     MENU_ID = "460348"
     url_menu = f"https://web-ar.us.restaurant-partners.com/menus/PY_AR/{MENU_ID}"
 
-    # --- Textos del popup (confirmados por captura) ---
-    TXT_POR_HOY = "No disponible por hoy"
-    TXT_INDEFINIDO = "No disponible indefinidamente"
+    # --- Opciones del popup de disponibilidad ---
+    # CONFIRMADO POR LOG (2026-07-27): el portal esta EN INGLES. El popup
+    # dice "Coca Cola | Unavailable for today | Unavailable indefinitely".
+    # Buscabamos el texto en castellano, no lo encontrabamos, y por eso
+    # fallaba el apagado aunque el click estuviera entrando bien.
+    # Se aceptan los dos idiomas por si el portal cambia de locale.
+    TXT_POR_HOY = re.compile(r"(no disponible por hoy|unavailable for today)", re.I)
+    TXT_INDEFINIDO = re.compile(
+        r"(no disponible indefinidamente|unavailable indefinitely)", re.I)
 
     # Popup de "Let's make sure the application can play sounds" que sale
     # al reloguear (una vez por dia).
@@ -155,6 +163,20 @@ class PedidosYa(PlataformaBase):
             "xpath=ancestor::label[contains(@class,'mat-slide-toggle-label')][1]"
         )
 
+    async def listar_productos(self) -> list[str]:
+        await self.ir_al_menu()
+        filas = self.page.locator("label.mat-slide-toggle-label")
+        nombres = []
+        for i in range(await filas.count()):
+            try:
+                texto = await filas.nth(i).inner_text()
+            except Exception:
+                continue
+            texto = " ".join(texto.split())
+            if texto:
+                nombres.append(texto)
+        return nombres
+
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         await self.ir_al_menu()
         datos = await self._html_de(self._fila(nombre_remoto))
@@ -202,13 +224,13 @@ class PedidosYa(PlataformaBase):
         # El popup ofrece las dos opciones
         opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
         try:
-            await self.clickear(self.page.get_by_text(opcion, exact=False),
-                                que=f"opcion '{opcion}'")
+            await self.clickear(self.page.get_by_text(opcion),
+                                que=f"opcion {opcion.pattern}")
         except Exception:
             # No sirve saber que no encontramos el texto: lo que hace falta
             # es saber que decia el popup que si se abrio.
-            log.error("No encontre '%s' en el popup. Lo que hay abierto dice: %s",
-                      opcion, await self.texto_overlay() or "(nada abierto)")
+            log.error("No encontre %s en el popup. Lo que hay abierto dice: %s",
+                      opcion.pattern, await self.texto_overlay() or "(nada abierto)")
             await self.page.keyboard.press("Escape")
             return False
 
