@@ -92,8 +92,12 @@ def sembrar():
     db = SessionLocal()
     try:
         if db.query(Producto).count() == 0:
+            # Recien creada: _crear_todo ya deja los alias como manda el
+            # catalogo, y como la sesion es autoflush=False, sincronizar
+            # aca no veria lo que acaba de agregarse y los duplicaria.
             _crear_todo(db)
-        _sincronizar_alias(db)
+        else:
+            _sincronizar_alias(db)
         db.commit()
     finally:
         db.close()
