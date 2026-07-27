@@ -1,4 +1,4 @@
-# StockSwitch
+# Todo-Selector
 
 App local para apagar/prender productos en **PedidosYa** y **Rappi** desde una
 sola pantalla, sin entrar a cada portal.
@@ -37,7 +37,7 @@ Las operaciones tardan 2 segundos y siempre dan OK. Sirve para ver la UI.
 ## Cómo funciona
 
 - **Un navegador persistente** arranca con la app, con una pestaña por
-  plataforma. Queda logueado en `%LOCALAPPDATA%\StockSwitch\chrome-profile`.
+  plataforma. Queda logueado en `%LOCALAPPDATA%\TodoSelector\chrome-profile`.
 - **La UI no espera al navegador**: apretás un botón, se encola una operación,
   y la pantalla se actualiza sola cada 3 segundos.
 - **Todo cambio se confirma releyendo**: después de clickear, recarga la página
@@ -87,7 +87,7 @@ Queda guardado. La UI muestra "Login pendiente" mientras falte alguna.
 run.py                    # arranque
 app/
   main.py                 # FastAPI + endpoints
-  database.py             # SQLite en %LOCALAPPDATA%\StockSwitch
+  database.py             # SQLite en %LOCALAPPDATA%\TodoSelector
   models.py               # Producto, AliasPlataforma, EstadoItem, Operacion
   seed.py                 # carga inicial de productos
   worker.py               # navegador persistente + cola + reverificación
@@ -126,16 +126,16 @@ URL: `https://web-ar.us.restaurant-partners.com/menus/PY_AR/460348`
       batatas") — por eso se usa `exact=True`.
 - [x] `leer_estado()`: confirmado, el toggle es un `<mat-slide-toggle>` con
       `aria-checked="true"/"false"` sobre el `<input>`.
-- [ ] `asegurar_sesion()`: falta confirmar cómo se ve la pantalla cuando la
-      sesión de **PedidosYa** expiró (la captura que se mandó era la de
-      Rappi). El resto (elemento que prueba que el menú cargó) ya se ajustó
-      a esperar `input.mat-slide-toggle-input`.
-- [ ] `prender()`: verificar si al prender aparece un popup de confirmación
-      o si es directo.
+- [x] `asegurar_sesion()`: confirmado, PedidosYa no tiene pantalla de sesión
+      expirada — se re-loguea solo. Se deja el chequeo de password como red
+      de seguridad. El elemento que prueba que el menú cargó espera
+      `input.mat-slide-toggle-input`.
+- [ ] `prender()`: sigue sin confirmar si al prender aparece un popup de
+      confirmación o si es directo (todavía no se probó en vivo).
 
 El popup de apagado ya está confirmado por captura: al clickear el toggle de
-un producto prendido aparecen "No disponible por hoy" y "No disponible
-indefinidamente".
+un producto prendido aparece un único popup con "No disponible por hoy" y
+"No disponible indefinidamente" (sin paso de confirmación extra).
 
 ## 2. Rappi (`plataformas/rappi.py`)
 
@@ -199,18 +199,18 @@ como ítems separados; en PedidosYa solo figura "Wrap de Atun con batatas".
 
 En PedidosYa, los platos (Risotto, Pastel de papa, Guisos, Ravioles, Arroz
 Chaufa) están bajo **"Ensaladas"**. En Rappi están bajo **"Plato del Día"**.
-En StockSwitch se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
+En Todo-Selector se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
 
 ## 4. Integración con Suipacha Loader
 
 Suipacha Loader también pregunta los platos del día al inicio de la jornada.
-Hoy StockSwitch los pregunta por separado — habría que tomarlos de ahí.
+Hoy Todo-Selector los pregunta por separado — habría que tomarlos de ahí.
 
 Suipacha Loader corre en `http://127.0.0.1:8000` con FastAPI y SQLite.
 Opciones:
 
 - [ ] **Leer su API** (si expone un endpoint con los platos del día), es lo
-      más limpio: StockSwitch consulta `localhost:8000` al arrancar.
+      más limpio: Todo-Selector consulta `localhost:8000` al arrancar.
 - [ ] **Leer su base directo** (`%LOCALAPPDATA%\SuipachaLoader\carabelas.db`)
       en modo solo-lectura. Más frágil pero no requiere tocar la otra app.
 

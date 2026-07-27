@@ -1,4 +1,4 @@
-# StockSwitch — contexto para Claude Code
+# Todo-Selector — contexto para Claude Code
 
 App local que apaga/prende productos en PedidosYa y Rappi desde una sola
 pantalla. Reemplaza el trabajo manual de entrar a cada portal.

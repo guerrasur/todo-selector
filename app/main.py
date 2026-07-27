@@ -1,4 +1,4 @@
-"""API + frontend de StockSwitch."""
+"""API + frontend de Todo-Selector."""
 
 import logging
 import os
@@ -19,7 +19,7 @@ from .worker import worker
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="StockSwitch")
+app = FastAPI(title="Todo-Selector")
 
 RAIZ = Path(__file__).resolve().parent.parent
 STATIC = RAIZ / "static"

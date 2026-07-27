@@ -50,9 +50,9 @@ class PedidosYa(PlataformaBase):
     async def asegurar_sesion(self) -> bool:
         await self.ir_al_menu()
 
-        # TODO-SELECTOR: confirmar como se ve la pantalla de login
-        # expirado en vivo. Heuristica: si aparece un campo de password,
-        # asumimos que la sesion expiro.
+        # CONFIRMADO: PedidosYa no muestra pantalla de sesion expirada,
+        # se re-loguea solo. Dejamos el chequeo de password como red de
+        # seguridad por si en el futuro llegara a pedir login manual.
         if await self.page.locator('input[type="password"]').count() > 0:
             return False
 

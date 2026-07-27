@@ -10,9 +10,9 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 def carpeta_datos() -> Path:
     """Misma logica que Suipacha Loader, pero carpeta propia."""
     if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "StockSwitch"
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "TodoSelector"
     else:
-        base = Path.home() / ".stockswitch"
+        base = Path.home() / ".todo-selector"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
