@@ -22,10 +22,10 @@ PRODUCTOS = [
     ("Sopa del dia", "Platos", "Sopa del dia", "Sopa del día"),
     ("Pollo al verdeo", "Platos", "Pollo al verdeo", "Pollo al verdeo"),
 
-    # DUDA: "Mixta" figura en PedidosYa pero no aparece en Rappi.
-    ("Mixta", "Platos", "Mixta", None),
+    # Mixta: descontinuada, no se usa mas. Se deja comentada por si vuelve.
+    # ("Mixta", "Platos", "Mixta", None),
 
-    # DUDA: "Ñoquis del 29" figura en Rappi pero no en PedidosYa.
+    # CONFIRMADO: "Ñoquis del 29" no existe en PedidosYa.
     ("Ñoquis del 29", "Platos", None, "Ñoquis del 29"),
 
     # ---------------- Tartas ----------------
@@ -47,9 +47,9 @@ PRODUCTOS = [
     ("Tarta de espinaca chica", "Tartas",
      "Tarta de espinaca chica", "Tarta de espinaca individual"),
 
-    # DUDA: "Tarta de zapallo" (sin guarnicion) solo esta en Rappi.
+    # CONFIRMADO: "Tarta de zapallo" (sin guarnicion) no existe en PedidosYa.
     ("Tarta de zapallo", "Tartas", None, "Tarta de zapallo"),
-    # DUDA: "Tarta de choclo individual" solo esta en Rappi.
+    # CONFIRMADO: "Tarta de choclo individual" no existe en PedidosYa.
     ("Tarta de choclo individual", "Tartas", None, "Tarta de choclo individual"),
 
     # ---------------- Platos ----------------
@@ -64,7 +64,7 @@ PRODUCTOS = [
     ("Pollo al horno sin sal", "Platos",
      "Pollo al horno sin sal", "Pollo al horno sin sal"),
 
-    # DUDA: la Locro solo aparece en Rappi.
+    # CONFIRMADO: la Locro no existe en PedidosYa.
     ("Locro del sabado", "Platos",
      None, "Locro del sabado"),
 
@@ -73,8 +73,8 @@ PRODUCTOS = [
     ("Agua chica con gas", "Bebidas", "Agua chica con gas", "Manantial con gas 500 ml"),
     ("Gaseosa cola", "Bebidas", "Gaseosa cola", "Gaseosa cola 500 ml"),
 
-    # DUDA: en la lista de PedidosYa figura "Gaseosa cola cero" (parece un typo,
-    # pero puede estar asi en el portal). CONFIRMAR el nombre exacto.
+    # CONFIRMADO: en PedidosYa se cargo mal y quedo "Gaseosa cola cero".
+    # El nombre esta asi en el portal, no es un typo de esta lista.
     ("Gaseosa cola cero", "Bebidas", "Gaseosa cola cero", "Gaseosa cola sin azucar 500 ml"),
 ]
 
