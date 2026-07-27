@@ -43,6 +43,18 @@ class Worker:
         self.ultimo_refresco = {}   # nombre -> datetime del ultimo reload
         self.corriendo = False
         self.ultimo_chequeo = None
+        # Una pestaña por plataforma = un solo usuario a la vez. Sin esto,
+        # el worker y los endpoints de diagnostico navegan la misma pagina
+        # al mismo tiempo y se cancelan entre si (net::ERR_ABORTED en el
+        # log del 2026-07-27, que dio un verificar-catalogo con 22 falsos
+        # "no encontrado").
+        self.bloqueos = {}
+
+    def bloqueo(self, plataforma: str) -> asyncio.Lock:
+        """Turno exclusivo sobre la pestaña de una plataforma."""
+        if plataforma not in self.bloqueos:
+            self.bloqueos[plataforma] = asyncio.Lock()
+        return self.bloqueos[plataforma]
 
     # ---------- Ciclo de vida ----------
 
@@ -174,6 +186,10 @@ class Worker:
         if plat is None:
             return False, f"plataforma desconocida: {plataforma}"
 
+        async with self.bloqueo(plataforma):
+            return await self._ejecutar_sin_turno(plat, plataforma, accion, nombre_remoto)
+
+    async def _ejecutar_sin_turno(self, plat, plataforma, accion, nombre_remoto):
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
         if not listo:
@@ -218,13 +234,13 @@ class Worker:
             if plat is None:
                 return
 
-            listo, _ = await self._preparar(plataforma)
-            if not listo:
-                return
-
             nombre_remoto = self._nombre_remoto(db, producto, plataforma)
             try:
-                real = await plat.leer_estado(nombre_remoto)
+                async with self.bloqueo(plataforma):
+                    listo, _ = await self._preparar(plataforma)
+                    if not listo:
+                        return
+                    real = await plat.leer_estado(nombre_remoto)
             except Exception as e:
                 log.error("Error verificando %s: %s", producto.nombre, e)
                 return
@@ -305,8 +321,9 @@ class Worker:
                     else list(self.plataformas.keys()))
 
         for nombre in objetivo:
-            self.ultimo_refresco.pop(nombre, None)  # fuerza el refresco
-            await self._preparar(nombre)
+            async with self.bloqueo(nombre):
+                self.ultimo_refresco.pop(nombre, None)  # fuerza el refresco
+                await self._preparar(nombre)
 
         return self.sesion_ok
 
@@ -318,12 +335,13 @@ class Worker:
         if self.modo_simulado or plat is None:
             return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
 
-        listo, motivo = await self._preparar(plataforma)
-        if not listo:
-            return {"error": motivo}
+        async with self.bloqueo(plataforma):
+            listo, motivo = await self._preparar(plataforma)
+            if not listo:
+                return {"error": motivo}
 
-        return {"url": plat.page.url,
-                "textos": await plat.buscar_textos(fragmento)}
+            return {"url": plat.page.url,
+                    "textos": await plat.buscar_textos(fragmento)}
 
     async def verificar_catalogo(self, plataforma: str) -> dict:
         """Busca TODOS los productos del catalogo en el portal, sin tocar nada.
@@ -335,6 +353,10 @@ class Worker:
         if self.modo_simulado or plat is None:
             return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
 
+        async with self.bloqueo(plataforma):
+            return await self._verificar_catalogo_sin_turno(plat, plataforma)
+
+    async def _verificar_catalogo_sin_turno(self, plat, plataforma: str) -> dict:
         listo, motivo = await self._preparar(plataforma)
         if not listo:
             return {"error": motivo}
@@ -385,6 +407,10 @@ class Worker:
         if self.modo_simulado or plat is None:
             return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
 
+        async with self.bloqueo(plataforma):
+            return await self._diagnosticar_sin_turno(plat, plataforma, nombre_remoto)
+
+    async def _diagnosticar_sin_turno(self, plat, plataforma, nombre_remoto) -> dict:
         listo, motivo = await self._preparar(plataforma)
         if not listo:
             return {"error": motivo}
@@ -440,15 +466,15 @@ class Worker:
                 if plat is None:
                     continue
 
-                listo, _ = await self._preparar(est.plataforma)
-                if not listo:
-                    continue
-
                 producto = db.query(Producto).get(est.producto_id)
                 nombre_remoto = self._nombre_remoto(db, producto, est.plataforma)
 
                 try:
-                    real = await plat.leer_estado(nombre_remoto)
+                    async with self.bloqueo(est.plataforma):
+                        listo, _ = await self._preparar(est.plataforma)
+                        if not listo:
+                            continue
+                        real = await plat.leer_estado(nombre_remoto)
                 except Exception:
                     continue
 

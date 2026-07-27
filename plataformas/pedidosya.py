@@ -45,7 +45,11 @@ log = logging.getLogger("pedidosya")
 
 class PedidosYa(PlataformaBase):
     nombre = "pedidosya"
-    url_menu = "https://web-ar.us.restaurant-partners.com/menus/PY_AR/460348"
+
+    # El id del menu es el de la sucursal: si te logueas en otra, la app
+    # navega de vuelta a esta.
+    MENU_ID = "460348"
+    url_menu = f"https://web-ar.us.restaurant-partners.com/menus/PY_AR/{MENU_ID}"
 
     # --- Textos del popup (confirmados por captura) ---
     TXT_POR_HOY = "No disponible por hoy"
@@ -68,17 +72,26 @@ class PedidosYa(PlataformaBase):
         contra Playwright 1.61). Ver inspeccionar().
         """
         boton = self.page.get_by_role("button", name=self.RE_PLAY_SOUND)
-        if await boton.count() == 0:
-            return False
+        if await boton.count() > 0:
+            try:
+                await boton.first.click(timeout=5000)
+                await self.page.wait_for_timeout(1000)
+                log.info("Popup de sonido cerrado")
+                return True
+            except Exception as e:
+                log.warning("No pude cerrar el popup de sonido: %s", e)
 
-        try:
-            await boton.first.click(timeout=5000)
-            await self.page.wait_for_timeout(1000)
-            log.info("Popup de sonido cerrado")
+        # Puede haber quedado colgado el popup de disponibilidad de un
+        # intento anterior. Si no se cierra, el proximo click cae sobre el
+        # backdrop y el reintento nace muerto.
+        if await self._hay_overlay():
+            texto = await self.texto_overlay()
+            log.warning("Cierro un dialogo que quedo abierto: %s", texto or "(sin texto)")
+            await self.page.keyboard.press("Escape")
+            await self.page.wait_for_timeout(800)
             return True
-        except Exception as e:
-            log.warning("No pude cerrar el popup de sonido: %s", e)
-            return False
+
+        return False
 
     async def _hay_overlay(self) -> bool:
         """Queda algun dialogo tapando el menu? Solo para avisar en el log."""
@@ -192,6 +205,11 @@ class PedidosYa(PlataformaBase):
             await self.clickear(self.page.get_by_text(opcion, exact=False),
                                 que=f"opcion '{opcion}'")
         except Exception:
+            # No sirve saber que no encontramos el texto: lo que hace falta
+            # es saber que decia el popup que si se abrio.
+            log.error("No encontre '%s' en el popup. Lo que hay abierto dice: %s",
+                      opcion, await self.texto_overlay() or "(nada abierto)")
+            await self.page.keyboard.press("Escape")
             return False
 
         await self.page.wait_for_timeout(3000)
