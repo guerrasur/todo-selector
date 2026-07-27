@@ -19,7 +19,11 @@ py -m playwright install chromium
 py run.py
 ```
 
-O doble click en `iniciar_app.bat`.
+O doble click en `iniciar_app.bat`. Si la carpeta es un clon de git (usar
+`git clone`, no bajar el zip), el `.bat` corre `git pull --ff-only` antes de
+arrancar para traer la ultima version del repo automaticamente. Si no hay
+conexion o hay cambios locales que generen conflicto, sigue con la version
+que ya tenias.
 
 ### Modo simulado (sin tocar las plataformas)
 
@@ -149,10 +153,10 @@ Al apagar ahí, también se apaga en Rappi normal.
       `is_checked()`).
 - [x] `apagar()`: confirmado por captura — el diálogo tiene 3 radios: "Sólo
       por hoy", "No disponible indefinidamente" y "Personalizar
-      disponibilidad" (esta última no se usa, pide elegir fecha). Falta
-      confirmar si hay un botón final de "Guardar" después de elegir el
-      radio (el código ya intenta clickear "Guardar"/"Confirmar"/"Aceptar"/
-      "Aplicar" si aparece alguno).
+      disponibilidad" (esta última no se usa, pide elegir fecha). Elegido
+      el radio, aparece un segundo modal "¿Desactivar producto?" con
+      botones "Cancelar" y "Sí, desactivar" — confirmado, el código
+      clickea "Sí, desactivar".
 - [ ] Pantalla de sesión expirada de Rappi: se sabe que existe (Rappi se
       desloguea por inactividad) pero falta confirmar el selector exacto
       para `asegurar_sesion()`.

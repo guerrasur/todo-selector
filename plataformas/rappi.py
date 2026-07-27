@@ -28,6 +28,11 @@ HAY QUE CLICKEAR EL <label>, no el input. No trae aria-checked, asi que
 leer_estado depende del badge "Apagados" (fuente 1) o de is_checked()
 sobre el input (fuente 2).
 
+CONFIRMADO POR CAPTURA: al elegir "Sólo por hoy" o "No disponible
+indefinidamente" aparece un SEGUNDO modal de confirmacion,
+"¿Desactivar producto?", con botones "Cancelar" y "Sí, desactivar"
+(rojo). apagar() clickea "Sí, desactivar" para confirmar.
+
 =========================================================================
  SELECTORES PENDIENTES DE CONFIRMAR EN VIVO  ->  buscar "TODO-SELECTOR"
 =========================================================================
@@ -171,8 +176,10 @@ class Rappi(PlataformaBase):
         except Exception:
             return False
 
-        # TODO-SELECTOR: puede haber un boton final de "Guardar"/"Confirmar".
-        for txt in ["Guardar", "Confirmar", "Aceptar", "Aplicar"]:
+        # CONFIRMADO POR CAPTURA (2026-07-27): cualquiera de las 2 opciones
+        # abre un segundo modal "¿Desactivar producto?" con botones
+        # "Cancelar" y "Sí, desactivar" (rojo). Hay que confirmar ahi.
+        for txt in ["Sí, desactivar", "Guardar", "Confirmar", "Aceptar", "Aplicar"]:
             btn = self.page.get_by_role("button", name=txt)
             if await btn.count() > 0:
                 await btn.first.click()
