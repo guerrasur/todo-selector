@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .database import init_db, get_db
-from .models import Producto, AliasPlataforma, EstadoItem, Operacion
+from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
 from .seed import sembrar
 from .worker import worker
 
@@ -151,9 +151,13 @@ def obtener_platos_dia(db: Session = Depends(get_db)):
               .filter(Producto.es_plato_del_dia == True,  # noqa: E712
                       Producto.fecha_dia == hoy)
               .all())
+    marca = db.query(Preferencia).get(Preferencia.PLATOS_RESPONDIDO)
     return {
         "fecha": hoy,
         "ya_cargados": len(platos) > 0,
+        # "Hoy no hay" es una respuesta valida: sin esta marca la app
+        # volvia a preguntar en cada recarga.
+        "ya_respondido": bool(marca and marca.valor == hoy),
         "platos": [p.nombre for p in platos],
     }
 
@@ -196,6 +200,12 @@ def guardar_platos_dia(data: PlatoDiaIn, db: Session = Depends(get_db)):
                 db.add(al)
             al.nombre_remoto = alias_r
 
+    marca = db.query(Preferencia).get(Preferencia.PLATOS_RESPONDIDO)
+    if marca is None:
+        marca = Preferencia(clave=Preferencia.PLATOS_RESPONDIDO)
+        db.add(marca)
+    marca.valor = hoy
+
     db.commit()
     return {"ok": True, "fecha": hoy}
 
@@ -208,6 +218,24 @@ async def revalidar_sesion(plataforma: str = None):
     """
     sesiones = await worker.revalidar_sesion(plataforma)
     return {"sesiones": sesiones}
+
+
+@app.get("/api/buscar-texto")
+async def buscar_texto(plataforma: str, fragmento: str):
+    """Diagnostico: como esta escrito realmente un producto en el portal.
+
+    Ej: /api/buscar-texto?plataforma=rappi&fragmento=Gaseosa
+    """
+    return await worker.buscar_textos(plataforma, fragmento)
+
+
+@app.get("/api/diagnostico")
+async def diagnostico(plataforma: str, nombre: str):
+    """Diagnostico: prueba leer un producto por nombre exacto, sin tocar nada.
+
+    Ej: /api/diagnostico?plataforma=pedidosya&nombre=Gaseosa%20Cola
+    """
+    return await worker.diagnosticar(plataforma, nombre)
 
 
 @app.get("/api/historial")

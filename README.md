@@ -108,6 +108,30 @@ los del día anterior desaparecen de la lista.
 **Pendiente:** tomar este dato de Suipacha Loader en vez de preguntarlo dos
 veces. Ver tareas pendientes.
 
+## Diagnóstico cuando algo "falla"
+
+El motivo del fallo ahora sale en tres lugares: en la consola (`op#N fallo: ...`),
+abajo del producto en la UI, y en `GET /api/historial`.
+
+La causa más común es que el nombre del catálogo (`app/seed.py`) no coincida
+**exactamente** con el del portal — los nombres se buscan con `exact=True`, así
+que una mayúscula o un guión de diferencia y no encuentra nada. Para verlo,
+con la app corriendo, pegá en el navegador:
+
+```
+http://127.0.0.1:8001/api/buscar-texto?plataforma=rappi&fragmento=Gaseosa
+http://127.0.0.1:8001/api/diagnostico?plataforma=pedidosya&nombre=Gaseosa%20Cola
+```
+
+- **`buscar-texto`** devuelve todos los textos del portal que contienen el
+  fragmento: ahí se ve cómo está escrito el producto de verdad.
+- **`diagnostico`** prueba leer un producto por nombre exacto sin tocar nada, y
+  devuelve la URL en la que está parada la pestaña (útil para detectar que
+  quedaste logueado en otra sucursal).
+
+Con el nombre real, se corrige el alias con `POST /api/alias` o directamente en
+`app/seed.py`.
+
 ## Qué hacer si se cae una sesión
 
 La UI muestra "Login pendiente: Rappi" (o PedidosYa) en rojo. Andá a la ventana

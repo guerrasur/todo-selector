@@ -72,6 +72,12 @@
   button.on { border-color: #14532d; color: #86efac; }
   button.off { border-color: #431407; color: #fdba74; }
   .vacio { color: var(--tenue); padding: 40px; text-align: center; }
+  /* Fila propia abajo del producto: .item es un grid de 3 columnas. */
+  .detalle-fallo {
+    grid-column: 1 / -1;
+    font-size: 12px; color: var(--error); line-height: 1.4;
+    word-break: break-word;
+  }
   .aviso-platos {
     background: var(--panel); border: 1px solid #4a4020;
     border-left: 3px solid var(--curso);
@@ -205,6 +211,16 @@ function fila(item) {
   }
   div.appendChild(plats);
 
+  // El motivo del fallo estaba solo en el tooltip: si algo falla, se ve.
+  for (const plat of PLATS) {
+    const est = item.estados[plat];
+    if (!est || est.estado !== 'fallo' || !est.detalle) continue;
+    const err = document.createElement('div');
+    err.className = 'detalle-fallo';
+    err.textContent = `${NOMBRE_PLAT[plat]}: ${est.detalle}`;
+    div.appendChild(err);
+  }
+
   const acc = document.createElement('div');
   acc.className = 'acciones';
 
@@ -255,11 +271,15 @@ async function chequearPlatosDelDia() {
   const info = await fetch('/api/platos-del-dia').then(r => r.json());
   const panel = document.getElementById('panel-platos');
 
-  if (info.ya_cargados) {
+  // ya_respondido cubre el caso "hoy no hay": no hay platos cargados pero
+  // la pregunta ya esta contestada, asi que no se vuelve a preguntar.
+  if (info.ya_cargados || info.ya_respondido) {
     panel.style.display = 'block';
     panel.className = 'aviso-platos ok';
     panel.innerHTML =
-      `<span>Platos de hoy: <b>${info.platos.join(' · ')}</b></span>` +
+      (info.ya_cargados
+        ? `<span>Platos de hoy: <b>${info.platos.join(' · ')}</b></span>`
+        : `<span>Hoy no hay platos del día.</span>`) +
       `<button id="btn-editar-platos">Cambiar</button>`;
     document.getElementById('btn-editar-platos').onclick = () =>
       pedirPlatos(info.platos);
@@ -308,7 +328,7 @@ function pedirPlatos(actuales) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nombres: [] }),
     });
-    document.getElementById('panel-platos').style.display = 'none';
+    await chequearPlatosDelDia();
     await cargar();
   };
 
