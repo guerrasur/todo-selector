@@ -22,8 +22,8 @@ PRODUCTOS = [
     ("Cala", "Ensaladas", "Cala", "Ensalada cala"),
     ("Porto", "Ensaladas", "Porto", "Ensalada porto"),
 
-    # DUDA: "Mexicana" figura en PedidosYa pero no aparece en Rappi.
-    ("Mexicana", "Ensaladas", "Mexicana", None),
+    # Mexicana: descontinuada, no se usa mas. Se deja comentada por si vuelve.
+    # ("Mexicana", "Ensaladas", "Mexicana", None),
 
     # DUDA: "Ensalada con Peras" figura en Rappi pero no en PedidosYa.
     ("Ensalada con Peras", "Ensaladas", None, "Ensalada con Peras"),
@@ -73,8 +73,8 @@ PRODUCTOS = [
     ("Agua con gas", "Bebidas", "Agua con gas", "Villavicencio con gas 500 ml"),
     ("Coca Cola", "Bebidas", "Coca Cola", "Coca-cola sabor original 500 ml"),
 
-    # DUDA: en la lista de PedidosYa figura "Coca Coca Zero" (parece un typo,
-    # pero puede estar asi en el portal). CONFIRMAR el nombre exacto.
+    # CONFIRMADO: en PedidosYa se cargo mal y quedo "Coca Coca Zero".
+    # El nombre esta asi en el portal, no es un typo de esta lista.
     ("Coca Zero", "Bebidas", "Coca Coca Zero", "Coca-cola sin azucar 500 ml"),
 ]
 

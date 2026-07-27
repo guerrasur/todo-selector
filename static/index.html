@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockSwitch</title>
+<style>
+  :root {
+    --bg: #12141a;
+    --panel: #1b1e26;
+    --panel-2: #232733;
+    --texto: #e8eaf0;
+    --tenue: #8a92a6;
+    --borde: #2d3240;
+    --on: #22c55e;
+    --off: #6b7280;
+    --curso: #f59e0b;
+    --error: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--texto);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--panel); border-bottom: 1px solid var(--borde);
+    padding: 14px 20px; display: flex; align-items: center; gap: 16px;
+  }
+  h1 { margin: 0; font-size: 19px; letter-spacing: -.3px; }
+  .badge {
+    font-size: 12px; padding: 3px 9px; border-radius: 20px;
+    background: var(--panel-2); color: var(--tenue);
+  }
+  .badge.alerta { background: #422; color: #fca5a5; }
+  main { padding: 20px; max-width: 1000px; margin: 0 auto; }
+  .categoria { margin: 26px 0 10px; font-size: 13px; letter-spacing: 1.2px;
+               text-transform: uppercase; color: var(--tenue); }
+  .item {
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+    display: grid; grid-template-columns: 1fr auto auto; gap: 14px;
+    align-items: center;
+  }
+  .nombre { font-weight: 500; }
+  .plats { display: flex; gap: 8px; }
+  .pill {
+    font-size: 11px; padding: 4px 10px; border-radius: 6px;
+    background: var(--panel-2); border: 1px solid var(--borde);
+    display: flex; align-items: center; gap: 6px; min-width: 108px;
+    color: var(--tenue); cursor: pointer; opacity: .45;
+    transition: opacity .12s, border-color .12s;
+  }
+  .pill.sel { opacity: 1; color: var(--texto); border-color: #4a5165; }
+  .pill:hover { border-color: #5a6178; }
+  .pill.na { opacity: .25; cursor: default; font-style: italic; }
+  .pill.na:hover { border-color: var(--borde); }
+  .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .p-prendido { background: var(--on); }
+  .p-apagado_hoy, .p-apagado_indefinido { background: var(--off); }
+  .p-apagando, .p-prendiendo { background: var(--curso); animation: late 1s infinite; }
+  .p-fallo { background: var(--error); }
+  .p-desconocido { background: #444; }
+  @keyframes late { 50% { opacity: .3; } }
+  .acciones { display: flex; gap: 6px; }
+  button {
+    font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 7px;
+    border: 1px solid var(--borde); background: var(--panel-2);
+    color: var(--texto); cursor: pointer;
+  }
+  button:hover { background: #2c3140; }
+  button.on { border-color: #14532d; color: #86efac; }
+  button.off { border-color: #431407; color: #fdba74; }
+  .vacio { color: var(--tenue); padding: 40px; text-align: center; }
+  .aviso-platos {
+    background: var(--panel); border: 1px solid #4a4020;
+    border-left: 3px solid var(--curso);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 14px; justify-content: space-between;
+  }
+  .aviso-platos.ok { border-color: var(--borde); border-left-color: var(--on); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>StockSwitch</h1>
+  <span class="badge" id="estado-sistema">cargando…</span>
+  <span class="badge" id="pendientes"></span>
+  <button id="btn-revalidar" style="margin-left:auto">Revalidar sesión</button>
+</header>
+
+<main>
+  <div id="panel-platos" style="display:none"></div>
+  <div id="lista" class="vacio">Cargando productos…</div>
+</main>
+
+<script>
+const PLATS = ['pedidosya', 'rappi'];
+const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi' };
+
+async function cargar() {
+  const [productos, sistema] = await Promise.all([
+    fetch('/api/productos').then(r => r.json()),
+    fetch('/api/estado-sistema').then(r => r.json()),
+  ]);
+
+  pintarSistema(sistema);
+  pintarProductos(productos);
+}
+
+function pintarSistema(s) {
+  const el = document.getElementById('estado-sistema');
+  if (s.simulado) {
+    el.textContent = 'MODO SIMULADO';
+    el.className = 'badge alerta';
+  } else {
+    const caidas = PLATS.filter(p => s.sesiones[p] === false);
+    if (caidas.length) {
+      el.textContent = 'Login pendiente: ' + caidas.map(p => NOMBRE_PLAT[p]).join(', ');
+      el.className = 'badge alerta';
+    } else {
+      el.textContent = 'Conectado';
+      el.className = 'badge';
+    }
+  }
+
+  const p = document.getElementById('pendientes');
+  p.textContent = s.operaciones_pendientes
+    ? `${s.operaciones_pendientes} en cola` : '';
+}
+
+function pintarProductos(productos) {
+  const cont = document.getElementById('lista');
+  cont.className = '';
+  cont.innerHTML = '';
+
+  const porCategoria = {};
+  for (const p of productos) {
+    (porCategoria[p.categoria] ||= []).push(p);
+  }
+
+  for (const [cat, items] of Object.entries(porCategoria)) {
+    const h = document.createElement('div');
+    h.className = 'categoria';
+    h.textContent = cat;
+    cont.appendChild(h);
+
+    for (const item of items) {
+      cont.appendChild(fila(item));
+    }
+  }
+}
+
+function fila(item) {
+  const div = document.createElement('div');
+  div.className = 'item';
+
+  const nombre = document.createElement('div');
+  nombre.className = 'nombre';
+  nombre.textContent = item.nombre;
+  div.appendChild(nombre);
+
+  // Cada plataforma es un chip clickeable: define sobre cuales actuar
+  const plats = document.createElement('div');
+  plats.className = 'plats';
+  const seleccion = new Set(PLATS);
+
+  for (const plat of PLATS) {
+    const est = item.estados[plat];
+
+    // Si no hay estado, el producto no existe en esa plataforma
+    if (!est) {
+      const na = document.createElement('span');
+      na.className = 'pill na';
+      na.textContent = `${NOMBRE_PLAT[plat]}: —`;
+      na.title = 'Este producto no existe en ' + NOMBRE_PLAT[plat];
+      plats.appendChild(na);
+      seleccion.delete(plat);
+      continue;
+    }
+
+    const pill = document.createElement('button');
+    pill.className = 'pill sel';
+    pill.dataset.plat = plat;
+    pill.title = (est.detalle || '') + '  (click para incluir/excluir)';
+    pill.innerHTML =
+      `<span class="punto p-${est.estado}"></span>` +
+      `${NOMBRE_PLAT[plat]}: ${etiqueta(est.estado)}`;
+
+    pill.onclick = () => {
+      if (seleccion.has(plat)) {
+        seleccion.delete(plat);
+        pill.classList.remove('sel');
+      } else {
+        seleccion.add(plat);
+        pill.classList.add('sel');
+      }
+      // Si no queda ninguna, deshabilitamos los botones
+      const vacio = seleccion.size === 0;
+      div.querySelectorAll('.acciones button').forEach(b => b.disabled = vacio);
+    };
+
+    plats.appendChild(pill);
+  }
+  div.appendChild(plats);
+
+  const acc = document.createElement('div');
+  acc.className = 'acciones';
+
+  const bHoy = document.createElement('button');
+  bHoy.className = 'off';
+  bHoy.textContent = 'Apagar hoy';
+  bHoy.onclick = () => accion(item.id, 'apagar_hoy', [...seleccion]);
+
+  const bIndef = document.createElement('button');
+  bIndef.className = 'off';
+  bIndef.textContent = 'Indefinido';
+  bIndef.onclick = () => accion(item.id, 'apagar_indef', [...seleccion]);
+
+  const bOn = document.createElement('button');
+  bOn.className = 'on';
+  bOn.textContent = 'Prender';
+  bOn.onclick = () => accion(item.id, 'prender', [...seleccion]);
+
+  acc.append(bHoy, bIndef, bOn);
+  div.appendChild(acc);
+
+  return div;
+}
+
+function etiqueta(e) {
+  return {
+    prendido: 'disponible',
+    apagando: 'apagando…',
+    prendiendo: 'prendiendo…',
+    apagado_hoy: 'apagado hoy',
+    apagado_indefinido: 'apagado',
+    fallo: 'FALLÓ',
+    desconocido: '—',
+  }[e] || e;
+}
+
+async function accion(producto_id, accion, plataformas) {
+  if (!plataformas || !plataformas.length) return;
+  await fetch('/api/accion', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ producto_id, accion, plataformas }),
+  });
+  cargar();
+}
+
+async function chequearPlatosDelDia() {
+  const info = await fetch('/api/platos-del-dia').then(r => r.json());
+  const panel = document.getElementById('panel-platos');
+
+  if (info.ya_cargados) {
+    panel.style.display = 'block';
+    panel.className = 'aviso-platos ok';
+    panel.innerHTML =
+      `<span>Platos de hoy: <b>${info.platos.join(' · ')}</b></span>` +
+      `<button id="btn-editar-platos">Cambiar</button>`;
+    document.getElementById('btn-editar-platos').onclick = () =>
+      pedirPlatos(info.platos);
+    return;
+  }
+
+  pedirPlatos([]);
+}
+
+function pedirPlatos(actuales) {
+  const panel = document.getElementById('panel-platos');
+  panel.style.display = 'block';
+  panel.className = 'aviso-platos';
+  panel.innerHTML = `
+    <div style="width:100%">
+      <div style="margin-bottom:8px">
+        <b>¿Cuáles son los platos del día?</b>
+        <span style="color:var(--tenue)">— separalos con coma</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input id="inp-platos" placeholder="Ej: Milanesa napolitana, Tarta de verdura"
+               value="${actuales.join(', ')}"
+               style="flex:1;padding:8px 10px;border-radius:7px;
+                      border:1px solid var(--borde);background:var(--panel-2);
+                      color:var(--texto);font:inherit">
+        <button id="btn-guardar-platos">Guardar</button>
+        <button id="btn-sin-platos">Hoy no hay</button>
+      </div>
+    </div>`;
+
+  document.getElementById('btn-guardar-platos').onclick = async () => {
+    const txt = document.getElementById('inp-platos').value;
+    const nombres = txt.split(',').map(s => s.trim()).filter(Boolean);
+    await fetch('/api/platos-del-dia', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombres }),
+    });
+    await chequearPlatosDelDia();
+    await cargar();
+  };
+
+  document.getElementById('btn-sin-platos').onclick = async () => {
+    await fetch('/api/platos-del-dia', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombres: [] }),
+    });
+    document.getElementById('panel-platos').style.display = 'none';
+    await cargar();
+  };
+
+  document.getElementById('inp-platos').focus();
+}
+
+document.getElementById('btn-revalidar').onclick = async (e) => {
+  const b = e.target;
+  b.disabled = true;
+  b.textContent = 'Revalidando…';
+  try {
+    await fetch('/api/revalidar-sesion', { method: 'POST' });
+    await cargar();
+  } finally {
+    b.disabled = false;
+    b.textContent = 'Revalidar sesión';
+  }
+};
+
+chequearPlatosDelDia();
+cargar();
+setInterval(cargar, 3000);
+</script>
+
+</body>
+</html>
