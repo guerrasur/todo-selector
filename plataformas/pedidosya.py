@@ -21,8 +21,8 @@ FLUJO OBSERVADO (capturas del usuario):
        - "Unavailable indefinitely"   (punto gris)
      OJO: el portal esta EN INGLES, aunque las capturas iniciales se
      hubieran leido en castellano. Ver TXT_POR_HOY.
-  4. Al clickear el toggle de un producto APAGADO, presumiblemente lo
-     prende directo (VERIFICAR en vivo).
+  4. Al clickear el toggle de un producto APAGADO lo prende directo, sin
+     popup. CONFIRMADO EN VIVO (op#17 'Budín de pan', 2026-07-27).
 
 CONFIRMADO POR HTML (DevTools, 2026-07-27): los toggles son
 <mat-slide-toggle> de Angular Material:
@@ -44,7 +44,12 @@ producto como el toggle: es la fila. El estado se lee 100% de
 aria-checked ("true"/"false") sobre el <input>.
 
 =========================================================================
- SELECTORES PENDIENTES DE CONFIRMAR EN VIVO  ->  buscar "TODO-SELECTOR"
+ ESTADO: los cuatro metodos del contrato corrieron en vivo contra el
+ portal. apagar() y prender() estan confirmados; el recorrido de
+ categorias tambien (op#17 encontro 'Budín de pan' en 'Platos'), con la
+ salvedad de _abrir_categoria: cuando el click tiene que ir por el
+ fallback JS hay que clickear adentro del custom element, no el custom
+ element. Ver ahi.
 =========================================================================
 """
 
@@ -217,15 +222,41 @@ class PedidosYa(PlataformaBase):
 
         antes = await self._nombres_visibles()
         try:
-            await self.clickear(cats.nth(indice), timeout=5000,
-                                que=f"categoria #{indice}")
+            entro = await self.clickear(cats.nth(indice), timeout=5000,
+                                        que=f"categoria #{indice}")
         except Exception as e:
             log.warning("No pude abrir la categoria #%s: %s",
                         indice, " ".join(str(e).split())[:100])
             return False
 
         await self.page.wait_for_timeout(1500)
-        return await self._nombres_visibles() != antes
+        if await self._nombres_visibles() != antes:
+            return True
+
+        # El click normal entro y la lista no cambio: la categoria ya estaba
+        # abierta. Es lo que pasa con la primera en cada recorrido.
+        if entro:
+            return False
+
+        # Fue por el fallback JS y no paso nada. CONFIRMADO POR LOG
+        # (2026-07-27): asi fallaron las 3 categorias al reconfirmar op#17.
+        # El handler no esta en <wk-menu-list-category-item> sino adentro,
+        # y un click disparado sobre el custom element no le llega.
+        log.info("La categoria #%s no reacciono al click por JS; "
+                 "reintento sobre el hijo que ocupa el centro", indice)
+        try:
+            tag = await self.clickear_por_js(cats.nth(indice), profundo=True,
+                                             timeout=5000)
+        except Exception as e:
+            log.warning("Tampoco pude abrir la categoria #%s: %s",
+                        indice, " ".join(str(e).split())[:100])
+            return False
+
+        await self.page.wait_for_timeout(1500)
+        cambio = await self._nombres_visibles() != antes
+        log.info("Categoria #%s por JS sobre <%s>: %s", indice, tag,
+                 "cambio la lista" if cambio else "sigue sin cambiar")
+        return cambio
 
     async def _mostrar_producto(self, nombre_remoto: str) -> bool:
         """Deja el producto en el DOM, cambiando de categoria si hace falta."""
@@ -356,14 +387,9 @@ class PedidosYa(PlataformaBase):
         await self._click_toggle(fila)
         await self.page.wait_for_timeout(2000)
 
-        # TODO-SELECTOR: verificar si al prender tambien aparece un popup
-        # de confirmacion. Si aparece, clickear el boton correspondiente aca.
-
+        # CONFIRMADO EN VIVO (2026-07-27, op#17 'Budín de pan'): prender NO abre
+        # ningun popup. El click sobre el toggle apagado lo prende directo y
+        # queda guardado; la relectura despues de recargar lo encontro
+        # prendido. El popup de dos opciones es solo del lado de apagar,
+        # porque ahi hay que elegir "por hoy" o "indefinidamente".
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
-
-    async def _confirmar(self, nombre_remoto: str, esperado_disponible: bool) -> bool:
-        """Recarga y relee: no confiamos en que el click alcanzo."""
-        await self.page.reload(wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(4000)
-        estado = await self.leer_estado(nombre_remoto)
-        return estado is not None and estado.disponible == esperado_disponible
