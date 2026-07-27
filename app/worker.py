@@ -393,6 +393,24 @@ class Worker:
 
         return {"url": plat.page.url, "elementos": datos}
 
+    async def esqueleto(self, plataforma: str) -> dict:
+        """El arbol del DOM, para ubicar algo sin depender del idioma."""
+        plat = self.plataformas.get(plataforma)
+        if self.modo_simulado or plat is None:
+            return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
+
+        async with self.bloqueo(plataforma):
+            listo, motivo = await self._preparar(plataforma)
+            if not listo:
+                return {"error": motivo}
+            try:
+                lineas = await plat.esqueleto()
+            except Exception as e:
+                log.exception("Leyendo esqueleto de %s", plataforma)
+                return {"url": plat.page.url, "error": _resumen(e)}
+
+        return {"url": plat.page.url, "nodos": len(lineas), "arbol": lineas}
+
     async def verificar_catalogo(self, plataforma: str) -> dict:
         """Busca TODOS los productos del catalogo en el portal, sin tocar nada.
 
