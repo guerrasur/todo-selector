@@ -68,6 +68,21 @@ class PedidosYa(PlataformaBase):
         except Exception:
             return False
 
+    async def _click_toggle(self, fila):
+        """Clickea el toggle de la fila.
+
+        OJO: el <input> tiene la clase cdk-visually-hidden de Angular
+        Material. Clickearlo directo NO funciona: Playwright espera a que
+        sea interactuable, la barra del toggle le tapa el punto de click,
+        y a los 30s tira timeout. Hay que clickear la barra visible.
+        """
+        barra = fila.locator("span.mat-slide-toggle-bar").first
+        if await barra.count() > 0:
+            await barra.click(timeout=10000)
+        else:
+            # El <label> entero tambien togglea (semantica de label).
+            await fila.click(timeout=10000)
+
     def _fila(self, nombre_remoto: str):
         """Devuelve el locator de la fila del producto.
 
@@ -117,10 +132,7 @@ class PedidosYa(PlataformaBase):
             return True  # ya estaba apagado
 
         fila = self._fila(nombre_remoto)
-        toggle = fila.locator(
-            'input[type="checkbox"], [role="switch"], button[aria-checked]'
-        ).first
-        await toggle.click()
+        await self._click_toggle(fila)
         await self.page.wait_for_timeout(1500)
 
         # El popup ofrece las dos opciones
@@ -141,10 +153,7 @@ class PedidosYa(PlataformaBase):
             return True
 
         fila = self._fila(nombre_remoto)
-        toggle = fila.locator(
-            'input[type="checkbox"], [role="switch"], button[aria-checked]'
-        ).first
-        await toggle.click()
+        await self._click_toggle(fila)
         await self.page.wait_for_timeout(2000)
 
         # TODO-SELECTOR: verificar si al prender tambien aparece un popup
