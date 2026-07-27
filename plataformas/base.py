@@ -130,6 +130,52 @@ class PlataformaBase(ABC):
                         self.nombre, que, " ".join(str(e).split())[:110])
             await objetivo.evaluate("el => el.click()", timeout=timeout)
 
+    # Elementos donde suele vivir la navegacion de categorias. La idea es
+    # mirar todos y ver cual trae los nombres de las categorias, en vez de
+    # adivinar como se cambia de seccion.
+    CANDIDATOS_NAVEGACION = [
+        "mat-expansion-panel-header",
+        "[role='tab']",
+        "[role='button']",
+        "button",
+        "nav a",
+        "h1, h2, h3, h4",
+        "li",
+    ]
+
+    async def estructura(self, por_selector: int = 30) -> dict:
+        """Diagnostico: como esta armada la pantalla del menu.
+
+        PedidosYa solo tiene en el DOM la categoria que esta a la vista (4
+        toggles de 26 productos, medido 2026-07-27). Para llegar al resto
+        hay que saber como se cambia de categoria, y esto lo muestra sin
+        tener que suponerlo.
+        """
+        await self.ir_al_menu()
+
+        salida = {}
+        for selector in self.CANDIDATOS_NAVEGACION:
+            try:
+                loc = self.page.locator(selector)
+                total = await loc.count()
+            except Exception:
+                continue
+            if total == 0:
+                continue
+
+            textos = []
+            for i in range(min(total, por_selector)):
+                try:
+                    texto = await loc.nth(i).inner_text()
+                except Exception:
+                    continue
+                texto = " ".join(texto.split())[:60]
+                if texto and texto not in textos:
+                    textos.append(texto)
+            salida[selector] = {"total": total, "textos": textos}
+
+        return salida
+
     async def listar_productos(self) -> list[str]:
         """Todos los nombres de producto que la pagina esta mostrando.
 
