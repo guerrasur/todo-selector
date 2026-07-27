@@ -83,6 +83,10 @@ class Preferencia(Base):
 
     PLATOS_RESPONDIDO = "platos_dia_respondido"   # valor = fecha YYYY-MM-DD
 
+    # "1" = el catalogo lo maneja el usuario desde la app (vinculo/separo
+    # productos), asi que seed.py deja de pisar los alias en cada arranque.
+    CATALOGO_MANUAL = "catalogo_manual"
+
     clave = Column(String(60), primary_key=True)
     valor = Column(String(200), default="")
 

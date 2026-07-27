@@ -99,7 +99,54 @@ class PlataformaBase(ABC):
                 return texto[:limite]
         return ""
 
-    async def clickear(self, locator, timeout: int = 8000, que: str = "elemento"):
+    # HTMLElement.click() sobre el elemento mismo. Alcanza cuando el que
+    # escucha el click es ese elemento o alguno de sus padres.
+    JS_CLICK = "el => el.click()"
+
+    # Click por JS sobre el descendiente mas profundo que ocupa el centro
+    # del elemento.
+    #
+    # CONFIRMADO POR LOG (2026-07-27): las tres categorias de PedidosYa se
+    # clickearon por el fallback JS y NINGUNA cambio la lista de productos.
+    # El motivo es que los eventos SUBEN pero no bajan: si el handler vive
+    # en un hijo de <wk-menu-list-category-item>, un click disparado sobre
+    # el custom element no lo despierta. Clickeando el hijo mas profundo el
+    # evento sube por todos los niveles, asi que cubre las dos formas.
+    JS_CLICK_PROFUNDO = """
+        el => {
+            const r = el.getBoundingClientRect();
+            const x = r.left + r.width / 2, y = r.top + r.height / 2;
+            let objetivo = el, mayor = -1;
+            const mirar = (nodo, prof) => {
+                const b = nodo.getBoundingClientRect();
+                if (b.width > 0 && b.height > 0 &&
+                    x >= b.left && x <= b.right &&
+                    y >= b.top && y <= b.bottom && prof > mayor) {
+                    mayor = prof;
+                    objetivo = nodo;
+                }
+                for (const h of nodo.children) mirar(h, prof + 1);
+            };
+            mirar(el, 0);
+            objetivo.click();
+            return objetivo.tagName.toLowerCase();
+        }
+    """
+
+    async def clickear_por_js(self, locator, profundo: bool = False,
+                              timeout: int = 8000) -> str:
+        """Dispara el click por JS, sin los chequeos de Playwright.
+
+        No mira si algo esta tapando el elemento: por eso es el plan B de
+        clickear(), y por eso tambien sirve para salir de un backdrop que se
+        come los clicks. `profundo` decide si se clickea el elemento o su
+        descendiente mas profundo (ver JS_CLICK_PROFUNDO).
+        """
+        js = self.JS_CLICK_PROFUNDO if profundo else self.JS_CLICK
+        return await locator.first.evaluate(js, timeout=timeout)
+
+    async def clickear(self, locator, timeout: int = 8000, que: str = "elemento",
+                       profundo: bool = False) -> bool:
         """Click que aguanta lo que los portales dejan flotando por encima.
 
         CONFIRMADO POR LOG (2026-07-27): en Rappi el header pegajoso de
@@ -110,11 +157,16 @@ class PlataformaBase(ABC):
         Dos defensas, en orden:
           1. Centrar el elemento en la pantalla (arriba esta el header,
              abajo la franja) y clickear normal, con timeout corto.
-          2. Si igual no entra, HTMLElement.click(), que no mira que haya
-             arriba. Es menos fiel a un click real, por eso es el plan B.
+          2. Si igual no entra, click por JS, que no mira que haya arriba.
+             Es menos fiel a un click real, por eso es el plan B.
 
         Se usa para TODOS los clicks (toggle, opciones del popup, boton de
         confirmar): cualquiera de ellos puede quedar tapado.
+
+        Devuelve True si entro el click normal y False si hubo que ir por
+        JS. Al que llama le importa la diferencia: el fallback JS no siempre
+        dispara lo mismo que un click de verdad, asi que un resultado
+        inesperado despues de un False todavia puede ser culpa del click.
         """
         objetivo = locator.first
         await objetivo.evaluate(
@@ -125,10 +177,59 @@ class PlataformaBase(ABC):
 
         try:
             await objetivo.click(timeout=timeout)
+            return True
         except Exception as e:
             log.warning("%s: click normal sobre %s fallo (%s). Voy por JS.",
                         self.nombre, que, " ".join(str(e).split())[:110])
-            await objetivo.evaluate("el => el.click()", timeout=timeout)
+            await self.clickear_por_js(objetivo, profundo=profundo, timeout=timeout)
+            return False
+
+    async def _confirmar(self, nombre_remoto: str, esperado_disponible: bool,
+                         asentar: int = 1500) -> bool:
+        """Recarga, deja la pagina lista y relee. No confiamos en el click.
+
+        CONFIRMADO POR LOG (2026-07-27, op#17): esperar un rato fijo despues
+        del reload NO alcanza en PedidosYa. La recarga vuelve a mostrar el
+        popup de sonido, cuyo backdrop se come los clicks, y ademas deja el
+        menu en la primera categoria: la relectura no encontro el producto y
+        dio por fallada una operacion que SI habia entrado. El reintento la
+        encontro prendida y termino en OK.
+
+        Por eso aca se rehace la misma preparacion del arranque
+        (asegurar_sesion: cierra popups y espera a que el menu exista) en
+        vez de dormir y esperar lo mejor.
+        """
+        await self.page.reload(wait_until="domcontentloaded")
+
+        try:
+            if not await self.asegurar_sesion():
+                log.warning("%s: al recargar para reconfirmar '%s', la pagina "
+                            "no quedo lista", self.nombre, nombre_remoto)
+        except Exception as e:
+            log.warning("%s: error preparando la pagina para reconfirmar '%s': %s",
+                        self.nombre, nombre_remoto, " ".join(str(e).split())[:120])
+
+        await self.page.wait_for_timeout(asentar)
+
+        estado = await self.leer_estado(nombre_remoto)
+
+        # Distinguir los dos fallos importa: "no lo encontre" es un problema
+        # de lectura (el cambio puede haber entrado igual) y "quedo al reves"
+        # es un problema del portal, que a veces no guarda.
+        if estado is None:
+            log.warning("%s: no encontre '%s' al reconfirmar; no puedo decir si "
+                        "el cambio entro", self.nombre, nombre_remoto)
+            return False
+
+        if estado.disponible != esperado_disponible:
+            log.warning("%s: '%s' quedo %s y esperaba %s (%s)",
+                        self.nombre, nombre_remoto,
+                        "prendido" if estado.disponible else "apagado",
+                        "prendido" if esperado_disponible else "apagado",
+                        estado.detalle)
+            return False
+
+        return True
 
     # Elementos donde suele vivir la navegacion de categorias. La idea es
     # mirar todos y ver cual trae los nombres de las categorias, en vez de

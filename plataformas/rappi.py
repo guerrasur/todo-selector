@@ -230,14 +230,12 @@ class Rappi(PlataformaBase):
             log.info("'%s' ya estaba prendido, no toco nada", nombre_remoto)
             return True
 
+        # CONFIRMADO EN VIVO (2026-07-27, op#18 'Budín de pan'): prender no
+        # abre ningun dialogo. El click sobre el toggle apagado lo prende y
+        # la relectura despues de recargar lo confirmo. Los dos modales
+        # ("Sólo por hoy" y "¿Desactivar producto?") son solo de apagar.
         tarjeta = self._tarjeta(nombre_remoto)
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
         await self.page.wait_for_timeout(2500)
 
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
-
-    async def _confirmar(self, nombre_remoto: str, esperado_disponible: bool) -> bool:
-        await self.page.reload(wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(4000)
-        estado = await self.leer_estado(nombre_remoto)
-        return estado is not None and estado.disponible == esperado_disponible

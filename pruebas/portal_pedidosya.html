@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Replica PedidosYa</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  /* El header pegajoso, como en el portal real */
+  .header { position: sticky; top: 0; height: 60px; background: #eee; z-index: 5; }
+  .columnas { display: flex; }
+  wk-menu-list { display: block; width: 220px; border-right: 1px solid #ccc; }
+  wk-menu-list-category-item { display: block; }
+  .inner { padding: 14px; cursor: pointer; }
+  .inner:hover { background: #f0f0f0; }
+  #productos { flex: 1; padding: 10px; }
+  label.mat-slide-toggle-label { display: flex; align-items: center; gap: 10px;
+                                 padding: 10px; }
+  span.mat-slide-toggle-bar { position: relative; display: inline-block;
+                              width: 36px; height: 14px; background: #bbb;
+                              border-radius: 8px; }
+  span.mat-slide-toggle-thumb-container { position: absolute; top: -3px; left: 0;
+                                          width: 20px; height: 20px; }
+  span.mat-slide-toggle-thumb { display: block; width: 20px; height: 20px;
+                                border-radius: 50%; background: #fff;
+                                box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .cdk-visually-hidden { position: absolute; width: 1px; height: 1px;
+                         margin: -1px; padding: 0; overflow: hidden;
+                         clip: rect(0 0 0 0); }
+  /* El backdrop que se come los clicks */
+  .cdk-overlay-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.32);
+                          z-index: 1000; }
+  .popup { position: fixed; top: 30%; left: 50%; transform: translateX(-50%);
+           background: #fff; padding: 20px; z-index: 1001; border-radius: 6px; }
+</style>
+
+<div class="header">Order overview</div>
+<div class="columnas">
+  <wk-menu-list><div class="menus-list-item" id="cats"></div></wk-menu-list>
+  <div id="productos"></div>
+</div>
+
+<div id="unavailable-category">Total unavailable</div>
+<div id="toppings-category">Toppings</div>
+
+<script>
+// Igual que el portal: el menu esta en castellano y el chrome en ingles.
+const CATEGORIAS = [
+  ["Bebidas",   ["Agua chica", "Agua chica con gas", "Gaseosa cola", "Gaseosa cola cero"]],
+  ["Platos", ["Tarta de choclo", "Flan casero", "Budín de pan", "Milanesa napolitana", "Pollo al horno"]],
+  ["Tartas",     ["Tarta de verdura", "Tarta de verdura chica", "Tarta de choclo"]],
+];
+
+// El parametro decide que tan dificil la hacemos:
+//   ?popup=cerrable    el popup de sonido se cierra con el boton (produccion)
+//   ?popup=pegado      el backdrop no se va nunca (fuerza el fallback JS)
+//   ?handler=hijo      el (click) de la categoria vive en un hijo (produccion)
+//   ?handler=host      el (click) vive en el custom element
+const params = new URLSearchParams(location.search);
+const POPUP = params.get("popup") || "cerrable";
+const HANDLER = params.get("handler") || "hijo";
+
+const apagados = new Set(JSON.parse(localStorage.getItem("apagados") || '["Budín de pan"]'));
+let categoriaActual = 0;   // el portal siempre arranca en la primera
+
+function guardar() {
+  localStorage.setItem("apagados", JSON.stringify([...apagados]));
+}
+
+function pintarCategorias() {
+  const cont = document.getElementById("cats");
+  cont.innerHTML = "";
+  CATEGORIAS.forEach(([nombre], i) => {
+    const item = document.createElement("wk-menu-list-category-item");
+    item.className = "menu-category";
+    const inner = document.createElement("div");
+    inner.className = "inner";
+    inner.textContent = nombre;
+    item.appendChild(inner);
+    // Aca esta el quid: donde se cuelga el listener.
+    (HANDLER === "host" ? item : inner)
+      .addEventListener("click", () => { categoriaActual = i; pintarProductos(); });
+    cont.appendChild(item);
+  });
+}
+
+function pintarProductos() {
+  const cont = document.getElementById("productos");
+  cont.innerHTML = "";
+  CATEGORIAS[categoriaActual][1].forEach((nombre, i) => {
+    const prendido = !apagados.has(nombre);
+    const label = document.createElement("label");
+    label.className = "mat-slide-toggle-label";
+    label.htmlFor = "toggle-" + categoriaActual + "-" + i;
+    label.innerHTML =
+      '<span class="mat-slide-toggle-bar">' +
+        '<input type="checkbox" role="switch" id="toggle-' + categoriaActual + '-' + i + '"' +
+        ' class="mat-slide-toggle-input cdk-visually-hidden"' +
+        ' aria-checked="' + prendido + '"' + (prendido ? " checked" : "") + '>' +
+        '<span class="mat-slide-toggle-thumb-container">' +
+          '<span class="mat-slide-toggle-thumb"></span>' +
+        '</span>' +
+      '</span>' +
+      '<span class="mat-slide-toggle-content">' +
+        '<p class="item-name">' + nombre + '</p>' +
+      '</span>';
+    label.querySelector("input").addEventListener("change", (ev) => {
+      // Prender es directo; apagar abre el popup de dos opciones.
+      if (ev.target.checked) {
+        apagados.delete(nombre);
+        guardar();
+        pintarProductos();
+      } else {
+        abrirPopupApagado(nombre);
+      }
+    });
+    cont.appendChild(label);
+  });
+}
+
+function abrirPopupApagado(nombre) {
+  const back = document.createElement("div");
+  back.className = "cdk-overlay-backdrop";
+  const caja = document.createElement("div");
+  caja.className = "popup";
+  caja.innerHTML = "<h3>" + nombre + "</h3>" +
+    '<p class="opcion" id="hoy">Unavailable for today</p>' +
+    '<p class="opcion" id="indef">Unavailable indefinitely</p>';
+  document.body.append(back, caja);
+  caja.querySelectorAll(".opcion").forEach(op => op.addEventListener("click", () => {
+    apagados.add(nombre);
+    guardar();
+    back.remove(); caja.remove();
+    pintarProductos();
+  }));
+}
+
+function popupDeSonido() {
+  const back = document.createElement("div");
+  back.className = "cdk-overlay-backdrop";
+  const caja = document.createElement("div");
+  caja.className = "popup";
+  caja.innerHTML = "<p>Let's make sure the application can play sounds</p>";
+  const btn = document.createElement("button");
+  btn.textContent = "Play sound";
+  btn.addEventListener("click", () => {
+    if (POPUP === "pegado") return;   // el boton no cierra nada
+    back.remove(); caja.remove();
+  });
+  caja.appendChild(btn);
+  document.body.append(back, caja);
+}
+
+pintarCategorias();
+pintarProductos();
+popupDeSonido();   // sale en CADA carga, igual que el portal
+</script>

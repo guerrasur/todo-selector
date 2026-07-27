@@ -5,15 +5,21 @@ pantalla. Reemplaza el trabajo manual de entrar a cada portal.
 
 ## Estado actual
 
-El esqueleto está completo y probado en modo simulado. **Faltan los selectores
-reales de las dos plataformas.**
+**En uso.** Las cuatro operaciones (leer la carta, apagar y prender) corrieron
+en vivo contra los dos portales el 2026-07-27. Queda un `TODO-SELECTOR` en
+`plataformas/rappi.py`: el HTML completo de la tarjeta y la pantalla de sesión
+expirada.
+
+El catálogo ya no se mantiene a mano: la pantalla **Carta** lee los dos
+portales y el usuario vincula o separa desde ahí (`app/catalogo.py`). En
+cuanto toca algo, `seed.py` deja de pisar los alias.
 
 ## Tu tarea
 
-Completar los `TODO-SELECTOR` en `plataformas/pedidosya.py` y
-`plataformas/rappi.py`, probando en vivo con Chrome abierto en los portales.
+Lo que siga en el README, sección "TAREAS PENDIENTES".
 
-El checklist completo está en el README, sección "TAREAS PENDIENTES".
+**Antes de tocar los selectores, corré las pruebas** (`pruebas/LEEME.md`):
+funcionan sin los portales y en cualquier máquina.
 
 ## Reglas importantes
 
@@ -30,6 +36,13 @@ El checklist completo está en el README, sección "TAREAS PENDIENTES".
 4. **Toda operación se confirma releyendo.** Los métodos `apagar()` y
    `prender()` devuelven True solo si el cambio se verificó recargando la
    página. No confiar en que el click alcanzó — PedidosYa a veces no guarda.
+   Ojo: después de recargar hay que rehacer la preparación (cerrar el popup
+   de sonido, esperar el menú). Dormir un rato fijo no alcanza y da por
+   fallados cambios que sí entraron.
+
+6. **Un click por JS sobre un custom element puede no hacer nada.** Si el
+   listener vive en un hijo, el evento no le llega: los eventos suben, no
+   bajan. Para eso está `clickear(..., profundo=True)`.
 
 5. **Probá con modo simulado primero** (`STOCKSWITCH_SIMULADO=1`) si tocás
    worker o API, para no depender del navegador.
