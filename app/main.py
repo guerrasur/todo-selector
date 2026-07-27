@@ -253,6 +253,15 @@ async def estructura(plataforma: str):
     return await worker.estructura(plataforma)
 
 
+@app.get("/api/esqueleto")
+async def esqueleto(plataforma: str):
+    """Diagnostico: el arbol del DOM de la pantalla del menu.
+
+    Ej: /api/esqueleto?plataforma=pedidosya
+    """
+    return await worker.esqueleto(plataforma)
+
+
 @app.get("/api/verificar-catalogo")
 async def verificar_catalogo(plataforma: str):
     """Diagnostico: busca toda la carta en el portal y dice que no coincide.

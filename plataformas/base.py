@@ -176,6 +176,51 @@ class PlataformaBase(ABC):
 
         return salida
 
+    async def esqueleto(self, max_nodos: int = 400, max_texto: int = 45) -> list[str]:
+        """Diagnostico: el arbol del DOM en una lista de lineas.
+
+        Cuando no sabemos donde vive algo (la lista de categorias de
+        PedidosYa, por ejemplo) y buscar por texto no sirve porque el
+        portal esta en otro idioma, lo unico que resuelve es ver la
+        estructura. Devuelve tag, id, clases y el texto propio de cada
+        elemento, indentado por profundidad.
+        """
+        await self.ir_al_menu()
+        return await self.page.evaluate(
+            """([maxNodos, maxTexto]) => {
+                const salida = [];
+                const saltar = new Set(['SCRIPT', 'STYLE', 'SVG', 'PATH',
+                                        'NOSCRIPT', 'HEAD', 'META', 'LINK']);
+                const caminar = (el, prof) => {
+                    if (salida.length >= maxNodos) return;
+                    if (saltar.has(el.tagName)) return;
+
+                    // solo el texto propio, no el de los hijos
+                    let propio = '';
+                    for (const n of el.childNodes) {
+                        if (n.nodeType === 3) propio += n.textContent;
+                    }
+                    propio = propio.replace(/\\s+/g, ' ').trim().slice(0, maxTexto);
+
+                    const id = el.id ? '#' + el.id : '';
+                    const clases = (el.className && typeof el.className === 'string')
+                        ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.')
+                        : '';
+                    const testid = el.dataset && el.dataset.testid
+                        ? `[${el.dataset.testid.slice(0, 40)}]` : '';
+
+                    salida.push('  '.repeat(Math.min(prof, 12)) +
+                                el.tagName.toLowerCase() + id + clases + testid +
+                                (propio ? '  "' + propio + '"' : ''));
+
+                    for (const h of el.children) caminar(h, prof + 1);
+                };
+                caminar(document.body, 0);
+                return salida;
+            }""",
+            [max_nodos, max_texto],
+        )
+
     async def listar_productos(self) -> list[str]:
         """Todos los nombres de producto que la pagina esta mostrando.
 
