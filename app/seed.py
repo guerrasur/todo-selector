@@ -5,6 +5,12 @@ Formato: (nombre_canonico, categoria, nombre_en_pedidosya, nombre_en_rappi)
 Si un nombre es None, ese producto NO existe en esa plataforma.
 
 REVISAR LAS MARCAS "DUDA" ANTES DE USAR EN PRODUCCION.
+
+Las tildes de los nombres de Rappi salen del portal mismo, via /api/nombres
+(2026-07-27). Sin tilde no se encuentran: se buscan con exact=True.
+
+OJO: esta lista esta INCOMPLETA. El portal de Rappi muestra 45 productos y
+aca hay 30. Ver la lista de faltantes en el README.
 """
 
 import logging
@@ -19,9 +25,9 @@ PRODUCTOS = [
     # ---------------- Platos ----------------
     ("Tarta de choclo", "Platos", "Tarta de choclo", "Tarta de choclo y queso"),
     ("Flan casero", "Platos", "Flan casero", "Flan casero"),
-    ("Milanesa con pure", "Platos", "Milanesa con pure", "Ensalada milanesa"),
+    ("Milanesa con pure", "Platos", "Milanesa con pure", "Milanesa con puré"),
     ("Budín de pan", "Platos", "Budín de pan", "Budín de pan"),
-    ("Milanesa napolitana", "Platos", "Milanesa napolitana", "Ensalada con zapallo"),
+    ("Milanesa napolitana", "Platos", "Milanesa napolitana", "Milanesa napolitana"),
     ("Pollo al horno", "Platos", "Pollo al horno", "Pollo al horno"),
     ("Sopa del dia", "Platos", "Sopa del dia", "Sopa del día"),
     ("Pollo al verdeo", "Platos", "Pollo al verdeo", "Pollo al verdeo"),
@@ -70,7 +76,7 @@ PRODUCTOS = [
 
     # CONFIRMADO: la Locro no existe en PedidosYa.
     ("Locro del sabado", "Platos",
-     None, "Locro del sabado"),
+     None, "Locro del sábado"),
 
     # ---------------- Bebidas ----------------
     ("Agua chica", "Bebidas", "Agua chica", "Manantial sin gas 500 ml"),

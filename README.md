@@ -178,6 +178,23 @@ editan por `POST /api/alias`.
 
 Con Chrome abierto en los dos portales, hay que:
 
+## 0. PedidosYa solo expone una categoría a la vez  ← BLOQUEANTE
+
+Medido el 2026-07-27: `verificar-catalogo` da **4/26**, y esos 4 son exactamente
+las Bebidas (Agua chica, Agua chica con gas, Gaseosa cola, Gaseosa cola cero). Ninguna
+ensalada, ningún producto, ningún plato. Apagar "Budín de pan" falla en 74 ms — ni siquiera
+intenta clickear, `leer_estado` no lo encuentra en el DOM.
+
+Sobre las Bebidas la app funciona de punta a punta: apagar, confirmar releyendo
+y reverificar a los 2 minutos. El problema es el alcance, no el mecanismo.
+
+Falta correr `/api/nombres?plataforma=pedidosya` para ver qué muestra la página,
+y de ahí sacar cómo llegar al resto: seleccionar la categoría, expandirla, o
+scrollear si la lista es virtualizada.
+
+Hasta que esto se resuelva, PedidosYa solo sirve para bebidas, y el rediseño de
+leer las dos cartas no se puede hacer.
+
 ## 1. PedidosYa (`plataformas/pedidosya.py`)
 
 URL: `https://web-ar.us.restaurant-partners.com/menus/PY_AR/MENU_ID`
@@ -239,6 +256,30 @@ Al apagar ahí, también se apaga en Rappi normal.
   cargados solo para Rappi en `seed.py` (la UI los muestra con un chip gris
   "—" en PedidosYa).
 
+### El catálogo está incompleto (medido 2026-07-27)
+
+`/api/nombres?plataforma=rappi` devuelve **45 productos**; `seed.py` tiene 30.
+Faltan estos 15, que existen en Rappi y no están cargados:
+
+```
+Wok de vegetales            Ensalada de tomate       Guiso de garbanzos
+Wok de pollo            Plato del dia               Wok de vegetales
+Ensalda mixta (sic)      Ensalada de hongos       Sopa de Sopa del diabaza y Vainilla
+Ensalada mixta         Ensalada mixta           Polenta con salsa
+Tarta de verdura porción     Ensalada verde         Tarta de acelga y Batata
+```
+
+Dos cosas para decidir sobre esa lista:
+
+- **"Ensalada mixta" está en el portal.** En `seed.py` figura comentada como
+  descontinuada. Una de las dos cosas está desactualizada.
+- **"Ensalada mixta" y "Ensalda mixta"**: el segundo tiene un typo en el
+  portal ("Ensalda"). Como los nombres se buscan con `exact=True`, hay que
+  copiarlo con el typo incluido o no se encuentra.
+
+Mantener esto a mano es exactamente lo que el rediseño (leer las dos cartas y
+machearlas) viene a eliminar.
+
 ### Pendiente de decisión del usuario
 
 **"chica" vs "individual".** En PedidosYa los tartas con guarnición
@@ -253,6 +294,11 @@ mismo producto:
 | Tarta de espinaca chica | Tarta de espinaca chica | Tarta de espinaca individual |
 
 **Si son platos distintos, hay que separarlos.** Preguntarle al usuario.
+
+**Se complica más:** `/api/nombres` (2026-07-27) muestra que en Rappi existen
+**"Tarta de verdura porción" Y "Tarta de verdura individual"** como ítems separados.
+O sea que la guarnición sí distingue productos distintos en Rappi, y hay que
+decidir a cuál de los dos corresponde el "chica" de PedidosYa.
 
 Ojo también: en Rappi existen "Tarta de zapallo" y "Tarta de zapallo individual"
 como ítems separados; en PedidosYa solo figura "Tarta de zapallo chica".
