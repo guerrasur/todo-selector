@@ -1,5 +1,17 @@
 """PedidosYa Partner.
 
+ESTRUCTURA DE LA PANTALLA (captura del usuario, 2026-07-27):
+  Columna izquierda: navegacion del portal (Menues, Ajustes, ...).
+  Columna del medio:  las categorias del menu -> Bebidas, Platos, Tartas.
+  Columna derecha:    los productos de la categoria elegida, con su toggle.
+
+  El portal carga UNA categoria por vez y arranca en Bebidas: por eso el
+  DOM tiene 4 productos de los 26 del catalogo. Ver CATEGORIAS.
+
+  El puntito a la derecha de cada fila distingue el tipo de apagado:
+  amarillo = "no disponible por hoy", gris = "indefinidamente". Todavia no
+  se usa; leer_estado() solo devuelve si esta disponible o no.
+
 FLUJO OBSERVADO (capturas del usuario):
   1. Lista de productos agrupados por categoria (Platos, Tartas, ...)
   2. Cada producto tiene un toggle a la izquierda del nombre
@@ -66,6 +78,28 @@ class PedidosYa(PlataformaBase):
     # Popup de "Let's make sure the application can play sounds" que sale
     # al reloguear (una vez por dia).
     RE_PLAY_SOUND = re.compile(r"play\s*sound", re.I)
+
+    # La columna del medio lista las categorias del menu. El portal carga
+    # UNA por vez y arranca en la de bebidas: por eso el DOM tiene 4
+    # productos de los 26 del catalogo. Para tocar una ensalada hay que
+    # clickear su categoria primero. Los platos (Empanada de carne, Guisos,
+    # Tarta de jamon y queso, Ensalada mixta, fideos) viven adentro de "Platos".
+    #
+    # PROVISORIO: en la captura del usuario las categorias estan en
+    # castellano, pero /api/estructura (2026-07-27) muestra que la sesion
+    # del navegador de la app ve el portal EN INGLES ("Order overview",
+    # "Recent Orders", "Menus"). Se prueban los dos idiomas hasta poder
+    # confirmar los nombres reales con /api/esqueleto.
+    # No hace falta que esta lista sea exacta: _mostrar_producto() solo da
+    # por buena una categoria si el producto aparece despues de clickearla.
+    CATEGORIAS = ["Bebidas", "Platos", "Tartas",
+                  "Drinks", "Beverages", "Salads"]
+
+    def __init__(self, page):
+        super().__init__(page)
+        # nombre_remoto -> categoria donde lo encontramos, para no tener que
+        # recorrer las tres cada vez.
+        self._categoria_de = {}
 
     async def _cerrar_popups(self) -> bool:
         """Cierra el popup de sonido que PedidosYa muestra al reloguear.
@@ -149,6 +183,62 @@ class PedidosYa(PlataformaBase):
         objetivo = barra if await barra.count() > 0 else fila
         await self.clickear(objetivo, timeout=10000, que="toggle")
 
+    async def _nombres_visibles(self) -> list[str]:
+        """Los productos que la pagina tiene renderizados ahora mismo."""
+        filas = self.page.locator("label.mat-slide-toggle-label")
+        nombres = []
+        for i in range(await filas.count()):
+            try:
+                texto = " ".join((await filas.nth(i).inner_text()).split())
+            except Exception:
+                continue
+            if texto:
+                nombres.append(texto)
+        return nombres
+
+    async def _abrir_categoria(self, categoria: str) -> bool:
+        """Clickea una categoria de la columna del medio.
+
+        El nombre de la categoria aparece mas de una vez en pantalla (en la
+        lista y como titulo de la seccion), asi que se prueban los primeros
+        candidatos y se toma como bueno el que cambie la lista de productos.
+        """
+        antes = await self._nombres_visibles()
+        candidatos = self.page.get_by_text(categoria, exact=True)
+
+        for i in range(min(await candidatos.count(), 3)):
+            try:
+                await self.clickear(candidatos.nth(i), timeout=4000,
+                                    que=f"categoria '{categoria}'")
+            except Exception:
+                continue
+            await self.page.wait_for_timeout(1500)
+            if await self._nombres_visibles() != antes:
+                return True
+        return False
+
+    async def _mostrar_producto(self, nombre_remoto: str) -> bool:
+        """Deja el producto en el DOM, cambiando de categoria si hace falta."""
+        if await self._fila(nombre_remoto).count() > 0:
+            return True
+
+        recordada = self._categoria_de.get(nombre_remoto)
+        orden = ([recordada] if recordada else [])
+        orden += [c for c in self.CATEGORIAS if c != recordada]
+
+        for categoria in orden:
+            await self._abrir_categoria(categoria)
+            if await self._fila(nombre_remoto).count() > 0:
+                if self._categoria_de.get(nombre_remoto) != categoria:
+                    log.info("'%s' esta en la categoria '%s'",
+                             nombre_remoto, categoria)
+                self._categoria_de[nombre_remoto] = categoria
+                return True
+
+        log.warning("'%s' no aparece en ninguna categoria (%s)",
+                    nombre_remoto, ", ".join(self.CATEGORIAS))
+        return False
+
     def _fila(self, nombre_remoto: str):
         """Devuelve el locator de la fila del producto.
 
@@ -164,17 +254,14 @@ class PedidosYa(PlataformaBase):
         )
 
     async def listar_productos(self) -> list[str]:
+        """Recorre las tres categorias: la carta entera, no solo la abierta."""
         await self.ir_al_menu()
-        filas = self.page.locator("label.mat-slide-toggle-label")
         nombres = []
-        for i in range(await filas.count()):
-            try:
-                texto = await filas.nth(i).inner_text()
-            except Exception:
-                continue
-            texto = " ".join(texto.split())
-            if texto:
-                nombres.append(texto)
+        for categoria in self.CATEGORIAS:
+            await self._abrir_categoria(categoria)
+            for nombre in await self._nombres_visibles():
+                if nombre not in nombres:
+                    nombres.append(nombre)
         return nombres
 
     async def inspeccionar(self, nombre_remoto: str) -> dict:
@@ -185,10 +272,10 @@ class PedidosYa(PlataformaBase):
 
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
         await self.ir_al_menu()
-        fila = self._fila(nombre_remoto)
-
-        if await fila.count() == 0:
+        if not await self._mostrar_producto(nombre_remoto):
             return None
+
+        fila = self._fila(nombre_remoto)
 
         # CONFIRMADO: el toggle es <input type="checkbox" role="switch"
         # aria-checked="true|false">. aria-checked es la fuente de verdad.
