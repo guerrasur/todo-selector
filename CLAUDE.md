@@ -21,6 +21,13 @@ Lo que siga en el README, sección "TAREAS PENDIENTES".
 **Antes de tocar los selectores, corré las pruebas** (`pruebas/LEEME.md`):
 funcionan sin los portales y en cualquier máquina.
 
+## Migraciones
+
+No hay Alembic, pero `init_db()` agrega solas las columnas nuevas del modelo
+a las tablas ya creadas (`ALTER TABLE ADD COLUMN`). Se pueden agregar campos
+sin romperle la base al usuario. **Solo agrega**: renombrar o borrar una
+columna sigue sin estar cubierto.
+
 ## Reglas importantes
 
 1. **No cambies el contrato de `plataformas/base.py`.** El worker depende de

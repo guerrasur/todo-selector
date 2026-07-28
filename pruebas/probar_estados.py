@@ -49,6 +49,56 @@ def poner(db, nombre, valor, plataforma="rappi"):
     db.commit()
 
 
+def sostener_y_pausa(db):
+    """Que sostiene la ronda de cada 15 minutos y que no."""
+    print("\n== La ronda de 15 min sostiene lo propio y respeta la pausa ==")
+    poner(db, "Cobb", EstadoItem.APAGADO_HOY)
+    poner(db, "Brie", EstadoItem.APAGADO_HOY)
+    poner(db, "Caesar", EstadoItem.APAGADO_AJENO)
+
+    # El portal los muestra a los tres disponibles: alguien los prendio.
+    leido = {"Cobb": True, "Ensalada Brie": True, "Ensalada caesar": True}
+
+    resultado = Worker._guardar_estados("rappi", leido, sostener=True)
+    db.expire_all()
+    revividos = {r["producto"] for r in resultado["revividos"]}
+
+    revisar(revividos == {"Cobb", "Brie"},
+            f"solo reencola lo que apago la app (revividos: {revividos})")
+    revisar(estado_de(db, "Caesar") == EstadoItem.PRENDIDO,
+            "lo apagado desde afuera que aparece prendido se actualiza y ya")
+    revisar(estado_de(db, "Cobb") == EstadoItem.APAGADO_HOY,
+            "al que revivio no se le pisa el estado hasta confirmarlo")
+
+    # Ahora con uno en pausa: no se sostiene mas.
+    p = db.query(Producto).filter_by(nombre="Brie").first()
+    p.pausado = True
+    db.commit()
+
+    resultado = Worker._guardar_estados("rappi", leido, sostener=True)
+    db.expire_all()
+    revividos = {r["producto"] for r in resultado["revividos"]}
+
+    revisar("Brie" not in revividos,
+            "un producto en pausa no se reencola aunque lo hubieramos apagado")
+    revisar("Cobb" in revividos, "y el que no esta en pausa se sigue sosteniendo")
+    revisar(estado_de(db, "Brie") == EstadoItem.PRENDIDO,
+            "al pausado se le actualiza el estado igual: la lectura sale gratis")
+
+    # En el arranque (sostener=False) nunca se reencola: un "apagado por hoy"
+    # de ayer ya vencio solo y volver a apagarlo seria repetir lo de ayer.
+    poner(db, "Cobb", EstadoItem.APAGADO_HOY)
+    resultado = Worker._guardar_estados("rappi", leido, sostener=False)
+    db.expire_all()
+    revisar(resultado["revividos"] == [],
+            "la lectura del arranque no reencola nada")
+    revisar(estado_de(db, "Cobb") == EstadoItem.PRENDIDO,
+            "y ahi si gana el portal")
+
+    p.pausado = False
+    db.commit()
+
+
 def novedades(db):
     print("\n== Avisar cuando algo aparece en un portal donde no estaba ==")
 
@@ -165,6 +215,7 @@ def main():
         revisar("Cobb" in nombres,
                 "lo que apago la app si entra")
 
+        sostener_y_pausa(db)
         novedades(db)
     finally:
         db.close()
