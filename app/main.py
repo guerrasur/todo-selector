@@ -83,6 +83,7 @@ def listar_productos(db: Session = Depends(get_db)):
             "id": p.id,
             "nombre": p.nombre,
             "categoria": p.categoria,
+            "pausado": bool(p.pausado),
             "alias": alias,
             "estados": {
                 plat: {
@@ -267,13 +268,20 @@ async def estructura(plataforma: str):
 
 
 @app.get("/api/carta")
-async def carta():
+async def carta(releer: bool = True):
     """Lee la carta de las dos plataformas y propone el emparejamiento.
 
-    No modifica nada: es la propuesta para revisar. Reemplaza el catalogo
+    No modifica nada: es la propuesta para revisar. Reemplaza el catálogo
     escrito a mano de app/seed.py.
+
+    Con `releer=false` devuelve la última lectura guardada en vez de ir a
+    los portales, que tarda como un minuto. Es lo que usa la pantalla al
+    abrirse: recargar el navegador no tiene por qué costar otra lectura.
     """
-    return await worker.leer_carta()
+    carta = await worker.leer_carta(releer=releer)
+    if carta is None:
+        return {"sin_lectura": True}
+    return carta
 
 
 @app.get("/api/esqueleto")
@@ -396,6 +404,29 @@ def agregar(data: AgregarIn, db: Session = Depends(get_db)):
     return {"ok": True, "producto": _ver_producto(producto)}
 
 
+class PausaIn(BaseModel):
+    producto_id: int
+    pausado: bool
+
+
+@app.post("/api/pausar")
+def pausar(data: PausaIn, db: Session = Depends(get_db)):
+    """Marca un producto como temporalmente inactivo (o lo reactiva).
+
+    Sigue en la carta del portal, pero este mes no se vende: se va al final
+    de la pantalla, apagado de color, y la ronda de cada 15 minutos deja de
+    sostenerlo. El estado se lo sigue leyendo, que sale gratis porque la
+    lectura trae la carta entera igual.
+    """
+    producto = db.query(Producto).get(data.producto_id)
+    if producto is None:
+        raise HTTPException(404, "producto no encontrado")
+
+    producto.pausado = data.pausado
+    db.commit()
+    return {"ok": True, "pausado": producto.pausado}
+
+
 class IgnorarIn(BaseModel):
     plataforma: str
     nombre_remoto: str
@@ -464,6 +495,14 @@ def guardar_alias(data: AliasIn, db: Session = Depends(get_db)):
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
+# La app se autoactualiza, asi que el navegador NO puede cachear la pantalla:
+# quedaba con el HTML viejo despues de cada update y mostraba estados que esa
+# version no sabia nombrar ("apagado_ajeno" crudo en vez de "apagado (afuera)",
+# 2026-07-28). Con no-store, abrir la pagina siempre trae la version que
+# corresponde al server que la esta sirviendo.
+SIN_CACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
+
+
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC / "index.html"))
+    return FileResponse(str(STATIC / "index.html"), headers=SIN_CACHE)

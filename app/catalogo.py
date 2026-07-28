@@ -165,6 +165,26 @@ def vincular(db, remoto_py: str, remoto_rappi: str,
     if a is not None and b is not None and a.id == b.id:
         return a                                     # ya estaban vinculados
 
+    # Antes de juntar, hay que soltar lo que estos dos ya tenian tomado del
+    # otro lado, o se perderia sin aviso. Pasa al vincular a mano dos que ya
+    # estaban emparejados con otra cosa: si "Tarta de verdura chica" (PY) se
+    # vincula con "Tarta de verdura" (Rappi), y ese ya estaba con "Tarta de verdura"
+    # (PY), ese ultimo se quedaba sin plataforma y desaparecia del catalogo.
+    # Ahora sobrevive como producto propio.
+    if a is not None:
+        actual = nombre_remoto(a, "rappi")
+        if actual is not None and actual != remoto_rappi:
+            log.info("'%s' se suelta de '%s' (Rappi) para vincularse con '%s'",
+                     a.nombre, actual, remoto_rappi)
+            separar(db, a.id, "rappi")
+
+    if b is not None:
+        actual = nombre_remoto(b, "pedidosya")
+        if actual is not None and actual != remoto_py:
+            log.info("'%s' se suelta de '%s' (PedidosYa) para vincularse con '%s'",
+                     b.nombre, actual, remoto_py)
+            separar(db, b.id, "pedidosya")
+
     if a is None and b is None:
         producto = Producto(nombre=_nombre_libre(db, nombre or remoto_py),
                             categoria=categoria, orden=500)

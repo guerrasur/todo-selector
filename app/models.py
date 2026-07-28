@@ -19,6 +19,12 @@ class Producto(Base):
     orden = Column(Integer, default=0)
     activo = Column(Boolean, default=True)       # False = no lo mostramos en la UI
 
+    # Temporalmente inactivo: sigue en la carta del portal pero este mes no
+    # se vende. Se muestra al final y apagado de color, y la ronda de cada
+    # 15 min NO lo sostiene: si figura apagado, se queda apagado sin que la
+    # app lo ande reencolando. Sirve para que lo que no se toca no estorbe.
+    pausado = Column(Boolean, default=False)
+
     # Platos del dia: cambian a diario, se cargan al inicio de la jornada.
     # 'fecha_dia' guarda para que dia son; si no es hoy, no se muestran.
     es_plato_del_dia = Column(Boolean, default=False)

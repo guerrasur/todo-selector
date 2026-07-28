@@ -127,6 +127,12 @@ arriba dice "leyendo el estado real…" y después queda la hora de la lectura.
 El botón **Leer estado real** la repite cuando quieras — sirve cuando alguien
 apagó algo desde el portal y querés que la pantalla se entere.
 
+**Cada 15 minutos se releen las dos cartas enteras**, así que lo que apagaste
+desde el portal también se mantiene al día. Antes esa ronda leía solo lo que la
+app tenía apagado, producto por producto; leer las dos cartas de una sale más
+barato que eso (~35 s de navegador cada 15 min) y actualiza toda la pantalla.
+Mientras corre, una operación que encoles espera a que termine.
+
 Hay tres formas de estar apagado, y se distinguen a propósito:
 
 | En pantalla | Qué significa |
@@ -160,11 +166,23 @@ se decide en la pantalla Carta, con todo a la vista.
 Un producto **completamente nuevo** (que no está en el catálogo en ninguna
 plataforma) no genera aviso: aparece en la pantalla Carta, en "solo en…".
 
+## Productos en pausa
+
+Un producto que está en la carta del portal pero **este mes no se vende** se
+puede marcar con **Pausar**. Se va al final de la pantalla, a una sección "En
+pausa", apagado de color, y **la app deja de sostenerlo**: si figura apagado,
+no lo reencola nunca más. Los botones le siguen funcionando, y el estado se le
+sigue leyendo — eso sale gratis, porque la lectura trae la carta entera igual.
+
+Sirve para que lo que no se toca no estorbe arriba. **Reactivar** lo devuelve.
+
 ## La pantalla Carta
 
-El botón **Carta** (arriba a la derecha) lee lo que muestran los dos portales
-y lo cruza con lo que tiene cargado la app. Tarda como un minuto: recorre
-todas las categorías de PedidosYa y la lista de Rappi.
+El botón **Actualizar carta** (arriba a la derecha) muestra lo que dicen los
+dos portales, cruzado con lo que tiene cargado la app. Al abrirse muestra la
+última lectura guardada; **Volver a leer los portales** va a buscarla de nuevo
+y tarda como un minuto (recorre todas las categorías de PedidosYa y la lista
+de Rappi).
 
 Muestra cuatro grupos: **a confirmar** (el emparejamiento automático no está
 seguro), **emparejados solos**, y los que están **solo en un portal**.
@@ -174,6 +192,10 @@ seguro), **emparejados solos**, y los que están **solo en un portal**.
 - **Separar**: lo contrario. Cada portal queda con su propio botón.
 - **Agregar**: carga en la app un producto que está en un portal y no en el
   catálogo.
+- **Vincular a mano**: dos listas desplegables, una por portal, para juntar dos
+  que la app no propuso. Es para lo que ninguna heurística va a sacar. Si el
+  que elegís ya estaba vinculado con otro, **ese otro no se pierde**: queda
+  como producto suelto, con su propio botón.
 
 El criterio es que **si no está claro que sea el mismo plato, van separados**,
 y vincularlos es una decisión explícita tuya. Cuando la app no está segura
