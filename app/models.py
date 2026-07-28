@@ -116,6 +116,25 @@ class Preferencia(Base):
     valor = Column(String(200), default="")
 
 
+class HistorialCatalogo(Base):
+    """Foto del catalogo ANTES de cada cambio, para poder deshacer.
+
+    Vincular y separar tocan varios productos a la vez y no son faciles de
+    revertir a mano: una vinculacion equivocada puede dejar sueltos a otros
+    dos. Sin un "deshacer", un click desprolijo cuesta reconstruir el
+    catalogo a mano. La foto es chica (30 productos) y solo se guardan las
+    ultimas, asi que sale barato.
+    """
+    __tablename__ = "historial_catalogo"
+
+    MAXIMO = 20      # cuantos pasos atras se pueden deshacer
+
+    id = Column(Integer, primary_key=True)
+    creada_en = Column(DateTime, default=datetime.now)
+    descripcion = Column(String(300), default="")
+    datos = Column(Text, default="")          # JSON con productos/alias/estados
+
+
 class Operacion(Base):
     """Cola de trabajo + historial. El worker toma las pendientes."""
     __tablename__ = "operaciones"
