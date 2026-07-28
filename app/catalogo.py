@@ -462,8 +462,11 @@ def separar(db, producto_id: int, plataforma: str,
         guardar_paso(db, f"separar '{producto.nombre}' de "
                          f"{NOMBRE_PLATAFORMA.get(plataforma, plataforma)}")
 
+    # La pausa viaja con el producto: si el plato estaba en pausa, sus dos
+    # mitades siguen estandolo. Si no, separar lo devolvia solo a la lista.
     nuevo = Producto(nombre=_nombre_libre(db, remoto, plataforma=plataforma),
-                     categoria=producto.categoria, orden=producto.orden)
+                     categoria=producto.categoria, orden=producto.orden,
+                     pausado=producto.pausado)
     db.add(nuevo)
     db.flush()
 

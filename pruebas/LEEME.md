@@ -7,7 +7,8 @@ temporal y una réplica local del portal. Se pueden correr en cualquier máquina
 py pruebas/probar_pedidosya.py        selectores y clicks de PedidosYa
 py pruebas/probar_catalogo.py         vincular / separar / sembrar
 py pruebas/probar_estados.py          guardar el estado leído del portal
-py pruebas/probar_pantalla_carta.py   la pantalla Carta, de punta a punta
+py pruebas/probar_cierre.py           apagar todo por plataforma + ajustes
+py pruebas/probar_pantalla_carta.py   la pantalla entera, de punta a punta
 ```
 
 Las dos que usan navegador necesitan Playwright instalado
@@ -37,7 +38,20 @@ operación en curso no la pise una lectura, que la app no se apropie de lo que
 apagó el local por su cuenta (`apagado_ajeno`, que la ronda de reverificación
 deja en paz), y que lo que el portal no mostró no borre lo que ya sabíamos.
 
+**`probar_cierre.py`** cubre el botón de "apagar todo" y los ajustes. Lo que
+importa ahí es lo que **no** se encola: apagar la carta entera son ~30
+operaciones por portal y cada una recarga la página, así que encolar de más es
+la diferencia entre un minuto y veinte. Cubre también que apagar una plataforma
+deje la otra intacta, que apretarlo dos veces no duplique la cola, y que los
+ajustes validen antes de guardar (una tanda con un valor malo no guarda ninguno).
+
 **`probar_pantalla_carta.py`** levanta la app entera en modo simulado y la
 maneja con Playwright como lo haría una persona. En modo simulado `/api/carta`
 devuelve `carta_2026-07-27.json`, que es la lectura **real** de los dos
 portales de ese día: sirve para probar la pantalla sin estar en el local.
+
+Además del recorrido de la Carta cubre el panel de **Apagar todo**, el de
+**Ajustes**, y una regresión que costó caro: el chip de plataforma se
+deseleccionaba solo. La lista se repinta cada pocos segundos, y la selección
+vivía en una variable local del repintado; si tardabas más que el refresco en
+apretar el botón, la acción salía a los dos portales sin decir nada.
