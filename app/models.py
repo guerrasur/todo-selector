@@ -25,10 +25,10 @@ class Producto(Base):
     # app lo ande reencolando. Sirve para que lo que no se toca no estorbe.
     pausado = Column(Boolean, default=False)
 
-    # Platos del dia: cambian a diario, se cargan al inicio de la jornada.
-    # 'fecha_dia' guarda para que dia son; si no es hoy, no se muestran.
-    es_plato_del_dia = Column(Boolean, default=False)
-    fecha_dia = Column(String(10), default="")   # YYYY-MM-DD
+    # OJO: la base puede tener todavia las columnas es_plato_del_dia y
+    # fecha_dia, de cuando la app preguntaba los platos del dia. Se saco esa
+    # pantalla (2026-07-28) y las columnas quedaron sin usar: son nullable,
+    # asi que no molestan, y borrarlas no esta cubierto por la migracion.
 
     alias = relationship("AliasPlataforma", back_populates="producto",
                          cascade="all, delete-orphan")
@@ -94,14 +94,8 @@ class EstadoItem(Base):
 
 
 class Preferencia(Base):
-    """Clave/valor suelto. Hoy guarda si ya se preguntaron los platos del dia.
-
-    Hace falta porque "hoy no hay platos" es una respuesta valida que no crea
-    ningun Producto: sin esta marca, la app volvia a preguntar en cada recarga.
-    """
+    """Clave/valor suelto para marcas sueltas de la app."""
     __tablename__ = "preferencias"
-
-    PLATOS_RESPONDIDO = "platos_dia_respondido"   # valor = fecha YYYY-MM-DD
 
     # "1" = el catalogo lo maneja el usuario desde la app (vinculo/separo
     # productos), asi que seed.py deja de pisar los alias en cada arranque.
