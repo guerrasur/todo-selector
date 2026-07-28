@@ -14,6 +14,17 @@ El catálogo ya no se mantiene a mano: la pantalla **Carta** lee los dos
 portales y el usuario vincula o separa desde ahí (`app/catalogo.py`). En
 cuanto toca algo, `seed.py` deja de pisar los alias.
 
+**Apagar todo** (`app/cierre.py`) apaga o prende la carta entera de **una
+plataforma o de las dos**, con un botón por portal: a veces PedidosYa tiene
+que apagarse antes que Rappi. Nunca encola lo que ya está como quiere
+quedar, lo pausado, ni lo que ya está en la cola.
+
+**Los ajustes** (`app/config.py`) viven en la tabla `preferencias`, con el
+prefijo `cfg_`. Ahí salen el ritmo del worker y **qué sucursal es** (el id de
+menú de PedidosYa y el storeId de Rappi, que antes estaban clavados en el
+código). Todos los defaults son lo que la app venía haciendo, así que una
+base sin ajustes guardados se comporta igual que antes.
+
 ## Tu tarea
 
 Lo que siga en el README, sección "TAREAS PENDIENTES".
@@ -40,6 +51,12 @@ columna sigue sin estar cubierto.
    "Tarta de verdura chica" — usar `exact=True` o el script apaga el
    equivocado. Esto ya mordió una vez.
 
+8. **No afirmar lo que no se está viendo.** Si la lectura de la carta no
+   encuentra un producto, su estado NO se pisa (una lectura mala no puede
+   borrar lo que sabíamos) — pero entonces ese estado quedó viejo y la
+   pantalla no puede seguir mostrándolo como un hecho de ahora. Ya costó
+   un pedido de algo apagado (2026-07-28). Ver `/api/alertas`.
+
 4. **Toda operación se confirma releyendo.** Los métodos `apagar()` y
    `prender()` devuelven True solo si el cambio se verificó recargando la
    página. No confiar en que el click alcanzó — PedidosYa a veces no guarda.
@@ -53,6 +70,13 @@ columna sigue sin estar cubierto.
 
 5. **Probá con modo simulado primero** (`STOCKSWITCH_SIMULADO=1`) si tocás
    worker o API, para no depender del navegador.
+
+7. **La lista de la pantalla se repinta sola cada pocos segundos.** Nada que
+   el usuario haya elegido puede vivir en una variable local del repintado:
+   se borra sola y no se nota. Ya pasó con los chips de plataforma, que
+   volvían a quedar los dos seleccionados y mandaban la acción a los dos
+   portales. Si el usuario lo eligió, va afuera del repintado (ver
+   `excluidas` en `static/index.html`).
 
 ## Cómo probar
 

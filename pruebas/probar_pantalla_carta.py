@@ -302,6 +302,221 @@ async def probar_buscador(pagina):
     await pagina.click("#btn-limpiar")
 
 
+async def probar_seleccion_de_plataforma(pagina):
+    """El chip excluido tiene que sobrevivir al repintado automatico.
+
+    EL BUG (2026-07-28): la seleccion vivia en una variable local de fila(),
+    y la lista se repinta sola cada 3 segundos. Excluias PedidosYa, tardabas
+    mas que el refresco en apretar el boton, y el chip volvia a quedar
+    seleccionado sin ningun aviso: el click apagaba en los DOS portales.
+    Es justo lo contrario de lo que el usuario habia pedido.
+    """
+    print("\n== Excluir una plataforma con el chip ==")
+    fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
+    await fila.wait_for(timeout=10000)
+
+    chip_rappi = fila.locator(".pill[data-plat='rappi']")
+    await chip_rappi.click()
+    revisar("sel" not in (await chip_rappi.get_attribute("class")),
+            "el chip queda deseleccionado al clickearlo")
+
+    # Mas que el refresco de la pantalla: es el escenario del bug.
+    await pagina.wait_for_timeout(4500)
+    fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
+    chip_rappi = fila.locator(".pill[data-plat='rappi']")
+    revisar("sel" not in (await chip_rappi.get_attribute("class")),
+            "y SIGUE deseleccionado despues de que la lista se repinte sola")
+
+    # El boton tiene que DECIR sobre que portal va a actuar. Antes decia
+    # "Apagar hoy" y para saberlo habia que interpretar la opacidad de los
+    # chips: el usuario no se enteraba de que existia apagar en uno solo.
+    boton = fila.locator("button", has_text="Apagar hoy")
+    revisar("solo PedidosYa" in await boton.inner_text(),
+            f"el boton dice a donde va ({(await boton.inner_text()).strip()})")
+
+    antes = await pagina.evaluate("fetch('/api/historial').then(r => r.json())")
+    await fila.locator("button", has_text="Apagar hoy").click()
+    await pagina.wait_for_timeout(1500)
+    despues = await pagina.evaluate("fetch('/api/historial').then(r => r.json())")
+
+    ids = {o["id"] for o in antes}
+    nuevas = [o for o in despues if o["id"] not in ids]
+    revisar(len(nuevas) == 1 and nuevas[0]["plataforma"] == "pedidosya",
+            f"la accion va solo a PedidosYa ({[o['plataforma'] for o in nuevas]})")
+
+    # Y se puede volver a incluir.
+    await chip_rappi.click()
+    await pagina.wait_for_timeout(4500)
+    fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
+    revisar("sel" in (await fila.locator(".pill[data-plat='rappi']")
+                      .get_attribute("class")),
+            "volver a clickearlo la incluye de nuevo, y tambien queda")
+    revisar("solo" not in await fila.locator("button", has_text="Apagar hoy")
+            .inner_text(),
+            "y el boton vuelve a decir que actua sobre los dos")
+
+    revisar(await pagina.locator("#pista-chips").count() == 1,
+            "la pantalla explica que los chips se pueden clickear")
+
+
+async def probar_aviso_de_apagado_sin_confirmar(pagina):
+    """EL BUG DEL 2026-07-28: decia apagado y PedidosYa lo estaba vendiendo.
+
+    La app no puede prometer que no vuelva a pasar (el portal revive cosas
+    solo), pero si puede dejar de afirmar en presente algo que no esta
+    viendo. Se simula lo que pasa cuando la lectura no encuentra el producto.
+    """
+    print("\n== Avisar de un apagado que no se puede confirmar ==")
+    from app.database import SessionLocal
+    from app.models import Producto, EstadoItem
+    from app.worker import worker
+
+    db = SessionLocal()
+    try:
+        p = db.query(Producto).filter_by(nombre="Tarta de verdura").first()
+        est = next(e for e in p.estados if e.plataforma == "pedidosya")
+        est.estado = EstadoItem.APAGADO_HOY
+        db.commit()
+
+        # La lectura del portal no lo encontro: es el agujero exacto.
+        worker.no_encontrados = {"pedidosya": [{
+            "producto_id": p.id, "producto": p.nombre,
+            "plataforma": "pedidosya", "nombre_remoto": "Tarta de verdura",
+            "estado": EstadoItem.APAGADO_HOY, "verificado_en": None,
+        }]}
+        producto_id = p.id
+    finally:
+        db.close()
+
+    alertas = await pagina.evaluate("fetch('/api/alertas').then(r => r.json())")
+    dudas = alertas["sin_confirmar"]
+    revisar(any(d["producto_id"] == producto_id and d["motivo"] == "no_aparece"
+                for d in dudas),
+            f"la API lo reporta como no confirmable ({len(dudas)} en total)")
+
+    await pagina.reload()
+    panel = pagina.locator("#panel-alertas")
+    await panel.wait_for(timeout=10000)
+    texto = await panel.inner_text()
+    revisar("Tarta de verdura" in texto and "no puedo confirmar" in texto.lower(),
+            "la pantalla lo dice arriba de todo, en rojo")
+    revisar("vendiendo" in texto.lower(),
+            "y dice por que importa: el portal puede estar vendiendolo")
+
+    fila = pagina.locator(".item.dudoso").filter(has_text="Tarta de verdura").first
+    revisar(await fila.count() > 0,
+            "y el producto queda marcado en la lista, no solo en el cartel")
+
+    worker.no_encontrados = {}
+    db = SessionLocal()
+    try:
+        p = db.query(Producto).get(producto_id)
+        est = next(e for e in p.estados if e.plataforma == "pedidosya")
+        est.estado = EstadoItem.PRENDIDO
+        db.commit()
+    finally:
+        db.close()
+
+    await pagina.reload()
+    await pagina.wait_for_timeout(1500)
+    revisar(await pagina.locator("#panel-alertas").is_hidden(),
+            "y el cartel se va cuando deja de haber dudas")
+
+
+async def probar_ajustes(pagina):
+    """El panel de configuracion: que guarde y que valide."""
+    print("\n== Ajustes ==")
+    await pagina.click("#btn-ajustes")
+    await pagina.wait_for_selector("#panel-ajustes:visible", timeout=5000)
+    await pagina.wait_for_selector("#cuerpo-ajustes .ajuste", timeout=5000)
+
+    panel = pagina.locator("#panel-ajustes")
+    revisar(await panel.locator(".grupo").count() >= 3,
+            "los ajustes salen agrupados")
+    revisar(await panel.locator("[data-clave='pedidosya_menu_id']").count() == 1,
+            "el id de menu de PedidosYa se puede editar desde la pantalla")
+
+    campo = panel.locator("[data-clave='minutos_ronda']")
+    await campo.fill("25")
+    await panel.locator("[data-clave='sostener_apagados']").uncheck()
+    await pagina.click("#btn-guardar-ajustes")
+    await pagina.wait_for_timeout(1500)
+
+    cfg = await pagina.evaluate("fetch('/api/config').then(r => r.json())")
+    valores = {o["clave"]: o["valor"] for o in cfg["opciones"]}
+    revisar(valores["minutos_ronda"] == 25, "guarda el valor nuevo")
+    revisar(valores["sostener_apagados"] is False, "y tambien los booleanos")
+
+    # Recargar la pagina no puede perderlos: viven en la base.
+    await pagina.reload()
+    await pagina.click("#btn-ajustes")
+    await pagina.wait_for_selector("#cuerpo-ajustes .ajuste", timeout=5000)
+    revisar(await pagina.locator("[data-clave='minutos_ronda']")
+            .input_value() == "25",
+            "y siguen ahi despues de recargar la pantalla")
+
+    # Un valor fuera de rango tiene que decirlo, no guardarse a medias.
+    await pagina.locator("[data-clave='max_intentos']").fill("99")
+    await pagina.click("#btn-guardar-ajustes")
+    await pagina.wait_for_timeout(1200)
+    revisar("No se pudo" in await pagina.locator("#estado-ajustes").inner_text(),
+            "avisa cuando un valor esta fuera de rango")
+
+    cfg = await pagina.evaluate("fetch('/api/config').then(r => r.json())")
+    valores = {o["clave"]: o["valor"] for o in cfg["opciones"]}
+    revisar(valores["max_intentos"] == 3,
+            "y no guarda nada de esa tanda")
+
+    pagina.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+    await pagina.click("#btn-restablecer")
+    await pagina.wait_for_timeout(1500)
+    cfg = await pagina.evaluate("fetch('/api/config').then(r => r.json())")
+    valores = {o["clave"]: o["valor"] for o in cfg["opciones"]}
+    revisar(valores["minutos_ronda"] == 15 and valores["sostener_apagados"],
+            "restablecer los devuelve a los valores por defecto")
+
+    await pagina.click("#btn-ajustes")      # cerrar
+
+
+async def probar_apagar_todo(pagina):
+    """Apagar la carta de UNA plataforma, que es lo que pidio el usuario."""
+    print("\n== Apagar todo ==")
+    await pagina.click("#btn-cierre")
+    await pagina.wait_for_selector("#panel-cierre:visible", timeout=5000)
+    await pagina.wait_for_selector(".fila-cierre", timeout=5000)
+
+    filas = pagina.locator(".fila-cierre")
+    revisar(await filas.count() == 3,
+            "hay un juego de botones para PedidosYa, otro para Rappi y otro "
+            "para los dos")
+
+    fila_py = pagina.locator(".fila-cierre[data-destino='pedidosya']")
+    revisar("para apagar" in await fila_py.inner_text(),
+            "dice cuantos productos tocaria antes de apretar nada")
+
+    antes = await pagina.evaluate("fetch('/api/historial?limite=500')"
+                                  ".then(r => r.json())")
+    ids = {o["id"] for o in antes}
+
+    pagina.once("dialog", lambda d: asyncio.ensure_future(d.accept()))
+    await fila_py.locator("button", has_text="Apagar todo").click()
+    await pagina.wait_for_selector("#resultado-cierre:not(:empty)", timeout=20000)
+
+    texto = await pagina.locator("#resultado-cierre").inner_text()
+    revisar("PedidosYa" in texto and "encoladas" in texto,
+            f"cuenta lo que encolo ({texto.strip()[:60]})")
+    revisar("Rappi" not in texto, "y no menciona Rappi, que no se toco")
+
+    despues = await pagina.evaluate("fetch('/api/historial?limite=500')"
+                                    ".then(r => r.json())")
+    nuevas = [o for o in despues if o["id"] not in ids]
+    revisar(len(nuevas) > 5, f"encolo la carta entera de PedidosYa ({len(nuevas)})")
+    revisar(all(o["plataforma"] == "pedidosya" for o in nuevas),
+            "TODAS las operaciones nuevas son de PedidosYa: Rappi quedo intacto")
+    revisar(all(o["accion"] == "apagar_hoy" for o in nuevas),
+            "y usan el apagado por hoy, que es el default del cierre")
+
+
 async def probar_sin_platos_del_dia(pagina):
     """El panel de platos del dia se saco entero (2026-07-28)."""
     print("\n== Ya no hay platos del dia ==")
@@ -327,6 +542,8 @@ async def main():
 
         await probar_sin_platos_del_dia(pagina)
         await probar_buscador(pagina)
+        await probar_seleccion_de_plataforma(pagina)
+        await probar_aviso_de_apagado_sin_confirmar(pagina)
 
         print("\n== El icono de la pestaña ==")
         icono = await pagina.evaluate("""
@@ -412,6 +629,12 @@ async def main():
         await probar_vinculador_manual(pagina)
         await probar_pausa(pagina)
         await probar_renombrar_y_deshacer(pagina)
+        await probar_ajustes(pagina)
+
+        # Al final: encola la carta entera, y en modo simulado cada operacion
+        # tarda 2 segundos. Antes de las otras pruebas les dejaria el worker
+        # ocupado y los estados en "apagando…" por varios minutos.
+        await probar_apagar_todo(pagina)
 
         await navegador.close()
 

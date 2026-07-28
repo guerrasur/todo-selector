@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from . import catalogo
+from . import catalogo, cierre, config
 from .database import init_db, get_db
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
 from .seed import sembrar
@@ -37,6 +37,7 @@ ARRANCADO_EN = datetime.now()
 async def arrancar():
     init_db()
     sembrar()
+    config.recargar()
     await worker.iniciar(modo_simulado=MODO_SIMULADO)
 
 
@@ -100,30 +101,162 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
     if producto is None:
         raise HTTPException(404, "producto no encontrado")
 
-    if data.accion not in ("apagar_hoy", "apagar_indef", "prender"):
+    if data.accion not in cierre.ACCIONES:
         raise HTTPException(400, "accion invalida")
 
-    creadas = []
-    for plat in data.plataformas:
-        op = Operacion(
-            producto_id=data.producto_id,
-            plataforma=plat,
-            accion=data.accion,
-        )
-        db.add(op)
+    desconocidas = [p for p in data.plataformas if p not in catalogo.PLATAFORMAS]
+    if desconocidas:
+        raise HTTPException(400, f"plataforma desconocida: {desconocidas[0]}")
 
-        # Marcamos estado transitorio para feedback inmediato en la UI
+    creadas, salteadas = [], []
+    for plat in data.plataformas:
+        # El EstadoItem es lo que dice "este producto existe en esta
+        # plataforma". Sin el, la operacion buscaria el nombre canonico en un
+        # portal donde el producto no esta y fallaria tres veces antes de
+        # decirlo. Pasa con una pantalla vieja: la lista se repinta sola,
+        # pero el click puede salir con los datos de antes.
         est = (db.query(EstadoItem)
                .filter_by(producto_id=data.producto_id, plataforma=plat)
                .first())
-        if est:
-            est.estado = (EstadoItem.PRENDIENDO if data.accion == "prender"
-                          else EstadoItem.APAGANDO)
+        if est is None:
+            salteadas.append({"plataforma": plat,
+                              "motivo": "el producto no existe en ese portal"})
+            continue
 
+        # Sin esto, dos clicks seguidos encolan la misma operacion dos veces
+        # y el segundo pasa por todo el circuito (refrescar, leer, clickear)
+        # para terminar en "ya estaba apagado". Con "Apagar todo" serian 30.
+        repetida = (db.query(Operacion)
+                    .filter(Operacion.producto_id == data.producto_id,
+                            Operacion.plataforma == plat,
+                            Operacion.accion == data.accion,
+                            Operacion.estado.in_([Operacion.PENDIENTE,
+                                                  Operacion.EN_CURSO]))
+                    .first())
+        if repetida is not None:
+            salteadas.append({"plataforma": plat, "motivo": "ya estaba encolada"})
+            continue
+
+        db.add(Operacion(
+            producto_id=data.producto_id,
+            plataforma=plat,
+            accion=data.accion,
+        ))
+
+        # Marcamos estado transitorio para feedback inmediato en la UI
+        est.estado = (EstadoItem.PRENDIENDO if data.accion == "prender"
+                      else EstadoItem.APAGANDO)
         creadas.append(plat)
 
     db.commit()
-    return {"encoladas": creadas}
+    return {"encoladas": creadas, "salteadas": salteadas}
+
+
+class MasivoIn(BaseModel):
+    accion: str                                  # apagar_hoy|apagar_indef|prender
+    plataformas: list[str] = ["pedidosya", "rappi"]
+    # None = como diga Ajustes. La pantalla no los manda; estan para poder
+    # forzar el comportamiento desde la API sin cambiar la configuracion.
+    releer: bool | None = None
+    incluir_pausados: bool | None = None
+    solo_propios: bool | None = None
+
+
+@app.post("/api/masivo")
+async def masivo(data: MasivoIn):
+    """Apaga (o prende) la carta entera de las plataformas que le pidas.
+
+    Es el botón de cierre, y acepta UNA plataforma a propósito: a veces hay
+    que apagar PedidosYa antes que Rappi.
+    """
+    try:
+        return {"resultado": await cierre.ejecutar(
+            worker, data.accion, data.plataformas,
+            releer=data.releer,
+            incluir_pausados=data.incluir_pausados,
+            solo_propios=data.solo_propios)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/masivo/previo")
+def masivo_previo(accion: str = "apagar_hoy"):
+    """Cuántos productos tocaría cada plataforma, para avisar antes."""
+    if accion not in cierre.ACCIONES:
+        raise HTTPException(400, "accion invalida")
+    return {"accion": accion, "por_plataforma": cierre.previo(
+        list(catalogo.PLATAFORMAS), accion)}
+
+
+@app.get("/api/alertas")
+def alertas(db: Session = Depends(get_db)):
+    """Lo que la app AFIRMA sin poder confirmarlo. Es lo que puede salir caro.
+
+    El caso real (2026-07-28): el usuario apagó un producto, Todo-Selector lo
+    mostró como «apagado hoy», y media hora después entró un pedido de
+    PedidosYa con ese producto.
+
+    El agujero: si la lectura de la carta no encuentra un producto (porque
+    el nombre del catálogo no coincide con el del portal, o porque no se
+    pudo abrir la categoría), la app **no pisa** el estado que tenía. Eso
+    está bien —una lectura mala no debería borrar lo que sabíamos— pero el
+    efecto es que un «apagado» viejo queda congelado y la pantalla lo sigue
+    afirmando en presente mientras el portal lo vende.
+
+    Acá salen los dos casos en que eso pasa:
+      - la última lectura NO vio el producto en el portal;
+      - hace mucho que nadie lo confirma.
+
+    Solo importan los que la app da por apagados: si dice «prendido» y en
+    realidad está apagado, se pierde una venta; al revés se vende algo que
+    no hay.
+    """
+    # Dos rondas sin confirmar ya es raro: la ronda es cada 15 min.
+    minutos = config.entero("minutos_ronda")
+    limite = (datetime.now() - timedelta(minutes=max(minutos, 5) * 2)
+              if minutos > 0 else None)
+
+    # Lo que la ultima lectura no encontro, indexado para cruzarlo abajo.
+    ciegos = {}
+    for lista in worker.no_encontrados.values():
+        for n in lista:
+            ciegos[(n["producto_id"], n["plataforma"])] = n
+
+    salida = []
+    productos = (db.query(Producto)
+                 .filter(Producto.activo == True)  # noqa: E712
+                 .order_by(Producto.orden).all())
+
+    for p in productos:
+        if p.pausado:
+            continue                     # el usuario ya dijo que no le importa
+        for est in p.estados:
+            if est.estado not in EstadoItem.APAGADOS_PROPIOS:
+                continue
+
+            no_visto = (p.id, est.plataforma) in ciegos
+            viejo = (limite is not None and
+                     (est.verificado_en is None or est.verificado_en < limite))
+            if not (no_visto or viejo):
+                continue
+
+            salida.append({
+                "producto_id": p.id,
+                "producto": p.nombre,
+                "plataforma": est.plataforma,
+                "nombre_remoto": catalogo.nombre_remoto(p, est.plataforma),
+                "estado": est.estado,
+                "verificado_en": (est.verificado_en.isoformat(timespec="seconds")
+                                  if est.verificado_en else None),
+                # El motivo cambia que hay que hacer: si el portal no lo
+                # muestra, es el nombre; si solo esta viejo, es releer.
+                "motivo": ("no_aparece" if no_visto else "sin_confirmar"),
+            })
+
+    return {
+        "sesiones_caidas": [p for p, ok in worker.sesion_ok.items() if ok is False],
+        "sin_confirmar": salida,
+    }
 
 
 @app.get("/api/estado-sistema")
@@ -442,6 +575,45 @@ def ver_catalogo(db: Session = Depends(get_db)):
         "deshacer": catalogo.hay_para_deshacer(db),
         "productos": [_ver_producto(p) for p in productos],
     }
+
+
+class ConfigIn(BaseModel):
+    cambios: dict
+
+
+@app.get("/api/config")
+def ver_config():
+    """Los ajustes con su definicion: la pantalla los dibuja de acá.
+
+    Devuelve tipo, ayuda, límites y valor actual de cada uno, así agregar un
+    ajuste nuevo es agregarlo a `config.OPCIONES` y nada más.
+    """
+    return {"opciones": config.para_la_pantalla()}
+
+
+@app.post("/api/config")
+async def guardar_config(data: ConfigIn, db: Session = Depends(get_db)):
+    """Guarda los ajustes y los aplica sin reiniciar la app."""
+    try:
+        config.guardar(db, data.cambios)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.commit()
+
+    config.recargar()
+    await worker.aplicar_config()
+    return {"ok": True, "opciones": config.para_la_pantalla()}
+
+
+@app.post("/api/config/restablecer")
+async def restablecer_config(db: Session = Depends(get_db)):
+    """Vuelve todos los ajustes a los valores por defecto."""
+    config.restablecer(db)
+    db.commit()
+
+    config.recargar()
+    await worker.aplicar_config()
+    return {"ok": True, "opciones": config.para_la_pantalla()}
 
 
 @app.post("/api/alias")
