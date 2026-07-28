@@ -252,6 +252,67 @@ async def probar_renombrar_y_deshacer(pagina):
             "y no toca los cambios anteriores")
 
 
+async def probar_buscador(pagina):
+    """El buscador reemplazo al panel de platos del dia (2026-07-28)."""
+    print("\n== Buscador ==")
+    buscador = pagina.locator("#buscador")
+
+    # La lista llega por fetch: contarla apenas carga la pagina da cero.
+    await pagina.locator("#lista .item").first.wait_for(timeout=10000)
+    todos = await pagina.locator("#lista .item").count()
+    revisar(todos > 5, f"la lista arranca completa ({todos} productos)")
+
+    await buscador.fill("wrap")
+    await pagina.wait_for_timeout(800)
+    visibles = await pagina.locator("#lista .item").count()
+    revisar(0 < visibles < todos, f"filtra por nombre ({visibles} de {todos})")
+    revisar("de" in await pagina.locator("#resultado-busqueda").inner_text(),
+            "dice cuantos quedaron")
+
+    # Sin tildes: los nombres de los portales las tienen y nadie las escribe.
+    await buscador.fill("clasica")
+    await pagina.wait_for_timeout(800)
+    texto = await pagina.locator("#lista").inner_text()
+    revisar("Clasica" in texto or "clásica" in texto.lower(),
+            "encuentra 'Clásica' buscando 'clasica'")
+
+    # Por el nombre del OTRO portal: es donde mas se pierde uno.
+    await buscador.fill("villavicencio")
+    await pagina.wait_for_timeout(800)
+    texto = await pagina.locator("#lista").inner_text()
+    revisar("Agua" in texto,
+            "encuentra 'Agua con gas' buscando como se llama en Rappi")
+
+    await buscador.fill("zzzzz")
+    await pagina.wait_for_timeout(800)
+    revisar("No hay ningún producto" in await pagina.locator("#lista").inner_text(),
+            "avisa cuando no hay resultados")
+
+    await pagina.click("#btn-limpiar")
+    await pagina.wait_for_timeout(800)
+    revisar(await pagina.locator("#lista .item").count() == todos,
+            "la cruz borra la busqueda y vuelve la lista entera")
+    revisar(await buscador.input_value() == "", "y deja el campo vacio")
+
+    # El repintado cada 3 segundos no puede robarle el foco al input.
+    await buscador.fill("wrap")
+    await pagina.wait_for_timeout(3500)
+    revisar(await pagina.evaluate("document.activeElement.id") == "buscador",
+            "sigue escribiendo aunque la lista se refresque sola")
+    await pagina.click("#btn-limpiar")
+
+
+async def probar_sin_platos_del_dia(pagina):
+    """El panel de platos del dia se saco entero (2026-07-28)."""
+    print("\n== Ya no hay platos del dia ==")
+    revisar(await pagina.locator("#panel-platos").count() == 0,
+            "no queda el panel en la pantalla")
+
+    estado = await pagina.evaluate(
+        "fetch('/api/platos-del-dia').then(r => r.status)")
+    revisar(estado == 404, f"el endpoint ya no existe (dio {estado})")
+
+
 async def main():
     servidor = levantar_app()
     for _ in range(100):                      # esperar a que levante
@@ -263,6 +324,9 @@ async def main():
         navegador = await abrir_navegador(p)
         pagina = await navegador.new_page()
         await pagina.goto(BASE)
+
+        await probar_sin_platos_del_dia(pagina)
+        await probar_buscador(pagina)
 
         print("\n== El icono de la pestaña ==")
         icono = await pagina.evaluate("""

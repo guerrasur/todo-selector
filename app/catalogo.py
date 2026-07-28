@@ -69,8 +69,6 @@ def _foto(db) -> str:
             "id": p.id, "nombre": p.nombre, "categoria": p.categoria,
             "orden": p.orden, "activo": bool(p.activo),
             "pausado": bool(p.pausado),
-            "es_plato_del_dia": bool(p.es_plato_del_dia),
-            "fecha_dia": p.fecha_dia,
             "alias": [{"plataforma": a.plataforma, "remoto": a.nombre_remoto}
                       for a in p.alias],
             "estados": [{"plataforma": e.plataforma, "estado": e.estado,
@@ -128,7 +126,6 @@ def deshacer(db) -> str | None:
         db.add(Producto(
             id=p["id"], nombre=p["nombre"], categoria=p["categoria"],
             orden=p["orden"], activo=p["activo"], pausado=p["pausado"],
-            es_plato_del_dia=p["es_plato_del_dia"], fecha_dia=p["fecha_dia"],
         ))
     db.flush()
 

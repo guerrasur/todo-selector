@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -63,16 +63,12 @@ class AliasIn(BaseModel):
 
 @app.get("/api/productos")
 def listar_productos(db: Session = Depends(get_db)):
-    hoy = date.today().isoformat()
     productos = (
         db.query(Producto)
         .filter(Producto.activo == True)  # noqa: E712
         .order_by(Producto.orden)
         .all()
     )
-    # Los platos del dia solo se muestran si son de hoy
-    productos = [p for p in productos
-                 if not p.es_plato_del_dia or p.fecha_dia == hoy]
 
     salida = []
     for p in productos:
@@ -156,78 +152,6 @@ async def sincronizar_estado(plataforma: str = None):
     algo desde el portal y querés que la pantalla se entere.
     """
     return {"resultado": await worker.sincronizar_estados(plataforma)}
-
-
-class PlatoDiaIn(BaseModel):
-    nombres: list[str]               # nombres canonicos de los platos de hoy
-    alias_rappi: dict[str, str] = {} # nombre -> como se llama en Rappi
-
-
-@app.get("/api/platos-del-dia")
-def obtener_platos_dia(db: Session = Depends(get_db)):
-    """Devuelve los platos cargados para hoy, y si ya se preguntó."""
-    hoy = date.today().isoformat()
-    platos = (db.query(Producto)
-              .filter(Producto.es_plato_del_dia == True,  # noqa: E712
-                      Producto.fecha_dia == hoy)
-              .all())
-    marca = db.query(Preferencia).get(Preferencia.PLATOS_RESPONDIDO)
-    return {
-        "fecha": hoy,
-        "ya_cargados": len(platos) > 0,
-        # "Hoy no hay" es una respuesta valida: sin esta marca la app
-        # volvia a preguntar en cada recarga.
-        "ya_respondido": bool(marca and marca.valor == hoy),
-        "platos": [p.nombre for p in platos],
-    }
-
-
-@app.post("/api/platos-del-dia")
-def guardar_platos_dia(data: PlatoDiaIn, db: Session = Depends(get_db)):
-    """Carga los platos de hoy. Los de dias anteriores se desactivan."""
-    hoy = date.today().isoformat()
-
-    # Bajamos los platos del dia viejos
-    (db.query(Producto)
-     .filter(Producto.es_plato_del_dia == True,  # noqa: E712
-             Producto.fecha_dia != hoy)
-     .update({"activo": False}, synchronize_session=False))
-
-    for nombre in data.nombres:
-        nombre = nombre.strip()
-        if not nombre:
-            continue
-
-        p = db.query(Producto).filter_by(nombre=nombre).first()
-        if p is None:
-            p = Producto(nombre=nombre, categoria="Plato del día", orden=900)
-            db.add(p)
-            db.flush()
-            for plat in ("pedidosya", "rappi"):
-                db.add(EstadoItem(producto_id=p.id, plataforma=plat,
-                                  estado=EstadoItem.DESCONOCIDO))
-
-        p.es_plato_del_dia = True
-        p.fecha_dia = hoy
-        p.activo = True
-
-        alias_r = data.alias_rappi.get(nombre)
-        if alias_r:
-            al = (db.query(AliasPlataforma)
-                  .filter_by(producto_id=p.id, plataforma="rappi").first())
-            if al is None:
-                al = AliasPlataforma(producto_id=p.id, plataforma="rappi")
-                db.add(al)
-            al.nombre_remoto = alias_r
-
-    marca = db.query(Preferencia).get(Preferencia.PLATOS_RESPONDIDO)
-    if marca is None:
-        marca = Preferencia(clave=Preferencia.PLATOS_RESPONDIDO)
-        db.add(marca)
-    marca.valor = hoy
-
-    db.commit()
-    return {"ok": True, "fecha": hoy}
 
 
 @app.post("/api/revalidar-sesion")
