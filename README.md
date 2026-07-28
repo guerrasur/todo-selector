@@ -140,6 +140,26 @@ ve revivido algo que ella apagó. Si se apropiara de todo lo que el local apagó
 por su cuenta, bastaría una lectura mala para volver a apagarlo sin que nadie
 se lo pidiera.
 
+## Cuando agregás un producto a la carta de un portal
+
+Si un producto del catálogo figuraba como "no existe en PedidosYa" y el portal
+ahora lo muestra, la app lo detecta en la lectura del estado y avisa arriba:
+
+> **Suprema a la Crema de Limon con Pure** ahora también está en PedidosYa como
+> **Suprema a la Crema de Limón con Puré** — [Es el mismo] [No, es otro]
+
+"Es el mismo" lo engancha con el nombre exacto del portal (las tildes salen de
+ahí, que es lo que necesita `exact=True`). "No, es otro" no vuelve a avisar.
+
+El aviso es **conservador a propósito**: solo aparece cuando el nombre es el
+mismo salvo tildes o mayúsculas, y solo para productos que ya están en el
+catálogo. Con un umbral más flojo propondría vincular "Wrap caesar con
+batatas" con "Wrap caesar con ensalada", que son platos distintos. Lo dudoso
+se decide en la pantalla Carta, con todo a la vista.
+
+Un producto **completamente nuevo** (que no está en el catálogo en ninguna
+plataforma) no genera aviso: aparece en la pantalla Carta, en "solo en…".
+
 ## La pantalla Carta
 
 El botón **Carta** (arriba a la derecha) lee lo que muestran los dos portales

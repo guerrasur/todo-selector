@@ -362,6 +362,14 @@ def vincular(data: VincularIn, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(400, str(e))
     db.commit()
+
+    # Si esto venía de un aviso, ya está resuelto: que no siga apareciendo.
+    for plataforma, lista in worker.novedades.items():
+        worker.novedades[plataforma] = [
+            n for n in lista
+            if n["nombre_en_el_portal"] not in (data.pedidosya, data.rappi)
+        ]
+
     return {"ok": True, "producto": _ver_producto(producto)}
 
 
@@ -386,6 +394,39 @@ def agregar(data: AgregarIn, db: Session = Depends(get_db)):
         raise HTTPException(400, str(e))
     db.commit()
     return {"ok": True, "producto": _ver_producto(producto)}
+
+
+class IgnorarIn(BaseModel):
+    plataforma: str
+    nombre_remoto: str
+
+
+@app.get("/api/novedades")
+def novedades():
+    """Productos del catálogo que aparecieron en un portal donde no estaban.
+
+    Sale de la lectura del estado real: si algo figuraba como "no existe en
+    PedidosYa" y el portal ahora lo muestra, es que lo agregaste a la carta.
+    """
+    salida = []
+    for lista in worker.novedades.values():
+        salida.extend(lista)
+    return {"novedades": salida}
+
+
+@app.post("/api/novedades/ignorar")
+def ignorar_novedad(data: IgnorarIn, db: Session = Depends(get_db)):
+    """No avisar más de este nombre."""
+    catalogo.ignorar_novedad(db, data.plataforma, data.nombre_remoto)
+    db.commit()
+
+    for plataforma, lista in worker.novedades.items():
+        worker.novedades[plataforma] = [
+            n for n in lista
+            if not (n["plataforma"] == data.plataforma
+                    and n["nombre_en_el_portal"] == data.nombre_remoto)
+        ]
+    return {"ok": True}
 
 
 @app.get("/api/catalogo")
