@@ -73,6 +73,14 @@
   button.on { border-color: #14532d; color: #86efac; }
   button.off { border-color: #431407; color: #fdba74; }
   .vacio { color: var(--tenue); padding: 40px; text-align: center; }
+  /* Los pausados no se esconden, se corren del camino. */
+  .item.pausado { opacity: .5; }
+  .item.pausado:hover { opacity: .85; }
+  button.pausa {
+    background: transparent; border-color: transparent; color: var(--tenue);
+    font-size: 12px; padding: 7px 8px;
+  }
+  button.pausa:hover { background: var(--panel-2); color: var(--texto); }
   /* Fila propia abajo del producto: .item es un grid de 3 columnas. */
   .detalle-fallo {
     grid-column: 1 / -1;
@@ -117,7 +125,7 @@
   <span class="badge" id="pendientes"></span>
   <span class="badge" id="lectura"></span>
   <button id="btn-leer-estado" style="margin-left:auto">Leer estado real</button>
-  <button id="btn-carta">Carta</button>
+  <button id="btn-carta">Actualizar carta</button>
   <button id="btn-revalidar">Revalidar sesión</button>
 </header>
 
@@ -240,8 +248,13 @@ function pintarProductos(productos) {
   cont.className = '';
   cont.innerHTML = '';
 
+  // Los pausados van al final y apagados de color: siguen en la carta del
+  // portal pero este mes no se venden, y no tienen que estorbar arriba.
+  const enUso = productos.filter(p => !p.pausado);
+  const pausados = productos.filter(p => p.pausado);
+
   const porCategoria = {};
-  for (const p of productos) {
+  for (const p of enUso) {
     (porCategoria[p.categoria] ||= []).push(p);
   }
 
@@ -254,6 +267,21 @@ function pintarProductos(productos) {
     for (const item of items) {
       cont.appendChild(fila(item));
     }
+  }
+
+  if (!pausados.length) return;
+
+  const h = document.createElement('div');
+  h.className = 'categoria';
+  h.innerHTML = `En pausa — ${pausados.length} ` +
+    `<span style="text-transform:none;letter-spacing:0">` +
+    `(siguen en la carta, pero la app no los sostiene)</span>`;
+  cont.appendChild(h);
+
+  for (const item of pausados) {
+    const f = fila(item);
+    f.classList.add('pausado');
+    cont.appendChild(f);
   }
 }
 
@@ -322,6 +350,25 @@ function fila(item) {
 
   const acc = document.createElement('div');
   acc.className = 'acciones';
+
+  // Discreto a proposito: se usa una vez cada tanto, no tiene que competir
+  // con los botones de todos los dias.
+  const bPausa = document.createElement('button');
+  bPausa.className = 'pausa';
+  bPausa.textContent = item.pausado ? 'Reactivar' : 'Pausar';
+  bPausa.title = item.pausado
+    ? 'Volver a la lista de siempre'
+    : 'Este mes no se vende: mandarlo al final y que la app no lo sostenga';
+  bPausa.onclick = async () => {
+    bPausa.disabled = true;
+    await fetch('/api/pausar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ producto_id: item.id, pausado: !item.pausado }),
+    });
+    cargar();
+  };
+  acc.appendChild(bPausa);
 
   const bHoy = document.createElement('button');
   bHoy.className = 'off';
@@ -452,8 +499,14 @@ async function abrirCarta() {
   const panel = panelCarta();
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
-  if (!carta) pintarCarta();
-  else await refrescarCarta();
+
+  // Al abrir se muestra la última lectura guardada en el server: recargar el
+  // navegador no tiene por qué costar otro minuto de leer los portales.
+  if (!carta) {
+    const guardada = await fetch('/api/carta?releer=false').then(r => r.json());
+    if (!guardada.sin_lectura) carta = guardada;
+  }
+  await refrescarCarta();
 }
 
 async function refrescarCarta() {
@@ -467,7 +520,7 @@ async function leerCarta() {
     <div class="ayuda cargando">Leyendo los dos portales… tarda como un minuto:
     recorre todas las categorías de PedidosYa y la lista de Rappi.</div>`;
   try {
-    carta = await fetch('/api/carta').then(r => r.json());
+    carta = await fetch('/api/carta?releer=true').then(r => r.json());
   } catch (e) {
     panel.innerHTML = `<h2>Carta</h2><div class="ayuda">No pude leer: ${e}</div>`;
     return;
@@ -495,6 +548,7 @@ function pintarCarta() {
 
   if (!carta) return;
   const cuerpo = document.getElementById('carta-cuerpo');
+  cuerpo.appendChild(vinculadorManual());
 
   if (carta.error || carta.errores) {
     const aviso = document.createElement('div');
@@ -526,11 +580,86 @@ function pintarCarta() {
     pie.className = 'ayuda';
     pie.style.marginTop = '16px';
     pie.textContent = `Leídos: ${carta.leidos.pedidosya || 0} en PedidosYa, ` +
-                      `${carta.leidos.rappi || 0} en Rappi.` +
+                      `${carta.leidos.rappi || 0} en Rappi` +
+                      (carta.leida_en ? `, el ${carta.leida_en.replace('T', ' a las ')}.` : '.') +
                       (catalogo && catalogo.manual
                         ? ' El catálogo lo manejás vos desde acá.' : '');
     cuerpo.appendChild(pie);
   }
+}
+
+// Vincular dos cualesquiera, sin esperar a que la app los proponga. Es para
+// los casos que ninguna heurística va a sacar: nombres que no se parecen en
+// nada, o dos que la app emparejó con otra cosa.
+function todosLosNombres(plataforma) {
+  const nombres = new Set();
+  const clave = plataforma === 'rappi' ? 'rappi' : 'pedidosya';
+  for (const grupo of ['pares', 'a_confirmar']) {
+    for (const par of (carta[grupo] || [])) {
+      if (par[clave]) nombres.add(par[clave]);
+    }
+  }
+  for (const n of (carta['solo_' + clave] || [])) nombres.add(n);
+  return [...nombres].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+function vinculadorManual() {
+  const div = document.createElement('div');
+  div.className = 'grupo';
+  div.innerHTML = `
+    <h3>Vincular a mano</h3>
+    <div class="ayuda">
+      Si sabés que dos son el mismo plato y la app no lo propuso, elegilos acá.
+      Si alguno ya estaba vinculado con otro, ese otro no se pierde: queda
+      como producto suelto.
+    </div>`;
+
+  // 'manual' la distingue de las filas de la carta: esta contiene TODOS los
+  // nombres adentro de los <select>, asi que buscar una fila por su texto la
+  // encontraria siempre a ella.
+  const fila = document.createElement('div');
+  fila.className = 'par manual';
+
+  const armar = (plataforma) => {
+    const lado = document.createElement('div');
+    lado.className = 'lado';
+    const quien = document.createElement('div');
+    quien.className = 'quien';
+    quien.textContent = NOMBRE_PLAT[plataforma];
+    const sel = document.createElement('select');
+    sel.dataset.plat = plataforma;
+    sel.style.cssText = 'width:100%;padding:6px 8px;border-radius:6px;' +
+      'border:1px solid var(--borde);background:var(--bg);color:var(--texto);' +
+      'font:inherit;font-size:13px';
+    sel.innerHTML = '<option value="">— elegir —</option>' +
+      todosLosNombres(plataforma)
+        .map(n => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`)
+        .join('');
+    lado.append(quien, sel);
+    return { lado, sel };
+  };
+
+  const py = armar('pedidosya');
+  const rappi = armar('rappi');
+
+  const acc = document.createElement('div');
+  acc.className = 'acciones';
+  const boton = document.createElement('button');
+  boton.className = 'on';
+  boton.textContent = 'Vincular';
+  boton.onclick = () => {
+    if (!py.sel.value || !rappi.sel.value) {
+      alert('Elegí uno de cada portal.');
+      return;
+    }
+    accionCarta('/api/vincular',
+                { pedidosya: py.sel.value, rappi: rappi.sel.value }, boton);
+  };
+  acc.appendChild(boton);
+
+  fila.append(py.lado, rappi.lado, acc);
+  div.appendChild(fila);
+  return div;
 }
 
 function grupo(titulo, filas) {
