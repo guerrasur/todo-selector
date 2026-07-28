@@ -44,6 +44,8 @@
     align-items: center;
   }
   .nombre { font-weight: 500; }
+  .nombre.editable { cursor: text; }
+  .nombre.editable:hover { text-decoration: underline dotted var(--tenue); }
   .plats { display: flex; gap: 8px; }
   .pill {
     font-size: 11px; padding: 4px 10px; border-radius: 6px;
@@ -290,9 +292,27 @@ function fila(item) {
   const div = document.createElement('div');
   div.className = 'item';
 
+  // El nombre es solo para vos: los portales se buscan por los alias. Al
+  // separar dos que se llamaban igual queda uno con un sufijo feo, así que
+  // tiene que poder arreglarse sin tocar código.
   const nombre = document.createElement('div');
-  nombre.className = 'nombre';
+  nombre.className = 'nombre editable';
   nombre.textContent = item.nombre;
+  nombre.title = 'Click para cambiarle el nombre (solo cambia cómo lo ves acá)';
+  nombre.onclick = async () => {
+    const nuevo = prompt('¿Cómo querés que se llame?', item.nombre);
+    if (nuevo === null || nuevo.trim() === '' || nuevo === item.nombre) return;
+    const r = await fetch('/api/renombrar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ producto_id: item.id, nombre: nuevo.trim() }),
+    });
+    if (!r.ok) {
+      const detalle = await r.json().catch(() => ({}));
+      alert('No se pudo: ' + (detalle.detail || r.status));
+    }
+    cargar();
+  };
   div.appendChild(nombre);
 
   // Cada plataforma es un chip clickeable: define sobre cuales actuar
@@ -544,8 +564,14 @@ function pintarCarta() {
       Lo que no es claramente el mismo plato queda separado, con un botón cada uno.
     </div>
     <button id="btn-leer-carta">${carta ? 'Volver a leer los portales' : 'Leer los portales'}</button>
+    <button id="btn-deshacer"${catalogo && catalogo.deshacer ? '' : ' disabled'}>
+      ${catalogo && catalogo.deshacer
+        ? 'Deshacer: ' + catalogo.deshacer : 'Nada para deshacer'}
+    </button>
     <div id="carta-cuerpo"></div>`;
   document.getElementById('btn-leer-carta').onclick = leerCarta;
+  document.getElementById('btn-deshacer').onclick = (e) =>
+    accionCarta('/api/deshacer', {}, e.target);
 
   if (!carta) return;
   const cuerpo = document.getElementById('carta-cuerpo');
@@ -604,6 +630,15 @@ function todosLosNombres(plataforma) {
   return [...nombres].sort((a, b) => a.localeCompare(b, 'es'));
 }
 
+// Con qué está vinculado hoy ese nombre, si con algo. Vincularlo con otra
+// cosa rompe ese vínculo, y eso tiene que verse ANTES de apretar el botón.
+function vinculoActual(plataforma, remoto) {
+  const producto = productoDe(plataforma, remoto);
+  if (!producto) return null;
+  const otra = plataforma === 'rappi' ? 'pedidosya' : 'rappi';
+  return producto.plataformas[otra];
+}
+
 function vinculadorManual() {
   const div = document.createElement('div');
   div.className = 'grupo';
@@ -633,10 +668,13 @@ function vinculadorManual() {
       'border:1px solid var(--borde);background:var(--bg);color:var(--texto);' +
       'font:inherit;font-size:13px';
     sel.innerHTML = '<option value="">— elegir —</option>' +
-      todosLosNombres(plataforma)
-        .map(n => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`)
-        .join('');
+      todosLosNombres(plataforma).map(n => {
+        const con = vinculoActual(plataforma, n);
+        const etiqueta = con ? `${n}   → hoy va con «${con}»` : n;
+        return `<option value="${n.replace(/"/g, '&quot;')}">${etiqueta}</option>`;
+      }).join('');
     lado.append(quien, sel);
+    sel.onchange = avisarDeLoQueRompe;
     return { lado, sel };
   };
 
@@ -658,7 +696,27 @@ function vinculadorManual() {
   };
   acc.appendChild(boton);
 
-  fila.append(py.lado, rappi.lado, acc);
+  const aviso = document.createElement('div');
+  aviso.className = 'ayuda';
+  aviso.id = 'aviso-vinculo';
+  aviso.style.cssText = 'grid-column:1/-1;margin:0;color:var(--curso)';
+
+  function avisarDeLoQueRompe() {
+    const sueltos = [];
+    for (const [plat, sel] of [['pedidosya', py.sel], ['rappi', rappi.sel]]) {
+      if (!sel.value) continue;
+      const con = vinculoActual(plat, sel.value);
+      const otra = plat === 'rappi' ? 'pedidosya' : 'rappi';
+      const elegido = otra === 'rappi' ? rappi.sel.value : py.sel.value;
+      if (con && con !== elegido) sueltos.push(`«${con}»`);
+    }
+    aviso.textContent = sueltos.length
+      ? 'Ojo: al vincular estos dos, ' + sueltos.join(' y ') +
+        ' se queda solo, con su propio botón. Si no lo usás, pausalo.'
+      : '';
+  }
+
+  fila.append(py.lado, rappi.lado, acc, aviso);
   div.appendChild(fila);
   return div;
 }
