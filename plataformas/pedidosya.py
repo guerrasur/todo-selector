@@ -314,6 +314,56 @@ class PedidosYa(PlataformaBase):
                     nombres.append(nombre)
         return nombres
 
+    async def leer_todos(self) -> dict:
+        """{nombre: disponible} de toda la carta, recorriendo las categorias.
+
+        Producto por producto seria una busqueda por nombre y un cambio de
+        categoria por cada uno. Aca cada categoria se abre UNA vez y se leen
+        de corrido las filas que tiene a la vista, que es de donde salen el
+        nombre y el aria-checked juntos.
+
+        De paso deja aprendido en que categoria vive cada producto, asi la
+        primera operacion del dia no tiene que salir a buscarlo.
+        """
+        await self.ir_al_menu()
+        total = await self.page.locator(self.SELECTOR_CATEGORIAS).count()
+        if total == 0:
+            log.warning("No encuentro la lista de categorias (%s)",
+                        self.SELECTOR_CATEGORIAS)
+            return {}
+
+        salida = {}
+        for indice in range(total):
+            await self._abrir_categoria(indice)
+
+            filas = self.page.locator("label.mat-slide-toggle-label")
+            for i in range(await filas.count()):
+                fila = filas.nth(i)
+                try:
+                    nombre = " ".join((await fila.inner_text()).split())
+                except Exception:
+                    continue
+                if not nombre or nombre in salida:
+                    continue
+
+                toggle = fila.locator(
+                    'input[type="checkbox"], [role="switch"], button[aria-checked]'
+                ).first
+                if await toggle.count() == 0:
+                    continue
+                aria = await toggle.get_attribute("aria-checked")
+                if aria is None:
+                    try:
+                        salida[nombre] = await toggle.is_checked()
+                    except Exception:
+                        continue
+                else:
+                    salida[nombre] = (aria == "true")
+
+                self._categoria_de[nombre] = indice
+
+        return salida
+
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         await self.ir_al_menu()
         datos = await self._html_de(self._fila(nombre_remoto))
