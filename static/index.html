@@ -57,7 +57,8 @@
   .pill.na:hover { border-color: var(--borde); }
   .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .p-prendido { background: var(--on); }
-  .p-apagado_hoy, .p-apagado_indefinido { background: var(--off); }
+  .p-apagado_hoy, .p-apagado_indefinido, .p-apagado_ajeno { background: var(--off); }
+  .p-apagado_ajeno { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--off); }
   .p-apagando, .p-prendiendo { background: var(--curso); animation: late 1s infinite; }
   .p-fallo { background: var(--error); }
   .p-desconocido { background: #444; }
@@ -114,7 +115,9 @@
   <h1>Todo-Selector</h1>
   <span class="badge" id="estado-sistema">cargando…</span>
   <span class="badge" id="pendientes"></span>
-  <button id="btn-carta" style="margin-left:auto">Carta</button>
+  <span class="badge" id="lectura"></span>
+  <button id="btn-leer-estado" style="margin-left:auto">Leer estado real</button>
+  <button id="btn-carta">Carta</button>
   <button id="btn-revalidar">Revalidar sesión</button>
 </header>
 
@@ -157,6 +160,24 @@ function pintarSistema(s) {
   const p = document.getElementById('pendientes');
   p.textContent = s.operaciones_pendientes
     ? `${s.operaciones_pendientes} en cola` : '';
+
+  // Cuando arranca, la lectura del estado real tarda un rato. Sin esto la
+  // pantalla muestra todo en "sin leer" y parece que no funciona.
+  const l = document.getElementById('lectura');
+  if (s.simulado) {
+    l.textContent = '';
+  } else if (s.ultima_lectura) {
+    l.textContent = 'estado leído ' + hora(s.ultima_lectura);
+    l.className = 'badge';
+  } else {
+    l.textContent = 'leyendo el estado real…';
+    l.className = 'badge alerta';
+  }
+}
+
+function hora(iso) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
 
 function pintarProductos(productos) {
@@ -275,8 +296,11 @@ function etiqueta(e) {
     prendiendo: 'prendiendo…',
     apagado_hoy: 'apagado hoy',
     apagado_indefinido: 'apagado',
+    // Apagado en el portal, no por la app. Se distingue porque la app no
+    // lo sostiene: si el portal lo revive, no lo vuelve a apagar sola.
+    apagado_ajeno: 'apagado (afuera)',
     fallo: 'FALLÓ',
-    desconocido: '—',
+    desconocido: 'sin leer',
   }[e] || e;
 }
 
@@ -594,6 +618,24 @@ async function accionCarta(url, cuerpo, boton) {
 }
 
 document.getElementById('btn-carta').onclick = abrirCarta;
+
+document.getElementById('btn-leer-estado').onclick = async (e) => {
+  const b = e.target;
+  b.disabled = true;
+  b.textContent = 'Leyendo…';
+  try {
+    const r = await fetch('/api/sincronizar-estado', { method: 'POST' })
+                    .then(r => r.json());
+    const errores = Object.entries(r.resultado || {})
+      .filter(([, v]) => v && v.error)
+      .map(([plat, v]) => `${NOMBRE_PLAT[plat] || plat}: ${v.error}`);
+    if (errores.length) alert('No pude leer todo:\n' + errores.join('\n'));
+    await cargar();
+  } finally {
+    b.disabled = false;
+    b.textContent = 'Leer estado real';
+  }
+};
 
 document.getElementById('btn-revalidar').onclick = async (e) => {
   const b = e.target;

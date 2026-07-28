@@ -142,7 +142,19 @@ def estado_sistema(db: Session = Depends(get_db)):
         "operaciones_pendientes": pendientes,
         "ultimo_chequeo": (worker.ultimo_chequeo.isoformat()
                            if worker.ultimo_chequeo else None),
+        "ultima_lectura": (worker.ultima_lectura.isoformat(timespec="seconds")
+                           if worker.ultima_lectura else None),
     }
+
+
+@app.post("/api/sincronizar-estado")
+async def sincronizar_estado(plataforma: str = None):
+    """Lee los portales y guarda cómo está cada producto ahora mismo.
+
+    Se corre solo al arrancar. El botón sirve para cuando alguien apagó
+    algo desde el portal y querés que la pantalla se entere.
+    """
+    return {"resultado": await worker.sincronizar_estados(plataforma)}
 
 
 class PlatoDiaIn(BaseModel):
