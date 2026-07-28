@@ -216,6 +216,28 @@ busca **por el nombre de los dos portales**, no solo por el que ves: buscando
 
 La cruz (o la tecla `Esc`) borra la búsqueda y vuelve la lista completa.
 
+## Vista: juntar arriba lo que está prendido
+
+Con la carta entera en pantalla, lo prendido queda desparramado entre las
+categorías y hay que ir a buscarlo. Abajo del buscador hay tres vistas:
+
+- **Por categoría** — la de siempre.
+- **Prendidos primero** — ordena por estado en vez de por categoría: los
+  prendidos arriba, los apagados abajo. **No esconde nada.**
+- **Solo los prendidos** — deja únicamente lo que está prendido.
+
+Al lado dice cuántos hay prendidos en total. La vista elegida queda guardada
+en el navegador: si preferís entrar siempre a "solo los prendidos", entrás
+siempre a eso.
+
+En las dos vistas por estado aparece un grupo del medio, **Sin confirmar**,
+con lo que la app no puede asegurar que esté apagado: lo que la última lectura
+no encontró en el portal, lo que falló, lo que todavía no se leyó y lo que
+está en curso. Ese grupo **no se esconde ni siquiera en "solo los prendidos"**,
+porque es justo el que puede estar vendiéndose — es el caso del 2026-07-28.
+Y cuando la vista esconde apagados, dice cuántos: esconder cosas sin decir
+cuántas es como se llega a creer que la carta está más prendida de lo que está.
+
 ## Qué está prendido: se lee del portal
 
 Al arrancar, la app lee los dos portales y guarda cómo está cada producto.

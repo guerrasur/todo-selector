@@ -114,6 +114,27 @@
   #panel-busqueda.buscando #btn-limpiar { display: block; }
   #resultado-busqueda { color: var(--tenue); font-size: 13px; white-space: nowrap; }
 
+  /* ---- Vista: filtrar o priorizar lo que está prendido ---- */
+  #panel-vista {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: -8px 0 16px;
+  }
+  #panel-vista .rotulo { color: var(--tenue); font-size: 13px; }
+  .chip-vista {
+    font-size: 13px; padding: 6px 12px; border-radius: 7px;
+    color: var(--tenue); background: var(--panel);
+  }
+  .chip-vista:hover { background: var(--panel-2); color: var(--texto); }
+  .chip-vista.sel {
+    background: var(--panel-2); color: var(--texto); border-color: #14532d;
+  }
+  #cuenta-prendidos { color: var(--tenue); font-size: 13px; }
+  /* El grupo del medio de la vista por estado: lo que la app NO puede
+     afirmar que esté apagado. Va del color de las alertas, no del de los
+     títulos, porque es lo que hay que mirar. */
+  .categoria.incierta { color: #fca5a5; }
+  .categoria .suelto { text-transform: none; letter-spacing: 0; }
+
   .aviso {
     background: var(--panel); border: 1px solid #4a4020;
     border-left: 3px solid var(--curso);
@@ -215,6 +236,16 @@
            placeholder="Buscar un producto…  (por el nombre de cualquiera de los dos portales)">
     <button id="btn-limpiar" title="Borrar la búsqueda (Esc)">✕</button>
     <span id="resultado-busqueda"></span>
+  </div>
+  <div id="panel-vista">
+    <span class="rotulo">Vista:</span>
+    <button class="chip-vista" data-vista="todos"
+            title="Por categoría, como siempre">Por categoría</button>
+    <button class="chip-vista" data-vista="primero"
+            title="Lo prendido arriba, lo apagado abajo. No esconde nada">Prendidos primero</button>
+    <button class="chip-vista" data-vista="solo"
+            title="Esconde lo que está apagado y confirmado">Solo los prendidos</button>
+    <span id="cuenta-prendidos"></span>
   </div>
   <div id="pista-chips" class="pista">
     Clickeá el chip <b>PedidosYa</b> o <b>Rappi</b> de un producto para sacarlo
@@ -466,6 +497,67 @@ function aplicarFiltro(texto) {
   cargar();
 }
 
+// ------------------------------------------------------------------ Vista
+//
+// Con la carta entera en pantalla, lo que está prendido queda desparramado
+// entre categorías y hay que ir a buscarlo. Estas dos vistas lo juntan
+// arriba: una lo ordena sin esconder nada, la otra deja SOLO eso.
+//
+// Igual que el buscador y los chips de plataforma, la elección vive acá
+// afuera: la lista se repinta sola cada pocos segundos y una variable local
+// se borraría sin que se note (ver el comentario largo en fila()). Además
+// queda guardada, porque es cómo querés mirar la carta y no algo que se
+// elige de nuevo cada vez que abrís la app.
+
+const VISTAS = ['todos', 'primero', 'solo'];
+let vista = 'todos';
+try {
+  const guardada = localStorage.getItem('vista');
+  if (VISTAS.includes(guardada)) vista = guardada;
+} catch (e) { /* sin localStorage se arranca por categoría, y listo */ }
+
+function elegirVista(cual) {
+  vista = VISTAS.includes(cual) ? cual : 'todos';
+  try { localStorage.setItem('vista', vista); } catch (e) { /* da igual */ }
+  for (const chip of document.querySelectorAll('.chip-vista')) {
+    chip.classList.toggle('sel', chip.dataset.vista === vista);
+  }
+  cargar();
+}
+
+// En qué grupo cae un producto, mirando sus dos portales.
+//
+// El del medio existe por la regla de no afirmar lo que no se está viendo:
+// un apagado que la app NO puede confirmar no se puede contar como apagado
+// y esconderlo de la vista de prendidos, porque es justo el que puede estar
+// vendiéndose (el pedido del 2026-07-28). Lo mismo lo que falló, lo que
+// todavía no se leyó, y lo que está en curso.
+function grupoDe(item) {
+  let incierto = false;
+  for (const plat of PLATS) {
+    const est = item.estados[plat];
+    if (!est) continue;
+    if (est.estado === 'prendido') return 'prendido';
+    if (est.estado !== 'apagado_hoy' && est.estado !== 'apagado_indefinido' &&
+        est.estado !== 'apagado_ajeno') incierto = true;
+    else if (dudosos.has(item.id + '|' + plat)) incierto = true;
+  }
+  return incierto ? 'incierto' : 'apagado';
+}
+
+function titulo(texto, clase, aclaracion) {
+  const h = document.createElement('div');
+  h.className = 'categoria' + (clase ? ' ' + clase : '');
+  h.textContent = texto;
+  if (aclaracion) {
+    const s = document.createElement('span');
+    s.className = 'suelto';
+    s.textContent = ' ' + aclaracion;
+    h.appendChild(s);
+  }
+  return h;
+}
+
 function pintarProductos(productos) {
   const cont = document.getElementById('lista');
   cont.className = '';
@@ -477,6 +569,13 @@ function pintarProductos(productos) {
   document.getElementById('resultado-busqueda').textContent =
     filtro ? `${productos.length} de ${total}` : '';
 
+  // Cuántos hay prendidos, sobre la carta entera: es un número de cabecera
+  // y no tiene que bailar con lo que estés buscando.
+  const prendidos = productos.filter(
+    p => !p.pausado && grupoDe(p) === 'prendido').length;
+  document.getElementById('cuenta-prendidos').textContent =
+    `${prendidos} prendido${prendidos === 1 ? '' : 's'}`;
+
   if (filtro && !productos.length) {
     cont.className = 'vacio';
     cont.textContent = 'No hay ningún producto que coincida.';
@@ -486,41 +585,85 @@ function pintarProductos(productos) {
   // Los pausados van al final y apagados de color: siguen en la carta del
   // portal pero este mes no se venden, y no tienen que estorbar arriba.
   const enUso = productos.filter(p => !p.pausado);
-  const pausados = productos.filter(p => p.pausado);
+  let pausados = productos.filter(p => p.pausado);
 
-  // Los que se agregan desde la pantalla Carta vienen sin categoría, y el
-  // título quedaba en blanco: una franja vacía arriba de un grupo de
-  // productos, que parecía un error de la pantalla.
-  const porCategoria = {};
-  for (const p of enUso) {
-    (porCategoria[p.categoria || 'Sin categoría'] ||= []).push(p);
-  }
+  const pintados = vista === 'todos'
+    ? porCategoria(cont, enUso)
+    : porEstado(cont, enUso);
 
-  for (const [cat, items] of Object.entries(porCategoria)) {
-    const h = document.createElement('div');
-    h.className = 'categoria';
-    h.textContent = cat;
-    cont.appendChild(h);
+  // En "solo los prendidos" tampoco tiene sentido listar los pausados que
+  // están apagados: la vista es lo que está vendiéndose.
+  if (vista === 'solo') pausados = pausados.filter(p => grupoDe(p) !== 'apagado');
 
-    for (const item of items) {
-      cont.appendChild(fila(item));
-    }
+  if (!pintados && !pausados.length) {
+    cont.className = 'vacio';
+    cont.textContent = filtro
+      ? 'Ninguno de los que coinciden está prendido.'
+      : 'No hay nada prendido: está toda la carta apagada.';
+    return;
   }
 
   if (!pausados.length) return;
 
-  const h = document.createElement('div');
-  h.className = 'categoria';
-  h.innerHTML = `En pausa — ${pausados.length} ` +
-    `<span style="text-transform:none;letter-spacing:0">` +
-    `(siguen en la carta, pero la app no los sostiene)</span>`;
-  cont.appendChild(h);
+  cont.appendChild(titulo(
+    `En pausa — ${pausados.length}`, '',
+    '(siguen en la carta, pero la app no los sostiene)'));
 
   for (const item of pausados) {
     const f = fila(item);
     f.classList.add('pausado');
     cont.appendChild(f);
   }
+}
+
+// La de siempre. Los que se agregan desde la pantalla Carta vienen sin
+// categoría, y el título quedaba en blanco: una franja vacía arriba de un
+// grupo de productos, que parecía un error de la pantalla.
+function porCategoria(cont, items) {
+  const grupos = {};
+  for (const p of items) (grupos[p.categoria || 'Sin categoría'] ||= []).push(p);
+
+  for (const [cat, delGrupo] of Object.entries(grupos)) {
+    cont.appendChild(titulo(cat));
+    for (const item of delGrupo) cont.appendChild(fila(item));
+  }
+  return items.length;
+}
+
+// Prendidos arriba. La categoría se deja de lado a propósito: acá lo que
+// agrupa es el estado, y dos títulos encimados no se leen.
+function porEstado(cont, items) {
+  const grupos = { prendido: [], incierto: [], apagado: [] };
+  for (const p of items) grupos[grupoDe(p)].push(p);
+
+  const secciones = [
+    ['prendido', 'Prendidos', '', ''],
+    ['incierto', 'Sin confirmar', 'incierta',
+     '(no puedo asegurar que estén apagados)'],
+  ];
+  if (vista !== 'solo') secciones.push(['apagado', 'Apagados', '', '']);
+
+  let pintados = 0;
+  for (const [clave, texto, clase, aclaracion] of secciones) {
+    const delGrupo = grupos[clave];
+    if (!delGrupo.length) continue;
+    cont.appendChild(titulo(`${texto} — ${delGrupo.length}`, clase, aclaracion));
+    for (const item of delGrupo) cont.appendChild(fila(item));
+    pintados += delGrupo.length;
+  }
+
+  // Esconder cosas sin decir cuántas es cómo se llega a creer que la carta
+  // está más prendida de lo que está.
+  if (vista === 'solo' && grupos.apagado.length && pintados) {
+    const pie = document.createElement('div');
+    pie.className = 'pista';
+    pie.style.margin = '16px 0 0';
+    pie.textContent = `${grupos.apagado.length} apagado` +
+      (grupos.apagado.length === 1 ? '' : 's') +
+      ' no se muestran en esta vista.';
+    cont.appendChild(pie);
+  }
+  return pintados;
 }
 
 function fila(item) {
@@ -1447,6 +1590,11 @@ function limpiarBusqueda() {
 }
 
 document.getElementById('btn-limpiar').onclick = limpiarBusqueda;
+
+for (const chip of document.querySelectorAll('.chip-vista')) {
+  chip.onclick = () => elegirVista(chip.dataset.vista);
+  chip.classList.toggle('sel', chip.dataset.vista === vista);
+}
 
 document.getElementById('btn-carta').onclick = abrirCarta;
 document.getElementById('btn-cierre').onclick = abrirCierre;
