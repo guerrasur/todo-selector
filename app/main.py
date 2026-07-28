@@ -20,6 +20,56 @@ from .worker import worker
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+
+# La pantalla se repinta sola cada 3 segundos y en cada vuelta pide cuatro
+# endpoints. Uvicorn loguea una linea por request, asi que son ~80 lineas por
+# minuto de "GET /api/productos 200 OK" que tapan lo unico que vale la pena
+# mirar en esa ventana: que hizo el worker y que fallo. El usuario termino
+# cerrando la app porque el log se hacia inmanejable (2026-07-28).
+ENDPOINTS_DE_REFRESCO = {
+    "/api/productos",
+    "/api/estado-sistema",
+    "/api/novedades",
+    "/api/alertas",
+}
+
+
+class SinRuidoDeRefresco(logging.Filter):
+    """Saca del log los GET del repintado que salieron bien.
+
+    Solo esos: un POST (una accion que pediste), un 4xx o un 5xx se siguen
+    viendo siempre. Si el filtro no entiende el record, deja pasar: perder
+    una linea de log por las dudas es peor que loguear de mas.
+    """
+
+    def filter(self, record):
+        args = getattr(record, "args", None)
+        if not args or len(args) < 5:
+            return True
+
+        metodo, ruta, codigo = args[1], args[2], args[4]
+        if metodo != "GET":
+            return True
+        try:
+            if int(codigo) >= 400:
+                return True
+        except (TypeError, ValueError):
+            return True
+
+        return str(ruta).split("?")[0] not in ENDPOINTS_DE_REFRESCO
+
+
+def silenciar_ruido_de_refresco():
+    """Se llama en el startup, no al importar.
+
+    uvicorn.run() configura el logging el solo (dictConfig) DESPUES de que
+    este modulo se importa, y eso se lleva puesto cualquier filtro que le
+    hubieramos puesto antes. Desde el evento de startup ya esta configurado.
+    """
+    log_acceso = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, SinRuidoDeRefresco) for f in log_acceso.filters):
+        log_acceso.addFilter(SinRuidoDeRefresco())
+
 app = FastAPI(title="Todo-Selector")
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -35,6 +85,7 @@ ARRANCADO_EN = datetime.now()
 
 @app.on_event("startup")
 async def arrancar():
+    silenciar_ruido_de_refresco()
     init_db()
     sembrar()
     config.recargar()
