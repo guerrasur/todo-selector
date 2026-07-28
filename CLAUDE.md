@@ -51,6 +51,12 @@ columna sigue sin estar cubierto.
    "Wrap caesar con batatas" — usar `exact=True` o el script apaga el
    equivocado. Esto ya mordió una vez.
 
+8. **No afirmar lo que no se está viendo.** Si la lectura de la carta no
+   encuentra un producto, su estado NO se pisa (una lectura mala no puede
+   borrar lo que sabíamos) — pero entonces ese estado quedó viejo y la
+   pantalla no puede seguir mostrándolo como un hecho de ahora. Ya costó
+   un pedido de algo apagado (2026-07-28). Ver `/api/alertas`.
+
 4. **Toda operación se confirma releyendo.** Los métodos `apagar()` y
    `prender()` devuelven True solo si el cambio se verificó recargando la
    página. No confiar en que el click alcanzó — PedidosYa a veces no guarda.

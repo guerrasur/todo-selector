@@ -49,6 +49,55 @@ def poner(db, nombre, valor, plataforma="rappi"):
     db.commit()
 
 
+def apagado_que_no_se_puede_confirmar(db):
+    """EL BUG DEL 2026-07-28: la pantalla decia apagado y el portal vendia.
+
+    El usuario apago un wrap, Todo-Selector lo mostro como "apagado hoy", y
+    media hora despues entro un pedido de PedidosYa con ese wrap.
+
+    El mecanismo: si la lectura de la carta no encuentra el producto (el
+    nombre del catalogo no coincide con el del portal, o no se pudo abrir la
+    categoria), la app no pisa el estado que tenia. Eso esta bien -una
+    lectura mala no deberia borrar lo que sabiamos- pero el efecto era que un
+    "apagado" viejo quedaba congelado y la pantalla lo seguia afirmando en
+    presente, sin nada que lo delatara.
+    """
+    print("\n== Un apagado que la app no puede confirmar ==")
+    poner(db, "Cobb", EstadoItem.APAGADO_HOY)
+    poner(db, "Brie", EstadoItem.APAGADO_HOY)
+
+    def sellado(nombre):
+        p = db.query(Producto).filter_by(nombre=nombre).first()
+        return next(e for e in p.estados if e.plataforma == "rappi").verificado_en
+
+    antes_cobb, antes_brie = sellado("Cobb"), sellado("Brie")
+
+    # El portal devuelve a Brie pero NO a Cobb: es el caso del wrap.
+    leido = {"Ensalada Brie": False}
+    resultado = Worker._guardar_estados("rappi", leido, sostener=True)
+    db.expire_all()
+
+    ciegos = {n["producto"] for n in resultado["no_encontrados"]}
+    revisar("Cobb" in ciegos, "avisa que no encontro el producto en el portal")
+    revisar("Brie" not in ciegos, "y no se queja del que si encontro")
+
+    revisar(estado_de(db, "Cobb") == EstadoItem.APAGADO_HOY,
+            "sigue sin pisar el estado: una lectura mala no borra lo que sabiamos")
+
+    # Lo que lo delata es verificado_en: al que no se vio no se le toca, asi
+    # que la hora se queda vieja y la pantalla puede decir "no lo confirmo".
+    revisar(sellado("Cobb") == antes_cobb,
+            "al que el portal no mostro NO se le actualiza la hora")
+    revisar(sellado("Brie") != antes_brie and sellado("Brie") is not None,
+            "y al que si mostro se le sella la hora de ahora")
+
+    # El dato que la pantalla necesita para poder avisar.
+    ciego = next(n for n in resultado["no_encontrados"] if n["producto"] == "Cobb")
+    revisar(ciego["estado"] == EstadoItem.APAGADO_HOY and
+            ciego["nombre_remoto"] == "Cobb",
+            "y dice con que nombre lo buscaba, que es lo que hay que corregir")
+
+
 def sostener_y_pausa(db):
     """Que sostiene la ronda de cada 15 minutos y que no."""
     print("\n== La ronda de 15 min sostiene lo propio y respeta la pausa ==")
@@ -216,6 +265,7 @@ def main():
                 "lo que apago la app si entra")
 
         sostener_y_pausa(db)
+        apagado_que_no_se_puede_confirmar(db)
         novedades(db)
     finally:
         db.close()

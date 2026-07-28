@@ -58,6 +58,14 @@
   .pill:hover { border-color: #5a6178; }
   .pill.na { opacity: .25; cursor: default; font-style: italic; }
   .pill.na:hover { border-color: var(--borde); }
+  /* Excluida con un click: tiene que verse APAGADA, no apenas mas tenue.
+     Con solo la opacidad no se notaba y el usuario no sabia sobre que
+     portal iba a actuar el boton. */
+  .pill:not(.sel):not(.na) {
+    opacity: .5; text-decoration: line-through;
+    text-decoration-color: var(--tenue); background: transparent;
+  }
+  .pill:not(.sel):not(.na) .punto { opacity: .35; }
   .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .p-prendido { background: var(--on); }
   .p-apagado_hoy, .p-apagado_indefinido, .p-apagado_ajeno { background: var(--off); }
@@ -113,6 +121,21 @@
     display: flex; align-items: center; gap: 14px; justify-content: space-between;
   }
   .aviso.ok { border-color: var(--borde); border-left-color: var(--on); }
+  /* Lo que la app afirma sin poder confirmarlo: es lo que puede costar
+     plata (un pedido de algo que no hay). Va en rojo, no en amarillo. */
+  .aviso.grave { border-color: #5a2020; border-left-color: var(--error); }
+  .aviso.grave b { color: #fca5a5; }
+  .pista {
+    color: var(--tenue); font-size: 12.5px; margin: -6px 0 16px;
+    line-height: 1.5;
+  }
+  .pista b { color: #aab2c5; font-weight: 500; }
+  /* Un producto que la app da por apagado y no puede confirmar. */
+  .item.dudoso { border-color: #5a2020; }
+  .pill.dudoso { border-color: #5a2020; }
+  .nota-dudosa {
+    grid-column: 1 / -1; font-size: 12px; color: #fca5a5; line-height: 1.4;
+  }
 
   /* ---- Pantalla Carta: lo que dicen los portales vs lo que hay cargado ---- */
   .carta { background: var(--panel); border: 1px solid var(--borde);
@@ -193,6 +216,12 @@
     <button id="btn-limpiar" title="Borrar la búsqueda (Esc)">✕</button>
     <span id="resultado-busqueda"></span>
   </div>
+  <div id="pista-chips" class="pista">
+    Clickeá el chip <b>PedidosYa</b> o <b>Rappi</b> de un producto para sacarlo
+    de la acción: el botón queda actuando sobre el otro portal solo. Sirve
+    cuando hay que apagar en un portal antes que en el otro.
+  </div>
+  <div id="panel-alertas" style="display:none"></div>
   <div id="panel-novedades" style="display:none"></div>
   <div id="panel-cierre" class="carta" style="display:none"></div>
   <div id="panel-ajustes" class="carta" style="display:none"></div>
@@ -204,16 +233,103 @@
 const PLATS = ['pedidosya', 'rappi'];
 const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi' };
 
+// producto_id + '|' + plataforma  ->  por qué la app no puede confirmar que
+// siga apagado. Lo usa fila() para marcar el producto.
+let dudosos = new Map();
+
 async function cargar() {
-  const [productos, sistema, novedades] = await Promise.all([
+  const [productos, sistema, novedades, alertas] = await Promise.all([
     fetch('/api/productos').then(r => r.json()),
     fetch('/api/estado-sistema').then(r => r.json()),
     fetch('/api/novedades').then(r => r.json()).catch(() => ({ novedades: [] })),
+    fetch('/api/alertas').then(r => r.json())
+      .catch(() => ({ sin_confirmar: [], sesiones_caidas: [] })),
   ]);
 
+  dudosos = new Map((alertas.sin_confirmar || [])
+    .map(a => [a.producto_id + '|' + a.plataforma, a]));
+
   pintarSistema(sistema);
+  pintarAlertas(alertas);
   pintarNovedades(novedades.novedades || []);
   pintarProductos(productos);
+}
+
+// Lo único que puede salir caro de verdad: que la pantalla diga "apagado"
+// de algo que el portal está vendiendo. Pasó el 2026-07-28 con un wrap.
+//
+// La app no puede prometer que no vuelva a pasar (el portal revive cosas
+// solo, y si no encuentra el producto no puede leerlo), pero sí puede dejar
+// de afirmar en presente algo que no está viendo.
+function pintarAlertas(alertas) {
+  const panel = document.getElementById('panel-alertas');
+  const caidas = alertas.sesiones_caidas || [];
+  const dudas = alertas.sin_confirmar || [];
+
+  if (!caidas.length && !dudas.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  panel.className = 'aviso grave';
+  panel.innerHTML = '';
+  const cont = document.createElement('div');
+  cont.style.width = '100%';
+  panel.appendChild(cont);
+
+  if (caidas.length) {
+    const t = document.createElement('div');
+    t.style.marginBottom = dudas.length ? '10px' : '0';
+    const b = document.createElement('b');
+    b.textContent = 'Hay que loguearse en ' +
+      caidas.map(p => NOMBRE_PLAT[p] || p).join(' y ') + '.';
+    t.append(b, ' Andá a la ventana del navegador que abrió la app, ' +
+                'logueate en esa pestaña y apretá «Revalidar sesión». ' +
+                'Lo que hayas pedido queda encolado y sale solo: no se pierde.');
+    cont.appendChild(t);
+  }
+
+  if (!dudas.length) return;
+
+  const t = document.createElement('div');
+  const b = document.createElement('b');
+  b.textContent = dudas.length === 1
+    ? 'Hay 1 producto que figura apagado y no puedo confirmarlo.'
+    : `Hay ${dudas.length} productos que figuran apagados y no puedo confirmarlos.`;
+  t.append(b, ' Puede que el portal los esté vendiendo igual.');
+  cont.appendChild(t);
+
+  for (const d of dudas) {
+    const fila = document.createElement('div');
+    fila.style.cssText = 'margin-top:6px;font-size:13px;color:var(--tenue)';
+    const nombre = document.createElement('b');
+    nombre.style.color = 'var(--texto)';
+    nombre.textContent = d.producto;
+    fila.append(nombre, ` en ${NOMBRE_PLAT[d.plataforma]}: ` + (
+      d.motivo === 'no_aparece'
+        ? `la última lectura no lo encontró en el portal como ` +
+          `«${d.nombre_remoto}» — puede que allá se llame distinto.`
+        : `sin confirmar desde ${d.verificado_en
+             ? hora(d.verificado_en) : 'nunca'}.`));
+    cont.appendChild(fila);
+  }
+
+  const acc = document.createElement('div');
+  acc.className = 'acciones';
+  acc.style.marginTop = '12px';
+
+  const bLeer = document.createElement('button');
+  bLeer.textContent = 'Leer los portales ahora';
+  bLeer.onclick = () => document.getElementById('btn-leer-estado').click();
+
+  const bCarta = document.createElement('button');
+  bCarta.textContent = 'Revisar los nombres en la Carta';
+  bCarta.title = 'Si el portal lo llama distinto, se arregla vinculándolo ahí';
+  bCarta.onclick = abrirCarta;
+
+  acc.append(bLeer, bCarta);
+  cont.appendChild(acc);
 }
 
 // Algo que el catálogo tenía como "no existe en ese portal" y el portal
@@ -462,13 +578,19 @@ function fila(item) {
 
     if (!fuera.has(plat)) seleccion.add(plat);
 
+    // Si la app da esto por apagado pero no lo puede confirmar, no puede
+    // seguir diciendo "apagado hoy" como si fuera un hecho de ahora.
+    const duda = dudosos.get(item.id + '|' + plat);
+
     const pill = document.createElement('button');
-    pill.className = 'pill' + (fuera.has(plat) ? '' : ' sel');
+    pill.className = 'pill' + (fuera.has(plat) ? '' : ' sel') +
+                     (duda ? ' dudoso' : '');
     pill.dataset.plat = plat;
     pill.title = (est.detalle || '') + '  (click para incluir/excluir)';
     pill.innerHTML =
       `<span class="punto p-${est.estado}"></span>` +
-      `${NOMBRE_PLAT[plat]}: ${etiqueta(est.estado)}`;
+      `${NOMBRE_PLAT[plat]}: ${etiqueta(est.estado)}` +
+      (duda ? ' <span style="color:#fca5a5">(?)</span>' : '');
 
     pill.onclick = () => {
       if (seleccion.has(plat)) {
@@ -485,16 +607,34 @@ function fila(item) {
       if (fuera.size) excluidas.set(item.id, fuera);
       else excluidas.delete(item.id);
 
-      // Si no queda ninguna, deshabilitamos los botones de apagar/prender
-      // (no el de pausar, que no depende de la plataforma).
-      const vacio = seleccion.size === 0;
-      div.querySelectorAll('.acciones button:not(.pausa)')
-         .forEach(b => b.disabled = vacio);
+      refrescarBotones();
     };
 
     plats.appendChild(pill);
   }
   div.appendChild(plats);
+
+  // Cuántas plataformas tiene este producto: si tiene una sola, aclarar
+  // "solo Rappi" en el botón no informa nada, es ruido.
+  const enCuantas = PLATS.filter(p => item.estados[p]).length;
+
+  // El botón dice sobre qué portal va a actuar. Antes solo decía "Apagar
+  // hoy" y para saber a dónde iba había que interpretar la opacidad de los
+  // chips: el usuario no tenía forma de saber que se podía apagar en un
+  // solo portal, y esa era justamente la función que pedía.
+  function refrescarBotones() {
+    const vacio = seleccion.size === 0;
+    const solo = (enCuantas > 1 && seleccion.size === 1)
+      ? ' · solo ' + NOMBRE_PLAT[[...seleccion][0]] : '';
+
+    for (const b of div.querySelectorAll('.acciones button:not(.pausa)')) {
+      b.disabled = vacio;
+      b.textContent = b.dataset.etiqueta + solo;
+      b.title = vacio
+        ? 'Sacaste los dos portales: volvé a clickear un chip para incluirlo'
+        : 'Actúa sobre ' + [...seleccion].map(p => NOMBRE_PLAT[p]).join(' y ');
+    }
+  }
 
   // El motivo del fallo estaba solo en el tooltip: si algo falla, se ve.
   for (const plat of PLATS) {
@@ -504,6 +644,23 @@ function fila(item) {
     err.className = 'detalle-fallo';
     err.textContent = `${NOMBRE_PLAT[plat]}: ${est.detalle}`;
     div.appendChild(err);
+  }
+
+  // Y lo mismo con el apagado que no se puede confirmar, que es peor que un
+  // fallo: un fallo se ve en rojo, esto se veía como si estuviera todo bien.
+  for (const plat of PLATS) {
+    const duda = dudosos.get(item.id + '|' + plat);
+    if (!duda) continue;
+    div.classList.add('dudoso');
+    const nota = document.createElement('div');
+    nota.className = 'nota-dudosa';
+    nota.textContent = `${NOMBRE_PLAT[plat]}: figura apagado, pero ` + (
+      duda.motivo === 'no_aparece'
+        ? `la última lectura no encontró «${duda.nombre_remoto}» en el ` +
+          `portal, así que no puedo confirmarlo. Puede estar vendiéndose.`
+        : `sin confirmar desde ${duda.verificado_en
+             ? hora(duda.verificado_en) : 'nunca'}.`);
+    div.appendChild(nota);
   }
 
   const acc = document.createElement('div');
@@ -530,28 +687,25 @@ function fila(item) {
 
   const bHoy = document.createElement('button');
   bHoy.className = 'off';
-  bHoy.textContent = 'Apagar hoy';
+  bHoy.dataset.etiqueta = 'Apagar hoy';
   bHoy.onclick = () => accion(item.id, 'apagar_hoy', [...seleccion]);
 
   const bIndef = document.createElement('button');
   bIndef.className = 'off';
-  bIndef.textContent = 'Indefinido';
+  bIndef.dataset.etiqueta = 'Indefinido';
   bIndef.onclick = () => accion(item.id, 'apagar_indef', [...seleccion]);
 
   const bOn = document.createElement('button');
   bOn.className = 'on';
-  bOn.textContent = 'Prender';
+  bOn.dataset.etiqueta = 'Prender';
   bOn.onclick = () => accion(item.id, 'prender', [...seleccion]);
 
   acc.append(bHoy, bIndef, bOn);
-
-  // Si excluiste las dos plataformas, no hay sobre qué actuar. Se repinta
-  // así también después del refresco, no solo al clickear el chip.
-  if (seleccion.size === 0) {
-    for (const b of [bHoy, bIndef, bOn]) b.disabled = true;
-  }
-
   div.appendChild(acc);
+
+  // Deja las etiquetas y el disabled como corresponda. Corre también en
+  // cada repintado, no solo al clickear un chip.
+  refrescarBotones();
 
   return div;
 }
