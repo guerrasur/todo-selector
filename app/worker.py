@@ -67,6 +67,7 @@ class Worker:
         self.corriendo = False
         self.ultimo_chequeo = None
         self.ultima_lectura = None   # ultima vez que leimos el estado real
+        self.novedades = {}          # plataforma -> productos que aparecieron
         # Una pestaña por plataforma = un solo usuario a la vez. Sin esto,
         # el worker y los endpoints de diagnostico navegan la misma pagina
         # al mismo tiempo y se cancelan entre si (net::ERR_ABORTED en el
@@ -533,8 +534,25 @@ class Worker:
                      nombre, salida[nombre]["prendidos"],
                      salida[nombre]["apagados"], salida[nombre]["no_estan"])
 
+            self.novedades[nombre] = self._buscar_novedades(nombre, leidos)
+            salida[nombre]["novedades"] = len(self.novedades[nombre])
+
         self.ultima_lectura = datetime.now()
         return salida
+
+    @staticmethod
+    def _buscar_novedades(plataforma: str, leidos: dict) -> list:
+        """Que apareció en el portal y el catalogo tenia como inexistente."""
+        from .catalogo import detectar_novedades
+
+        db = SessionLocal()
+        try:
+            return detectar_novedades(db, plataforma, leidos)
+        except Exception as e:
+            log.exception("Buscando novedades en %s: %s", plataforma, e)
+            return []
+        finally:
+            db.close()
 
     @staticmethod
     def _guardar_estados(plataforma: str, leidos: dict) -> dict:
