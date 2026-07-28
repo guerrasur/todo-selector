@@ -199,9 +199,19 @@ seguro), **emparejados solos**, y los que están **solo en un portal**.
 - **Agregar**: carga en la app un producto que está en un portal y no en el
   catálogo.
 - **Vincular a mano**: dos listas desplegables, una por portal, para juntar dos
-  que la app no propuso. Es para lo que ninguna heurística va a sacar. Si el
-  que elegís ya estaba vinculado con otro, **ese otro no se pierde**: queda
-  como producto suelto, con su propio botón.
+  que la app no propuso. Es para lo que ninguna heurística va a sacar. Cada
+  opción muestra con qué está vinculada hoy, y antes de apretar el botón la
+  pantalla avisa qué vínculo vas a romper. Si el que elegís ya estaba
+  vinculado con otro, **ese otro no se pierde**: queda como producto suelto,
+  con su propio botón (pausalo si no lo usás).
+- **Deshacer**: vuelve el catálogo a como estaba antes del último cambio, y
+  dice cuál va a deshacer. Vincular toca varios productos a la vez, así que
+  revertirlo a mano es un rompecabezas. Guarda los últimos 20 pasos.
+
+**Renombrar:** el nombre que ves en la pantalla es solo tuyo — los portales se
+buscan por los alias. Se cambia clickeándolo. Sirve cuando dos productos se
+llamaban igual y hubo que desempatarlos: el que se separa queda como
+"Tarta de verdura (PedidosYa)".
 
 El criterio es que **si no está claro que sea el mismo plato, van separados**,
 y vincularlos es una decisión explícita tuya. Cuando la app no está segura

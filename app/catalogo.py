@@ -25,7 +25,8 @@ import json
 import logging
 
 from .carta import parecido
-from .models import Producto, AliasPlataforma, EstadoItem, Preferencia
+from .models import (Producto, AliasPlataforma, EstadoItem, Preferencia,
+                     HistorialCatalogo)
 
 log = logging.getLogger("catalogo")
 
@@ -58,6 +59,94 @@ def es_manual(db) -> bool:
     return bool(marca and marca.valor == "1")
 
 
+# ---------- Deshacer ----------
+
+def _foto(db) -> str:
+    """Serializa el catalogo entero. Es chico: 30 productos."""
+    productos = []
+    for p in db.query(Producto).all():
+        productos.append({
+            "id": p.id, "nombre": p.nombre, "categoria": p.categoria,
+            "orden": p.orden, "activo": bool(p.activo),
+            "pausado": bool(p.pausado),
+            "es_plato_del_dia": bool(p.es_plato_del_dia),
+            "fecha_dia": p.fecha_dia,
+            "alias": [{"plataforma": a.plataforma, "remoto": a.nombre_remoto}
+                      for a in p.alias],
+            "estados": [{"plataforma": e.plataforma, "estado": e.estado,
+                         "detalle": e.detalle} for e in p.estados],
+        })
+    return json.dumps(productos, ensure_ascii=False)
+
+
+def guardar_paso(db, descripcion: str):
+    """Saca la foto ANTES de tocar nada. La llaman vincular/separar/agregar."""
+    db.add(HistorialCatalogo(descripcion=descripcion, datos=_foto(db)))
+    db.flush()
+
+    viejos = (db.query(HistorialCatalogo)
+              .order_by(HistorialCatalogo.id.desc())
+              .offset(HistorialCatalogo.MAXIMO).all())
+    for v in viejos:
+        db.delete(v)
+
+
+def hay_para_deshacer(db) -> str | None:
+    """Que cambio deshace el proximo 'Deshacer'."""
+    paso = (db.query(HistorialCatalogo)
+            .order_by(HistorialCatalogo.id.desc()).first())
+    return paso.descripcion if paso else None
+
+
+def deshacer(db) -> str | None:
+    """Vuelve el catalogo a como estaba antes del ultimo cambio.
+
+    Reconstruye productos, alias y estados con los MISMOS ids, para no
+    dejar colgadas las operaciones del historial que los referencian.
+    """
+    paso = (db.query(HistorialCatalogo)
+            .order_by(HistorialCatalogo.id.desc()).first())
+    if paso is None:
+        return None
+
+    productos = json.loads(paso.datos)
+    descripcion = paso.descripcion
+    paso_id = paso.id
+
+    db.query(AliasPlataforma).delete(synchronize_session=False)
+    db.query(EstadoItem).delete(synchronize_session=False)
+    db.query(Producto).delete(synchronize_session=False)
+    db.flush()
+
+    # El borrado masivo no pasa por el identity map: la sesion sigue con los
+    # objetos viejos en memoria y, al reinsertar un producto con el mismo id,
+    # arrastra por cascada los alias que ya no existen (UNIQUE violado).
+    # Vaciar la sesion la obliga a leer de nuevo de la base.
+    db.expunge_all()
+
+    for p in productos:
+        db.add(Producto(
+            id=p["id"], nombre=p["nombre"], categoria=p["categoria"],
+            orden=p["orden"], activo=p["activo"], pausado=p["pausado"],
+            es_plato_del_dia=p["es_plato_del_dia"], fecha_dia=p["fecha_dia"],
+        ))
+    db.flush()
+
+    for p in productos:
+        for a in p["alias"]:
+            db.add(AliasPlataforma(producto_id=p["id"],
+                                   plataforma=a["plataforma"],
+                                   nombre_remoto=a["remoto"]))
+        for e in p["estados"]:
+            db.add(EstadoItem(producto_id=p["id"], plataforma=e["plataforma"],
+                              estado=e["estado"], detalle=e["detalle"]))
+
+    db.query(HistorialCatalogo).filter_by(id=paso_id).delete(
+        synchronize_session=False)
+    log.info("Deshecho: %s", descripcion)
+    return descripcion
+
+
 # ---------- Busqueda ----------
 
 def nombre_remoto(producto: Producto, plataforma: str) -> str | None:
@@ -86,15 +175,34 @@ def buscar_por_remoto(db, plataforma: str, remoto: str) -> Producto | None:
     return None
 
 
-def _nombre_libre(db, base: str, excluir_id: int = None) -> str:
-    """Producto.nombre es unico: le agregamos un sufijo si hace falta."""
-    candidato = base
+NOMBRE_PLATAFORMA = {"pedidosya": "PedidosYa", "rappi": "Rappi"}
+
+
+def _nombre_libre(db, base: str, excluir_id: int = None,
+                  plataforma: str = None) -> str:
+    """Producto.nombre es unico: le agregamos algo si hace falta.
+
+    Primero se prueba el nombre de la plataforma y recien despues un
+    numero. Al separar dos que se llamaban igual quedaba "Tarta de verdura (2)",
+    que no le dice nada a nadie; "Tarta de verdura (PedidosYa)" se entiende.
+    """
+    def libre(nombre):
+        choque = db.query(Producto).filter_by(nombre=nombre).first()
+        return choque is None or choque.id == excluir_id
+
+    if libre(base):
+        return base
+
+    if plataforma:
+        con_plataforma = f"{base} ({NOMBRE_PLATAFORMA.get(plataforma, plataforma)})"
+        if libre(con_plataforma):
+            return con_plataforma
+
     intento = 2
     while True:
-        choque = db.query(Producto).filter_by(nombre=candidato).first()
-        if choque is None or choque.id == excluir_id:
-            return candidato
         candidato = f"{base} ({intento})"
+        if libre(candidato):
+            return candidato
         intento += 1
 
 
@@ -139,7 +247,11 @@ def agregar(db, plataforma: str, remoto: str, categoria: str = "",
     if ya is not None:
         return ya
 
-    producto = Producto(nombre=_nombre_libre(db, nombre or remoto),
+    guardar_paso(db, f"agregar '{remoto}' "
+                     f"({NOMBRE_PLATAFORMA.get(plataforma, plataforma)})")
+
+    producto = Producto(nombre=_nombre_libre(db, nombre or remoto,
+                                             plataforma=plataforma),
                         categoria=categoria, orden=500)
     db.add(producto)
     db.flush()
@@ -165,6 +277,9 @@ def vincular(db, remoto_py: str, remoto_rappi: str,
     if a is not None and b is not None and a.id == b.id:
         return a                                     # ya estaban vinculados
 
+    guardar_paso(db, f"vincular '{remoto_py}' (PedidosYa) con "
+                     f"'{remoto_rappi}' (Rappi)")
+
     # Antes de juntar, hay que soltar lo que estos dos ya tenian tomado del
     # otro lado, o se perderia sin aviso. Pasa al vincular a mano dos que ya
     # estaban emparejados con otra cosa: si "Tarta de verdura chica" (PY) se
@@ -176,14 +291,14 @@ def vincular(db, remoto_py: str, remoto_rappi: str,
         if actual is not None and actual != remoto_rappi:
             log.info("'%s' se suelta de '%s' (Rappi) para vincularse con '%s'",
                      a.nombre, actual, remoto_rappi)
-            separar(db, a.id, "rappi")
+            separar(db, a.id, "rappi", registrar=False)
 
     if b is not None:
         actual = nombre_remoto(b, "pedidosya")
         if actual is not None and actual != remoto_py:
             log.info("'%s' se suelta de '%s' (PedidosYa) para vincularse con '%s'",
                      b.nombre, actual, remoto_py)
-            separar(db, b.id, "pedidosya")
+            separar(db, b.id, "pedidosya", registrar=False)
 
     if a is None and b is None:
         producto = Producto(nombre=_nombre_libre(db, nombre or remoto_py),
@@ -320,7 +435,8 @@ def detectar_novedades(db, plataforma: str, leidos) -> list:
     return novedades
 
 
-def separar(db, producto_id: int, plataforma: str) -> Producto:
+def separar(db, producto_id: int, plataforma: str,
+            registrar: bool = True) -> Producto:
     """Saca una plataforma del producto y la deja como producto aparte.
 
     Es lo contrario de vincular: para cuando la app dio por iguales dos
@@ -345,7 +461,11 @@ def separar(db, producto_id: int, plataforma: str) -> Producto:
         raise ValueError(f"'{producto.nombre}' solo esta en {plataforma}: "
                          "no hay nada que separar")
 
-    nuevo = Producto(nombre=_nombre_libre(db, remoto),
+    if registrar:
+        guardar_paso(db, f"separar '{producto.nombre}' de "
+                         f"{NOMBRE_PLATAFORMA.get(plataforma, plataforma)}")
+
+    nuevo = Producto(nombre=_nombre_libre(db, remoto, plataforma=plataforma),
                      categoria=producto.categoria, orden=producto.orden)
     db.add(nuevo)
     db.flush()

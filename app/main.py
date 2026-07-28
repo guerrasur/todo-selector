@@ -460,6 +460,49 @@ def ignorar_novedad(data: IgnorarIn, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+class RenombrarIn(BaseModel):
+    producto_id: int
+    nombre: str
+
+
+@app.post("/api/renombrar")
+def renombrar(data: RenombrarIn, db: Session = Depends(get_db)):
+    """Cambia el nombre con el que se ve el producto en la pantalla.
+
+    No toca los nombres de los portales: esos son los alias, y son los que
+    se usan para buscarlo. Sirve para limpiar los nombres que quedan feos
+    cuando dos productos se llamaban igual y hubo que desempatarlos.
+    """
+    producto = db.query(Producto).get(data.producto_id)
+    if producto is None:
+        raise HTTPException(404, "producto no encontrado")
+
+    nombre = data.nombre.strip()
+    if not nombre:
+        raise HTTPException(400, "el nombre no puede quedar vacío")
+
+    otro = db.query(Producto).filter_by(nombre=nombre).first()
+    if otro is not None and otro.id != producto.id:
+        raise HTTPException(400, f"ya hay un producto que se llama «{nombre}»")
+
+    catalogo.guardar_paso(db, f"renombrar '{producto.nombre}' a '{nombre}'")
+    producto.nombre = nombre
+    catalogo.marcar_manual(db)
+    db.commit()
+    return {"ok": True, "producto": _ver_producto(producto)}
+
+
+@app.post("/api/deshacer")
+def deshacer(db: Session = Depends(get_db)):
+    """Vuelve el catálogo a como estaba antes del último cambio."""
+    descripcion = catalogo.deshacer(db)
+    if descripcion is None:
+        raise HTTPException(400, "no hay nada para deshacer")
+    db.commit()
+    return {"ok": True, "deshecho": descripcion,
+            "siguiente": catalogo.hay_para_deshacer(db)}
+
+
 @app.get("/api/catalogo")
 def ver_catalogo(db: Session = Depends(get_db)):
     """Qué nombre tiene cada producto en cada portal, y quién manda.
@@ -472,6 +515,7 @@ def ver_catalogo(db: Session = Depends(get_db)):
                  .order_by(Producto.orden).all())
     return {
         "manual": catalogo.es_manual(db),
+        "deshacer": catalogo.hay_para_deshacer(db),
         "productos": [_ver_producto(p) for p in productos],
     }
 

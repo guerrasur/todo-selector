@@ -204,6 +204,54 @@ async def probar_pausa(pagina):
             "Reactivar lo devuelve a la lista de siempre")
 
 
+async def abrir_panel_carta(pagina):
+    """Deja el panel de la carta abierto, este como este."""
+    visible = await pagina.evaluate(
+        "document.getElementById('panel-carta').style.display === 'block'")
+    if not visible:
+        await pagina.click("#btn-carta")
+    await pagina.wait_for_selector("#panel-carta", state="visible", timeout=5000)
+
+
+async def probar_renombrar_y_deshacer(pagina):
+    """Los dos que faltaban cuando el catalogo queda hecho un lio.
+
+    Renombrar: al separar dos que se llamaban igual, uno queda con un
+    sufijo. Deshacer: vincular toca varios productos a la vez y revertirlo
+    a mano es un rompecabezas.
+    """
+    print("\n== Renombrar y deshacer ==")
+
+    pagina.once("dialog", lambda d: asyncio.ensure_future(d.accept("Flan casero ensalada")))
+    await pagina.locator(".item .nombre", has_text="Flan casero").first.click()
+    await pagina.wait_for_timeout(1500)
+
+    productos = await pagina.evaluate("fetch('/api/productos').then(r => r.json())")
+    revisar(any(p["nombre"] == "Flan casero ensalada" for p in productos),
+            "el producto queda con el nombre nuevo")
+
+    await abrir_panel_carta(pagina)
+    # El panel se muestra antes de terminar de traer /api/catalogo, asi que
+    # hay que esperar al texto, no leerlo apenas aparece el boton.
+    revisar(await esperar(pagina.locator("#btn-deshacer", has_text="renombrar")),
+            "el boton dice que va a deshacer el renombre")
+
+    await pagina.locator("#btn-deshacer").click()
+    await pagina.wait_for_timeout(1500)
+
+    productos = await pagina.evaluate("fetch('/api/productos').then(r => r.json())")
+    revisar(any(p["nombre"] == "Flan casero" for p in productos),
+            "deshacer devuelve el nombre anterior")
+
+    # Y el vinculo que se hizo a mano tiene que seguir donde estaba: deshacer
+    # va de a un paso, no borra todo.
+    datos = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    de verdura = [p for p in datos["productos"]
+              if p["plataformas"]["pedidosya"] == "Tarta de verdura chica"]
+    revisar(len(de verdura) == 1 and de verdura[0]["plataformas"]["rappi"] == "Tarta de verdura",
+            "y no toca los cambios anteriores")
+
+
 async def main():
     servidor = levantar_app()
     for _ in range(100):                      # esperar a que levante
@@ -299,6 +347,7 @@ async def main():
         await probar_aviso_de_novedad(pagina)
         await probar_vinculador_manual(pagina)
         await probar_pausa(pagina)
+        await probar_renombrar_y_deshacer(pagina)
 
         await navegador.close()
 
