@@ -116,6 +116,30 @@ los del día anterior desaparecen de la lista.
 **Pendiente:** tomar este dato de Suipacha Loader en vez de preguntarlo dos
 veces. Ver tareas pendientes.
 
+## Qué está prendido: se lee del portal
+
+Al arrancar, la app lee los dos portales y guarda cómo está cada producto.
+Antes arrancaba sin saber nada: todo quedaba en "sin leer" hasta que tocabas
+un botón, así que la pantalla no contestaba la pregunta más básica.
+
+La lectura tarda un rato y corre en segundo plano; mientras tanto el cartel de
+arriba dice "leyendo el estado real…" y después queda la hora de la lectura.
+El botón **Leer estado real** la repite cuando quieras — sirve cuando alguien
+apagó algo desde el portal y querés que la pantalla se entere.
+
+Hay tres formas de estar apagado, y se distinguen a propósito:
+
+| En pantalla | Qué significa |
+|---|---|
+| `apagado hoy` / `apagado` | Lo apagó la app. **Lo sostiene**: si el portal lo revive, lo vuelve a apagar sola. |
+| `apagado (afuera)` | Estaba apagado en el portal y no fue la app. Lo muestra pero **no lo toca**. |
+| `sin leer` | Todavía no se leyó (o el nombre del catálogo no coincide con el del portal). |
+
+La diferencia importa: la ronda de reverificación reencola un apagado cuando
+ve revivido algo que ella apagó. Si se apropiara de todo lo que el local apagó
+por su cuenta, bastaría una lectura mala para volver a apagarlo sin que nadie
+se lo pidiera.
+
 ## La pantalla Carta
 
 El botón **Carta** (arriba a la derecha) lee lo que muestran los dos portales
@@ -366,9 +390,8 @@ hay que agregarle ese modelo primero.
 ## 5. Pendientes de producto
 
 - [ ] Botón de "apagar todo" al cierre.
-- [ ] Sincronizar el estado real al arrancar (hoy arranca en "desconocido"
-      hasta que se toque algo). La pantalla Carta ya lee los dos portales:
-      falta guardar lo que lee como estado inicial.
+- [x] Sincronizar el estado real al arrancar. Hecho: al levantar, la app lee
+      los dos portales y guarda cómo está cada producto. Ver más arriba.
 - [ ] Mostrar el historial en pantalla (la API ya lo devuelve).
 - [ ] **Sacar del código el id de menú de PedidosYa (`MENU_ID`) y el `storeId`
       de Rappi (`STORE_ID`).** Hasta que sean configurables, "sirve para otro
