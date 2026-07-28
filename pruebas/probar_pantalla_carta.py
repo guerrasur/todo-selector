@@ -327,6 +327,13 @@ async def probar_seleccion_de_plataforma(pagina):
     revisar("sel" not in (await chip_rappi.get_attribute("class")),
             "y SIGUE deseleccionado despues de que la lista se repinte sola")
 
+    # El boton tiene que DECIR sobre que portal va a actuar. Antes decia
+    # "Apagar hoy" y para saberlo habia que interpretar la opacidad de los
+    # chips: el usuario no se enteraba de que existia apagar en uno solo.
+    boton = fila.locator("button", has_text="Apagar hoy")
+    revisar("solo PedidosYa" in await boton.inner_text(),
+            f"el boton dice a donde va ({(await boton.inner_text()).strip()})")
+
     antes = await pagina.evaluate("fetch('/api/historial').then(r => r.json())")
     await fila.locator("button", has_text="Apagar hoy").click()
     await pagina.wait_for_timeout(1500)
@@ -344,6 +351,76 @@ async def probar_seleccion_de_plataforma(pagina):
     revisar("sel" in (await fila.locator(".pill[data-plat='rappi']")
                       .get_attribute("class")),
             "volver a clickearlo la incluye de nuevo, y tambien queda")
+    revisar("solo" not in await fila.locator("button", has_text="Apagar hoy")
+            .inner_text(),
+            "y el boton vuelve a decir que actua sobre los dos")
+
+    revisar(await pagina.locator("#pista-chips").count() == 1,
+            "la pantalla explica que los chips se pueden clickear")
+
+
+async def probar_aviso_de_apagado_sin_confirmar(pagina):
+    """EL BUG DEL 2026-07-28: decia apagado y PedidosYa lo estaba vendiendo.
+
+    La app no puede prometer que no vuelva a pasar (el portal revive cosas
+    solo), pero si puede dejar de afirmar en presente algo que no esta
+    viendo. Se simula lo que pasa cuando la lectura no encuentra el producto.
+    """
+    print("\n== Avisar de un apagado que no se puede confirmar ==")
+    from app.database import SessionLocal
+    from app.models import Producto, EstadoItem
+    from app.worker import worker
+
+    db = SessionLocal()
+    try:
+        p = db.query(Producto).filter_by(nombre="Tarta de verdura").first()
+        est = next(e for e in p.estados if e.plataforma == "pedidosya")
+        est.estado = EstadoItem.APAGADO_HOY
+        db.commit()
+
+        # La lectura del portal no lo encontro: es el agujero exacto.
+        worker.no_encontrados = {"pedidosya": [{
+            "producto_id": p.id, "producto": p.nombre,
+            "plataforma": "pedidosya", "nombre_remoto": "Tarta de verdura",
+            "estado": EstadoItem.APAGADO_HOY, "verificado_en": None,
+        }]}
+        producto_id = p.id
+    finally:
+        db.close()
+
+    alertas = await pagina.evaluate("fetch('/api/alertas').then(r => r.json())")
+    dudas = alertas["sin_confirmar"]
+    revisar(any(d["producto_id"] == producto_id and d["motivo"] == "no_aparece"
+                for d in dudas),
+            f"la API lo reporta como no confirmable ({len(dudas)} en total)")
+
+    await pagina.reload()
+    panel = pagina.locator("#panel-alertas")
+    await panel.wait_for(timeout=10000)
+    texto = await panel.inner_text()
+    revisar("Tarta de verdura" in texto and "no puedo confirmar" in texto.lower(),
+            "la pantalla lo dice arriba de todo, en rojo")
+    revisar("vendiendo" in texto.lower(),
+            "y dice por que importa: el portal puede estar vendiendolo")
+
+    fila = pagina.locator(".item.dudoso").filter(has_text="Tarta de verdura").first
+    revisar(await fila.count() > 0,
+            "y el producto queda marcado en la lista, no solo en el cartel")
+
+    worker.no_encontrados = {}
+    db = SessionLocal()
+    try:
+        p = db.query(Producto).get(producto_id)
+        est = next(e for e in p.estados if e.plataforma == "pedidosya")
+        est.estado = EstadoItem.PRENDIDO
+        db.commit()
+    finally:
+        db.close()
+
+    await pagina.reload()
+    await pagina.wait_for_timeout(1500)
+    revisar(await pagina.locator("#panel-alertas").is_hidden(),
+            "y el cartel se va cuando deja de haber dudas")
 
 
 async def probar_ajustes(pagina):
@@ -466,6 +543,7 @@ async def main():
         await probar_sin_platos_del_dia(pagina)
         await probar_buscador(pagina)
         await probar_seleccion_de_plataforma(pagina)
+        await probar_aviso_de_apagado_sin_confirmar(pagina)
 
         print("\n== El icono de la pestaña ==")
         icono = await pagina.evaluate("""

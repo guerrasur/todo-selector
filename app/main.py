@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -186,6 +186,77 @@ def masivo_previo(accion: str = "apagar_hoy"):
         raise HTTPException(400, "accion invalida")
     return {"accion": accion, "por_plataforma": cierre.previo(
         list(catalogo.PLATAFORMAS), accion)}
+
+
+@app.get("/api/alertas")
+def alertas(db: Session = Depends(get_db)):
+    """Lo que la app AFIRMA sin poder confirmarlo. Es lo que puede salir caro.
+
+    El caso real (2026-07-28): el usuario apagó un producto, Todo-Selector lo
+    mostró como «apagado hoy», y media hora después entró un pedido de
+    PedidosYa con ese producto.
+
+    El agujero: si la lectura de la carta no encuentra un producto (porque
+    el nombre del catálogo no coincide con el del portal, o porque no se
+    pudo abrir la categoría), la app **no pisa** el estado que tenía. Eso
+    está bien —una lectura mala no debería borrar lo que sabíamos— pero el
+    efecto es que un «apagado» viejo queda congelado y la pantalla lo sigue
+    afirmando en presente mientras el portal lo vende.
+
+    Acá salen los dos casos en que eso pasa:
+      - la última lectura NO vio el producto en el portal;
+      - hace mucho que nadie lo confirma.
+
+    Solo importan los que la app da por apagados: si dice «prendido» y en
+    realidad está apagado, se pierde una venta; al revés se vende algo que
+    no hay.
+    """
+    # Dos rondas sin confirmar ya es raro: la ronda es cada 15 min.
+    minutos = config.entero("minutos_ronda")
+    limite = (datetime.now() - timedelta(minutes=max(minutos, 5) * 2)
+              if minutos > 0 else None)
+
+    # Lo que la ultima lectura no encontro, indexado para cruzarlo abajo.
+    ciegos = {}
+    for lista in worker.no_encontrados.values():
+        for n in lista:
+            ciegos[(n["producto_id"], n["plataforma"])] = n
+
+    salida = []
+    productos = (db.query(Producto)
+                 .filter(Producto.activo == True)  # noqa: E712
+                 .order_by(Producto.orden).all())
+
+    for p in productos:
+        if p.pausado:
+            continue                     # el usuario ya dijo que no le importa
+        for est in p.estados:
+            if est.estado not in EstadoItem.APAGADOS_PROPIOS:
+                continue
+
+            no_visto = (p.id, est.plataforma) in ciegos
+            viejo = (limite is not None and
+                     (est.verificado_en is None or est.verificado_en < limite))
+            if not (no_visto or viejo):
+                continue
+
+            salida.append({
+                "producto_id": p.id,
+                "producto": p.nombre,
+                "plataforma": est.plataforma,
+                "nombre_remoto": catalogo.nombre_remoto(p, est.plataforma),
+                "estado": est.estado,
+                "verificado_en": (est.verificado_en.isoformat(timespec="seconds")
+                                  if est.verificado_en else None),
+                # El motivo cambia que hay que hacer: si el portal no lo
+                # muestra, es el nombre; si solo esta viejo, es releer.
+                "motivo": ("no_aparece" if no_visto else "sin_confirmar"),
+            })
+
+    return {
+        "sesiones_caidas": [p for p, ok in worker.sesion_ok.items() if ok is False],
+        "sin_confirmar": salida,
+    }
 
 
 @app.get("/api/estado-sistema")

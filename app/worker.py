@@ -53,6 +53,14 @@ def _carta_de_muestra() -> dict:
 
 INTERVALO_COLA = 2               # segundos entre chequeos de la cola
 
+# Cuanto se espera antes de volver a intentar una plataforma deslogueada.
+# Reintentar cada 2 segundos no la va a reloguear (el login es a mano, a
+# proposito) y solo llena el log.
+ESPERA_SIN_SESION = 60
+
+# Motivo por el que fallo una operacion, cuando importa distinguirlo.
+SIN_SESION = "sin_sesion"
+
 # Lo que antes eran constantes hoy sale de Ajustes (app/config.py). Los
 # valores por defecto son estos mismos, asi que sin tocar nada la app se
 # comporta igual que siempre:
@@ -74,6 +82,12 @@ class Worker:
         self.ultima_lectura = None   # ultima vez que leimos el estado real
         self.novedades = {}          # plataforma -> productos que aparecieron
         self.ultima_carta = None     # ultimo cruce de las dos cartas
+        # plataforma -> productos del catalogo que la ultima lectura NO vio
+        # en el portal. Es lo que hace que un "apagado" viejo se congele.
+        self.no_encontrados = {}
+        # plataforma -> hasta cuando no vale la pena reintentar la cola
+        # porque la sesion esta caida y hay que loguearse a mano.
+        self.reintentar_desde = {}
         # Una pestaña por plataforma = un solo usuario a la vez. Sin esto,
         # el worker y los endpoints de diagnostico navegan la misma pagina
         # al mismo tiempo y se cancelan entre si (net::ERR_ABORTED en el
@@ -172,12 +186,19 @@ class Worker:
     async def _procesar_pendientes(self):
         db = SessionLocal()
         try:
-            op = (
-                db.query(Operacion)
-                .filter(Operacion.estado == Operacion.PENDIENTE)
-                .order_by(Operacion.creada_en)
-                .first()
-            )
+            # Una plataforma deslogueada no se arregla reintentando: el login
+            # es a mano a proposito. Sus operaciones esperan ahi, sin gastar
+            # intentos, hasta que vuelva la sesion.
+            ahora = datetime.now()
+            en_espera = [p for p, hasta in self.reintentar_desde.items()
+                         if ahora < hasta]
+
+            consulta = (db.query(Operacion)
+                        .filter(Operacion.estado == Operacion.PENDIENTE))
+            if en_espera:
+                consulta = consulta.filter(~Operacion.plataforma.in_(en_espera))
+
+            op = consulta.order_by(Operacion.creada_en).first()
             if not op:
                 return
 
@@ -202,9 +223,26 @@ class Worker:
                      op.id, op.accion, nombre_remoto, op.plataforma,
                      op.intentos, max_intentos)
 
-            exito, detalle = await self._ejecutar(
+            exito, detalle, motivo = await self._ejecutar(
                 op.plataforma, op.accion, nombre_remoto
             )
+
+            # Sesion caida: la operacion NO se gasta un intento ni termina en
+            # error. Antes se moria despues de 3 reintentos de 2 segundos, y
+            # cuando el usuario terminaba de loguearse a mano ya no quedaba
+            # nada encolado: lo que habia pedido se habia perdido en silencio.
+            # Ahora espera ahi y sale sola apenas vuelve la sesion.
+            if motivo == SIN_SESION:
+                op.estado = Operacion.PENDIENTE
+                op.intentos = max(0, op.intentos - 1)
+                op.detalle = detalle
+                self.reintentar_desde[op.plataforma] = (
+                    datetime.now() + timedelta(seconds=ESPERA_SIN_SESION))
+                log.warning("op#%s en espera: %s esta deslogueado. Logueate en "
+                            "la ventana del navegador y sale sola.",
+                            op.id, op.plataforma)
+                db.commit()
+                return
 
             if exito:
                 log.info("op#%s OK", op.id)
@@ -241,13 +279,14 @@ class Worker:
             db.close()
 
     async def _ejecutar(self, plataforma: str, accion: str, nombre_remoto: str):
+        """(exito, detalle, motivo). `motivo` distingue el caso sin sesion."""
         if self.modo_simulado:
             await asyncio.sleep(2)
-            return True, "simulado"
+            return True, "simulado", ""
 
         plat = self.plataformas.get(plataforma)
         if plat is None:
-            return False, f"plataforma desconocida: {plataforma}"
+            return False, f"plataforma desconocida: {plataforma}", ""
 
         async with self.bloqueo(plataforma):
             return await self._ejecutar_sin_turno(plat, plataforma, accion, nombre_remoto)
@@ -256,7 +295,8 @@ class Worker:
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
         if not listo:
-            return False, motivo
+            sin_sesion = not self.sesion_ok.get(plataforma, True)
+            return False, motivo, (SIN_SESION if sin_sesion else "")
 
         try:
             if accion == "apagar_hoy":
@@ -266,19 +306,19 @@ class Worker:
             elif accion == "prender":
                 ok = await plat.prender(nombre_remoto)
             else:
-                return False, f"accion desconocida: {accion}"
+                return False, f"accion desconocida: {accion}", ""
 
             if not ok:
                 # Puede que haya fallado por deslogueo en el medio
                 sigue_ok = await plat.asegurar_sesion()
                 self.sesion_ok[plataforma] = sigue_ok
                 if not sigue_ok:
-                    return False, "se cayo la sesion durante la operacion"
+                    return False, "se cayo la sesion durante la operacion", SIN_SESION
 
-            return ok, "" if ok else "no se pudo confirmar el cambio"
+            return ok, "" if ok else "no se pudo confirmar el cambio", ""
         except Exception as e:
             log.exception("Excepcion en %s.%s('%s')", plataforma, accion, nombre_remoto)
-            return False, _resumen(e)
+            return False, _resumen(e), ""
 
     async def _verificar_luego(self, producto_id: int, plataforma: str,
                                accion: str, demora: int):
@@ -392,6 +432,8 @@ class Worker:
         if not ok:
             return False, "sesion caida: logueate en la ventana del navegador"
 
+        # Volvio la sesion: lo que estaba esperando puede salir ya.
+        self.reintentar_desde.pop(plataforma, None)
         return True, ""
 
     async def aplicar_config(self) -> dict:
@@ -430,6 +472,10 @@ class Worker:
         for nombre in objetivo:
             async with self.bloqueo(nombre):
                 self.ultimo_refresco.pop(nombre, None)  # fuerza el refresco
+                # Que el boton sirva para lo que el usuario lo aprieta: acaba
+                # de loguearse y quiere que salga AHORA, no cuando venza la
+                # espera.
+                self.reintentar_desde.pop(nombre, None)
                 await self._preparar(nombre)
 
         return self.sesion_ok
@@ -599,6 +645,19 @@ class Worker:
                      nombre, salida[nombre]["prendidos"],
                      salida[nombre]["apagados"], salida[nombre]["no_estan"])
 
+            # Los que la app no encuentra en el portal. Se guardan para
+            # poder avisarlo en la pantalla: si encima la app los da por
+            # apagados, esta afirmando algo que no puede ver.
+            self.no_encontrados[nombre] = salida[nombre]["no_encontrados"]
+            ciegos = [n for n in self.no_encontrados[nombre]
+                      if n["estado"] in EstadoItem.APAGADOS_PROPIOS]
+            if ciegos:
+                log.warning(
+                    "%s: %s producto(s) que la app da por APAGADOS no "
+                    "aparecieron en la lectura, asi que no puede confirmar "
+                    "que sigan apagados: %s", nombre, len(ciegos),
+                    ", ".join(c["nombre_remoto"] for c in ciegos))
+
             self.novedades[nombre] = self._buscar_novedades(nombre, leidos)
             salida[nombre]["novedades"] = len(self.novedades[nombre])
 
@@ -645,8 +704,9 @@ class Worker:
 
         db = SessionLocal()
         try:
-            prendidos = apagados = no_estan = en_curso = 0
+            prendidos = apagados = en_curso = 0
             revividos = []
+            no_encontrados = []
 
             for producto in db.query(Producto).all():
                 remoto = remoto_de(producto, plataforma)
@@ -664,10 +724,23 @@ class Worker:
                     continue
 
                 if remoto not in leidos:
-                    # No aparecio en el portal. No lo pisamos con
-                    # "desconocido" si ya sabiamos algo: puede ser que el
-                    # nombre no coincida, y eso lo dice /api/verificar-catalogo.
-                    no_estan += 1
+                    # No aparecio en el portal. Seguimos sin pisar lo que ya
+                    # sabiamos (el nombre puede no coincidir), PERO esto se
+                    # avisa: era un agujero grande. Un producto que la app
+                    # no encuentra queda con su ultimo estado PARA SIEMPRE, y
+                    # si ese estado era "apagado", la pantalla lo sigue
+                    # afirmando en presente mientras el portal lo vende.
+                    # verificado_en NO se toca: es justo lo que delata que
+                    # esto es viejo.
+                    no_encontrados.append({
+                        "producto_id": producto.id,
+                        "producto": producto.nombre,
+                        "plataforma": plataforma,
+                        "nombre_remoto": remoto,
+                        "estado": est.estado,
+                        "verificado_en": (est.verificado_en.isoformat(
+                            timespec="seconds") if est.verificado_en else None),
+                    })
                     continue
 
                 disponible = leidos[remoto]
@@ -702,8 +775,9 @@ class Worker:
 
             db.commit()
             return {"leidos": len(leidos), "prendidos": prendidos,
-                    "apagados": apagados, "no_estan": no_estan,
-                    "en_curso": en_curso, "revividos": revividos}
+                    "apagados": apagados, "no_estan": len(no_encontrados),
+                    "en_curso": en_curso, "revividos": revividos,
+                    "no_encontrados": no_encontrados}
         finally:
             db.close()
 

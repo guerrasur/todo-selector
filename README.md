@@ -105,16 +105,58 @@ Las operaciones tardan 2 segundos y siempre dan OK. Sirve para ver la UI.
   - **PedidosYa se pone rancio** tras un día → nunca se opera sobre página vieja
 - **Botón "Revalidar sesión"** para forzar el chequeo cuando quieras.
 
-## Elegir sobre qué plataforma actuar
+## Apagar un producto en un solo portal
 
 Cada producto muestra dos chips (PedidosYa / Rappi). **Están los dos activos por
 defecto**; clickeás uno para excluirlo y el botón actúa solo sobre el otro.
-Sirve cuando una plataforma ya está bien y solo hay que corregir la otra.
+Sirve cuando hay que apagar en un portal antes que en el otro, o cuando una
+plataforma ya está bien y solo hay que corregir la otra.
+
+**El botón dice a dónde va**: con los dos chips puestos dice `Apagar hoy`, y
+sacando uno pasa a decir `Apagar hoy · solo PedidosYa`. El chip excluido queda
+tachado. Antes había que interpretar la opacidad de los chips para saberlo, así
+que la función existía pero no se veía.
 
 La exclusión **se queda puesta** hasta que vuelvas a clickear el chip. Antes se
 perdía sola: la lista se repinta cada pocos segundos y con eso el chip volvía a
 quedar seleccionado, así que si tardabas más que el refresco en apretar el
 botón, la acción salía a los dos portales sin decir nada.
+
+## Cuando la app no puede confirmar un apagado
+
+El 2026-07-28 pasó lo peor que puede pasar: la pantalla decía **apagado** y
+media hora después entró un pedido de PedidosYa con ese producto.
+
+El mecanismo: si la lectura de la carta **no encuentra** un producto —porque el
+nombre del catálogo no coincide con el del portal, o porque no se pudo abrir la
+categoría— la app *no pisa* el estado que tenía. Eso está bien (una lectura mala
+no debería borrar lo que sabíamos), pero el efecto era que un `apagado` viejo
+quedaba **congelado** y la pantalla lo seguía afirmando en presente, sin nada
+que lo delatara.
+
+La app no puede prometer que el portal no reviva algo por su cuenta. Lo que sí
+puede es **dejar de afirmar lo que no está viendo**. Ahora:
+
+- un producto que figura apagado y que la última lectura **no encontró** en el
+  portal aparece marcado en rojo, con el nombre exacto con el que lo estaba
+  buscando (que es lo que hay que corregir, normalmente desde la Carta);
+- lo mismo si hace **más de dos rondas** que nadie lo confirma;
+- arriba de todo sale un cartel rojo con la lista y dos atajos: releer los
+  portales, o ir a la Carta a arreglar el nombre.
+
+Se ve en `GET /api/alertas`.
+
+## Si se cae la sesión, no se pierde lo que pediste
+
+Rappi se desloguea por inactividad. Antes, una operación que agarraba la sesión
+caída se moría: tres reintentos de dos segundos contra un login que **solo
+vuelve a mano**, y después ERROR. Para cuando terminabas de loguearte, lo que
+habías pedido ya no estaba encolado.
+
+Ahora una operación que falla por sesión caída **no gasta intentos y no termina
+en error**: queda esperando y sale sola apenas vuelve la sesión, sin que tengas
+que volver a pedirla. La otra plataforma sigue trabajando normal mientras tanto,
+y el cartel rojo de arriba te dice en cuál hay que loguearse.
 
 ## Apagar todo (el botón de cierre)
 
@@ -362,6 +404,7 @@ GET  /api/masivo/previo?accion=apagar_hoy    cuántos tocaría cada portal
 GET  /api/config          los ajustes con su definición y su valor actual
 POST /api/config          {"cambios": {"minutos_ronda": 30}}
 POST /api/config/restablecer
+GET  /api/alertas         lo que la app da por apagado y no puede confirmar
 ```
 
 `/api/masivo` acepta además `releer`, `incluir_pausados` y `solo_propios` para

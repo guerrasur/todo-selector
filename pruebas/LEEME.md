@@ -36,7 +36,9 @@ cuando el catálogo pasa a manejarse desde la app.
 **`probar_estados.py`** cubre lo delicado de leer el estado real: que una
 operación en curso no la pise una lectura, que la app no se apropie de lo que
 apagó el local por su cuenta (`apagado_ajeno`, que la ronda de reverificación
-deja en paz), y que lo que el portal no mostró no borre lo que ya sabíamos.
+deja en paz), y que lo que el portal no mostró no borre lo que ya sabíamos —
+pero que **quede avisado**, que es el bug del 2026-07-28: la pantalla decía
+"apagado" y entró un pedido de eso.
 
 **`probar_cierre.py`** cubre el botón de "apagar todo" y los ajustes. Lo que
 importa ahí es lo que **no** se encola: apagar la carta entera son ~30

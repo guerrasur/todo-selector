@@ -273,6 +273,78 @@ def sucursal_configurable(db):
             "y olvida en que categoria vivia cada producto: es otro menu")
 
 
+async def sesion_caida(db):
+    """EL BUG DEL 2026-07-28: Rappi se deslogueo y se perdio lo encolado.
+
+    El usuario apago la Flan casero, Rappi estaba deslogueado, le salto el error y
+    tuvo que loguearse a mano. Para cuando termino, la operacion ya se habia
+    muerto: tres reintentos de 2 segundos contra una sesion que solo vuelve
+    con un login manual, y despues ERROR. Lo que habia pedido se perdio en
+    silencio.
+
+    Ahora la operacion espera ahi, sin gastar intentos, y sale sola apenas
+    vuelve la sesion.
+    """
+    print("\n== Sesion caida: la operacion espera, no se pierde ==")
+    from app.worker import Worker, SIN_SESION
+
+    todo_prendido(db)
+    w = Worker()
+    w.modo_simulado = False
+    w.corriendo = True
+
+    intentos = []
+
+    async def falla_sin_sesion(plataforma, accion, nombre_remoto):
+        intentos.append(plataforma)
+        w.sesion_ok[plataforma] = False
+        return False, "sesion caida: logueate en la ventana del navegador", SIN_SESION
+
+    w._ejecutar = falla_sin_sesion
+
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    db.add(Operacion(producto_id=p.id, plataforma="rappi", accion="apagar_hoy"))
+    db.commit()
+
+    for _ in range(4):
+        await w._procesar_pendientes()
+
+    db.expire_all()
+    op = db.query(Operacion).filter_by(producto_id=p.id).first()
+
+    revisar(op.estado == Operacion.PENDIENTE,
+            f"la operacion sigue encolada y no en error (quedo: {op.estado})")
+    revisar(op.intentos == 0, f"no gasta intentos (lleva {op.intentos})")
+    revisar(len(intentos) == 1,
+            f"y no machaca la plataforma deslogueada ({len(intentos)} intento)")
+    revisar("rappi" in w.reintentar_desde, "queda anotada la espera")
+
+    # Otra plataforma no tiene por que quedarse esperando por esta.
+    otro = db.query(Producto).filter_by(nombre="Budín de pan").first()
+    db.add(Operacion(producto_id=otro.id, plataforma="pedidosya",
+                     accion="apagar_hoy"))
+    db.commit()
+
+    hechas = []
+
+    async def anda_bien(plataforma, accion, nombre_remoto):
+        hechas.append(plataforma)
+        return True, "", ""
+
+    w._ejecutar = anda_bien
+    await w._procesar_pendientes()
+    revisar(hechas == ["pedidosya"],
+            f"PedidosYa sigue trabajando igual ({hechas})")
+
+    # Y al revalidar la sesion, lo que estaba esperando sale enseguida.
+    w.reintentar_desde.pop("rappi", None)
+    await w._procesar_pendientes()
+    db.expire_all()
+    op = db.query(Operacion).filter_by(producto_id=p.id).first()
+    revisar("rappi" in hechas and op.estado == Operacion.OK,
+            "y cuando vuelve la sesion sale sola, sin volver a pedirla")
+
+
 async def main():
     init_db()
     seed.sembrar()
@@ -287,6 +359,7 @@ async def main():
         await estado_transitorio(db, worker)
         await releer_antes(db, worker)
         await previo(db, worker)
+        await sesion_caida(db)
         ajustes(db)
         sucursal_configurable(db)
     finally:
