@@ -54,6 +54,47 @@ def limpiar(db):
 
 # ---------------------------------------------------------------- escenarios
 
+def base_vieja_gana_columnas(db):
+    """Una base creada por una version anterior tiene que seguir andando.
+
+    create_all() no toca las tablas que ya existen: sin la migracion, una
+    columna nueva del modelo no aparece nunca y TODAS las consultas del
+    producto empiezan a fallar con "no such column". La unica salida seria
+    borrarle la base al usuario, con su historial adentro.
+    """
+    print("\n== Base de una version anterior: se le agregan las columnas ==")
+    from sqlalchemy import text
+    from app.database import engine, init_db
+
+    with engine.begin() as con:
+        con.execute(text("DROP TABLE IF EXISTS productos"))
+        # El esquema tal como era antes de 'pausado'.
+        con.execute(text("""
+            CREATE TABLE productos (
+                id INTEGER NOT NULL PRIMARY KEY,
+                nombre VARCHAR(120) NOT NULL UNIQUE,
+                categoria VARCHAR(60),
+                orden INTEGER,
+                activo BOOLEAN,
+                es_plato_del_dia BOOLEAN,
+                fecha_dia VARCHAR(10)
+            )"""))
+        con.execute(text("INSERT INTO productos (nombre, categoria, activo) "
+                         "VALUES ('Producto de antes', 'Platos', 1)"))
+
+    init_db()
+    db.expire_all()
+
+    p = db.query(Producto).filter_by(nombre="Producto de antes").first()
+    revisar(p is not None, "los productos que ya estaban siguen ahi")
+    revisar(p is not None and not p.pausado,
+            "la columna nueva existe y arranca en falso")
+
+    # Y tiene que poder correrse dos veces sin romper.
+    init_db()
+    revisar(True, "correr la migracion de nuevo no rompe nada")
+
+
 def base_recien_creada(db):
     print("\n== Base nueva: el catalogo se siembra como manda seed.py ==")
     limpiar(db)
@@ -236,16 +277,51 @@ def no_se_puede_separar_lo_que_no_esta(db):
     db.rollback()
 
 
+def vincular_no_pisa_lo_que_ya_estaba(db):
+    """Vincular a mano dos que ya estaban emparejados con otra cosa.
+
+    El caso que lo pidio: "tarta de verdura chica" (PedidosYa) es en
+    realidad el "tarta de verdura" de Rappi. Pero ese ya estaba vinculado con el
+    "Tarta de verdura" de PedidosYa. Ese ultimo NO se puede evaporar.
+    """
+    print("\n== Vincular a mano no hace desaparecer al que estaba ==")
+    limpiar(db)
+    seed.sembrar()
+    db.expire_all()
+
+    revisar(remotos(db, "Tarta de verdura") ==
+            {"pedidosya": "Tarta de verdura", "rappi": "Tarta de verdura"},
+            "de entrada, 'Tarta de verdura' esta vinculado con el de Rappi")
+
+    catalogo.vincular(db, "Tarta de verdura chica", "Tarta de verdura")
+    db.commit()
+    db.expire_all()
+
+    revisar(remotos(db, "Tarta de verdura chica") ==
+            {"pedidosya": "Tarta de verdura chica", "rappi": "Tarta de verdura"},
+            "el par nuevo queda vinculado")
+
+    sueltos = [p for p in db.query(Producto).all()
+               if catalogo.nombre_remoto(p, "pedidosya") == "Tarta de verdura"]
+    revisar(len(sueltos) == 1,
+            "el 'Tarta de verdura' de PedidosYa sigue existiendo, ahora suelto")
+    revisar(len(sueltos) == 1 and
+            catalogo.nombre_remoto(sueltos[0], "rappi") is None,
+            "y quedo sin plataforma de Rappi, no vinculado a la fuerza")
+
+
 def main():
     init_db()
     db = SessionLocal()
     try:
+        base_vieja_gana_columnas(db)
         base_recien_creada(db)
         base_vieja_se_corrige(db)
         vincular_y_separar(db)
         separar_conserva_el_estado(db)
         vincular_remapea_la_cola(db)
         seed_no_pisa_lo_manual(db)
+        vincular_no_pisa_lo_que_ya_estaba(db)
         no_se_puede_separar_lo_que_no_esta(db)
     finally:
         db.close()

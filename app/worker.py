@@ -68,6 +68,7 @@ class Worker:
         self.ultimo_chequeo = None
         self.ultima_lectura = None   # ultima vez que leimos el estado real
         self.novedades = {}          # plataforma -> productos que aparecieron
+        self.ultima_carta = None     # ultimo cruce de las dos cartas
         # Una pestaña por plataforma = un solo usuario a la vez. Sin esto,
         # el worker y los endpoints de diagnostico navegan la misma pagina
         # al mismo tiempo y se cancelan entre si (net::ERR_ABORTED en el
@@ -269,6 +270,10 @@ class Worker:
             if producto is None:
                 return
 
+            # Si lo pausaron entre el apagado y este chequeo, no lo sostenemos.
+            if producto.pausado:
+                return
+
             plat = self.plataformas.get(plataforma)
             if plat is None:
                 return
@@ -450,15 +455,22 @@ class Worker:
 
         return {"url": plat.page.url, "nodos": len(lineas), "arbol": lineas}
 
-    async def leer_carta(self) -> dict:
+    async def leer_carta(self, releer: bool = True) -> dict:
         """Lee la carta de las dos plataformas y las cruza.
 
         Es el reemplazo del catalogo a mano de seed.py: cada portal dice
         como se llaman SUS productos y aca se decide cuales son el mismo.
         No toca la base: propone, y la confirmacion es del usuario.
         """
+        # Leer las dos cartas tarda como un minuto. Guardamos la ultima para
+        # que abrir la pantalla no la dispare de nuevo: recargar el navegador
+        # obligaba a esperar otra vez, y la carta no cambia tan seguido.
+        if not releer:
+            return self.ultima_carta      # None si todavia no se leyo nunca
+
         if self.modo_simulado:
-            return _carta_de_muestra()
+            self.ultima_carta = _carta_de_muestra()
+            return self.ultima_carta
 
         cartas, errores = {}, {}
         for nombre in ("pedidosya", "rappi"):
@@ -491,9 +503,13 @@ class Worker:
                  "%s a confirmar",
                  len(cartas.get("pedidosya", [])), len(cartas.get("rappi", [])),
                  salida["emparejados"], len(salida["a_confirmar"]))
+
+        salida["leida_en"] = datetime.now().isoformat(timespec="seconds")
+        self.ultima_carta = salida
         return salida
 
-    async def sincronizar_estados(self, plataforma: str = None) -> dict:
+    async def sincronizar_estados(self, plataforma: str = None,
+                                  sostener: bool = False) -> dict:
         """Lee la carta de los portales y guarda como esta cada producto.
 
         Sin esto la app arrancaba sin saber nada: todo en "desconocido"
@@ -528,7 +544,7 @@ class Worker:
                     salida[nombre] = {"error": _resumen(e)}
                     continue
 
-            salida[nombre] = self._guardar_estados(nombre, leidos)
+            salida[nombre] = self._guardar_estados(nombre, leidos, sostener)
             log.info("Estado real de %s: %s prendidos, %s apagados, "
                      "%s del catalogo no aparecieron",
                      nombre, salida[nombre]["prendidos"],
@@ -555,13 +571,28 @@ class Worker:
             db.close()
 
     @staticmethod
-    def _guardar_estados(plataforma: str, leidos: dict) -> dict:
-        """Vuelca al catalogo lo que se leyo del portal."""
+    def _guardar_estados(plataforma: str, leidos: dict,
+                         sostener: bool = False) -> dict:
+        """Vuelca al catalogo lo que se leyo del portal.
+
+        `sostener` cambia que pasa con lo que la app apago y el portal
+        muestra disponible:
+
+          False (lectura del arranque): gana el portal. Es lo correcto al
+            empezar el dia, porque un "apagado por hoy" de ayer ya vencio
+            solo y volver a apagarlo seria repetir la decision de ayer.
+
+          True (ronda de cada 15 min): no se pisa, se devuelve en
+            'revividos' para que el que llama confirme y lo reencole. Eso
+            es un producto que se revivio solo, que es justamente lo que la
+            ronda viene a cazar.
+        """
         from .catalogo import nombre_remoto as remoto_de
 
         db = SessionLocal()
         try:
             prendidos = apagados = no_estan = en_curso = 0
+            revividos = []
 
             for producto in db.query(Producto).all():
                 remoto = remoto_de(producto, plataforma)
@@ -589,6 +620,21 @@ class Worker:
                 est.verificado_en = datetime.now()
 
                 if disponible:
+                    # Un producto en pausa se lee igual (la lectura trae la
+                    # carta entera de todos modos) pero no se sostiene: es
+                    # justamente lo que el usuario pidio sacarse de encima.
+                    if (sostener and not producto.pausado
+                            and est.estado in EstadoItem.APAGADOS_PROPIOS):
+                        # Lo apagamos nosotros y esta prendido: se revivio.
+                        # No lo pisamos: primero hay que confirmarlo.
+                        revividos.append({
+                            "producto_id": producto.id,
+                            "producto": producto.nombre,
+                            "plataforma": plataforma,
+                            "nombre_remoto": remoto,
+                            "estado": est.estado,
+                        })
+                        continue
                     est.estado = EstadoItem.PRENDIDO
                     est.detalle = ""
                     prendidos += 1
@@ -603,7 +649,7 @@ class Worker:
             db.commit()
             return {"leidos": len(leidos), "prendidos": prendidos,
                     "apagados": apagados, "no_estan": no_estan,
-                    "en_curso": en_curso}
+                    "en_curso": en_curso, "revividos": revividos}
         finally:
             db.close()
 
@@ -712,53 +758,85 @@ class Worker:
                 log.exception("Error reverificando: %s", e)
 
     async def _reverificar(self):
+        """Relee las dos cartas enteras y actualiza todo lo que se ve.
+
+        Antes leia SOLO lo que la app tenia apagado, producto por producto.
+        Eso dejaba desactualizado el resto de la pantalla y, en PedidosYa,
+        significaba cambiar de categoria una vez por producto.
+
+        Leer las dos cartas de una sale mas barato que eso y ademas mantiene
+        al dia lo que el local apago o prendio desde el portal, que era lo
+        que faltaba: ahora "apagado (afuera)" tambien se confirma cada
+        ronda, y si alguien lo prendio a mano la pantalla se entera.
+        """
         if self.modo_simulado:
+            return
+
+        resultado = await self.sincronizar_estados(sostener=True)
+
+        revividos = []
+        for datos in resultado.values():
+            if isinstance(datos, dict):
+                revividos.extend(datos.get("revividos", []))
+
+        for caso in revividos:
+            await self._reencolar_si_revivio(caso)
+
+        self.ultimo_chequeo = datetime.now()
+
+    async def _reencolar_si_revivio(self, caso: dict):
+        """Confirma con una segunda lectura antes de acusar que revivio.
+
+        Un falso "revivio" no es gratis: reencola un apagado. Hoy apagar()
+        relee antes de clickear, asi que en el peor caso no hace nada, pero
+        la lectura de confirmacion es barata (es un solo producto) y evita
+        llenar el historial de operaciones que no hacian falta.
+        """
+        plataforma = caso["plataforma"]
+        plat = self.plataformas.get(plataforma)
+        if plat is None:
+            return
+
+        try:
+            async with self.bloqueo(plataforma):
+                listo, _ = await self._preparar(plataforma)
+                if not listo:
+                    return
+                real = await plat.leer_estado(caso["nombre_remoto"])
+        except Exception as e:
+            log.error("Error confirmando si '%s' revivio en %s: %s",
+                      caso["producto"], plataforma, e)
             return
 
         db = SessionLocal()
         try:
-            apagados = (
-                db.query(EstadoItem)
-                .filter(EstadoItem.estado.in_([
-                    EstadoItem.APAGADO_HOY, EstadoItem.APAGADO_INDEF
-                ]))
-                .all()
-            )
+            est = (db.query(EstadoItem)
+                   .filter_by(producto_id=caso["producto_id"],
+                              plataforma=plataforma)
+                   .first())
+            if est is None:
+                return
 
-            for est in apagados:
-                plat = self.plataformas.get(est.plataforma)
-                if plat is None:
-                    continue
+            est.verificado_en = datetime.now()
 
-                producto = db.query(Producto).get(est.producto_id)
-                nombre_remoto = self._nombre_remoto(db, producto, est.plataforma)
+            if real is None or not real.disponible:
+                log.info("%s: la lectura de la carta lo dio prendido y la "
+                         "confirmacion no. Me quedo con la confirmacion.",
+                         caso["producto"])
+                db.commit()
+                return
 
-                try:
-                    async with self.bloqueo(est.plataforma):
-                        listo, _ = await self._preparar(est.plataforma)
-                        if not listo:
-                            continue
-                        real = await plat.leer_estado(nombre_remoto)
-                except Exception:
-                    continue
-
-                est.verificado_en = datetime.now()
-
-                if real is not None and real.disponible:
-                    # Se revivio solo: lo reencolamos
-                    log.warning("%s revivio en %s, reencolando",
-                                producto.nombre, est.plataforma)
-                    accion = ("apagar_hoy" if est.estado == EstadoItem.APAGADO_HOY
-                              else "apagar_indef")
-                    db.add(Operacion(
-                        producto_id=est.producto_id,
-                        plataforma=est.plataforma,
-                        accion=accion,
-                        detalle="reintento automatico: se habia revivido",
-                    ))
-
+            log.warning("%s revivio en %s, reencolando", caso["producto"],
+                        plataforma)
+            est.estado = EstadoItem.PRENDIDO
+            db.add(Operacion(
+                producto_id=caso["producto_id"],
+                plataforma=plataforma,
+                accion=("apagar_hoy" if caso["estado"] == EstadoItem.APAGADO_HOY
+                        else "apagar_indef"),
+                detalle="reintento automatico: se habia revivido",
+            ))
             db.commit()
-            self.ultimo_chequeo = datetime.now()
         finally:
             db.close()
 

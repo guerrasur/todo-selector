@@ -58,11 +58,24 @@ async def abrir_navegador(p):
 
 
 def fila_de(pagina, texto_py, texto_rappi):
-    """La fila de la carta que cruza esos dos nombres."""
-    return (pagina.locator(".par")
+    """La fila de la carta que cruza esos dos nombres.
+
+    Se excluye .manual: la fila de "Vincular a mano" tiene todos los nombres
+    adentro de los <select>, asi que matchearia con cualquier busqueda.
+    """
+    return (pagina.locator(".par:not(.manual)")
             .filter(has_text=texto_py)
             .filter(has_text=texto_rappi)
             .first)
+
+
+async def esperar(locator, timeout=10000):
+    """True si el elemento aparece antes del timeout."""
+    try:
+        await locator.first.wait_for(timeout=timeout)
+        return True
+    except Exception:
+        return False
 
 
 async def esperar_boton(fila, texto, timeout=10000):
@@ -127,6 +140,70 @@ async def probar_aviso_de_novedad(pagina):
             "y el producto deja de figurar en gris en PedidosYa")
 
 
+async def probar_vinculador_manual(pagina):
+    """Vincular dos cualesquiera, sin esperar a que la app los proponga.
+
+    El caso que lo pidio: el usuario sabe que el "Tarta de verdura chica"
+    de PedidosYa es el "Tarta de verdura" de Rappi. Ninguna heuristica lo va a
+    proponer, y ademas el de Rappi ya estaba emparejado con otro.
+    """
+    print("\n== Vincular a mano ==")
+    await pagina.click("#btn-carta")
+    await pagina.wait_for_selector("#panel-carta:visible", timeout=5000)
+
+    seccion = pagina.locator(".grupo").filter(has_text="Vincular a mano").first
+    await seccion.wait_for(timeout=10000)
+
+    await seccion.locator("select[data-plat='pedidosya']").select_option(
+        "Tarta de verdura chica")
+    await seccion.locator("select[data-plat='rappi']").select_option("Tarta de verdura")
+    await seccion.locator("button", has_text="Vincular").click()
+    await pagina.wait_for_timeout(2000)
+
+    datos = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    productos = datos["productos"]
+
+    nuevo = [p for p in productos
+             if p["plataformas"]["pedidosya"] == "Tarta de verdura chica"]
+    revisar(len(nuevo) == 1 and nuevo[0]["plataformas"]["rappi"] == "Tarta de verdura",
+            "los dos que elegi quedan bajo el mismo boton")
+
+    viejo = [p for p in productos
+             if p["plataformas"]["pedidosya"] == "Tarta de verdura"]
+    revisar(len(viejo) == 1 and viejo[0]["plataformas"]["rappi"] is None,
+            "el que estaba emparejado con ese de Rappi no se perdio: quedo suelto")
+
+
+async def probar_pausa(pagina):
+    """Temporalmente inactivo: al final, apagado de color, y sin sostener."""
+    print("\n== Pausar un producto ==")
+    await pagina.click("#btn-carta")          # cerrar el panel de la carta
+    await pagina.wait_for_timeout(300)
+
+    fila = pagina.locator(".item").filter(has_text="Pollo al horno").first
+    await fila.locator("button", has_text="Pausar").click()
+    await pagina.wait_for_selector(".item.pausado", timeout=10000)
+
+    revisar(await pagina.locator(".categoria", has_text="En pausa").count() == 1,
+            "aparece la seccion 'En pausa' al final")
+
+    pausados = pagina.locator(".item.pausado")
+    revisar(await pausados.count() == 1 and
+            "Pollo al horno" in await pausados.first.inner_text(),
+            "el producto pausado se va ahi y queda apagado de color")
+
+    productos = await pagina.evaluate("fetch('/api/productos').then(r => r.json())")
+    pausado = [p for p in productos if p["pausado"]]
+    revisar(len(pausado) == 1 and pausado[0]["nombre"].startswith("Guiso"),
+            "la API lo devuelve marcado como pausado")
+
+    # Y se puede volver atras.
+    await pausados.first.locator("button", has_text="Reactivar").click()
+    await pagina.wait_for_timeout(1500)
+    revisar(await pagina.locator(".item.pausado").count() == 0,
+            "Reactivar lo devuelve a la lista de siempre")
+
+
 async def main():
     servidor = levantar_app()
     for _ in range(100):                      # esperar a que levante
@@ -180,18 +257,22 @@ async def main():
                 "Separar los vuelve a dejar con un boton cada uno")
 
         print("\n== Agregar uno que solo esta en Rappi ==")
-        fila_bowl = pagina.locator(".par").filter(has_text="Guiso de garbanzos").first
+        fila_bowl = pagina.locator(".par:not(.manual)").filter(has_text="Guiso de garbanzos").first
         await fila_bowl.locator("button", has_text="Agregar").click()
-        fila_bowl = pagina.locator(".par").filter(has_text="Guiso de garbanzos").first
+        fila_bowl = pagina.locator(".par:not(.manual)").filter(has_text="Guiso de garbanzos").first
         await fila_bowl.locator(".hecho").wait_for(timeout=10000)
         revisar("cargado" in await fila_bowl.inner_text(),
                 "queda marcado como cargado")
 
-        texto_lista = await pagina.locator("#lista").inner_text()
-        revisar("Guiso de garbanzos" in texto_lista,
+        # La lista se repinta despues de que la fila de la carta se marca
+        # como cargada, asi que hay que esperarla a ella, no leer y ver.
+        en_lista = pagina.locator("#lista .item").filter(has_text="Guiso de garbanzos")
+        revisar(await esperar(en_lista),
                 "y aparece en la lista de productos de la pantalla principal")
 
         await probar_aviso_de_novedad(pagina)
+        await probar_vinculador_manual(pagina)
+        await probar_pausa(pagina)
 
         await navegador.close()
 
