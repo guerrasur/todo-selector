@@ -302,6 +302,133 @@ async def probar_buscador(pagina):
     await pagina.click("#btn-limpiar")
 
 
+async def probar_vista_de_prendidos(pagina):
+    """Juntar arriba lo que está prendido, sin tener que recorrer la carta.
+
+    Dos vistas sobre los mismos datos: "prendidos primero" ordena sin
+    esconder nada, "solo los prendidos" filtra. Lo que NO puede pasar es que
+    filtrar esconda un apagado que la app no puede confirmar: ese es
+    exactamente el que puede estar vendiéndose (el pedido del 2026-07-28).
+    """
+    print("\n== Vista: prendidos primero / solo los prendidos ==")
+    from datetime import datetime
+    from app.database import SessionLocal
+    from app.models import Producto, EstadoItem
+    from app.worker import worker
+
+    # En modo simulado todo arranca en "desconocido": hay que dejar un
+    # prendido, un apagado y un apagado-sin-confirmar para ver los 3 grupos.
+    #
+    # El `verificado_en` no es decoracion: un apagado que nadie confirmo
+    # nunca cae solo en el grupo de los inciertos (/api/alertas lo reporta
+    # por viejo), y entonces la prueba no distinguiria un grupo del otro.
+    db = SessionLocal()
+    try:
+        def poner(nombre, estado, confirmado=False):
+            p = db.query(Producto).filter_by(nombre=nombre).first()
+            for e in p.estados:
+                e.estado = estado
+                e.verificado_en = datetime.now() if confirmado else None
+            return p
+
+        # "Risotto" y no "Guiso de lentejas": el nombre del apagado no puede
+        # ser prefijo de otro producto, o buscarlo en la pantalla encuentra
+        # al otro ("Guiso de lentejas vegetariano") y la prueba miente.
+        poner("Arroz Chaufa", EstadoItem.PRENDIDO, confirmado=True)
+        poner("Risotto", EstadoItem.APAGADO_HOY, confirmado=True)
+        dudoso = poner("Pastel de papa", EstadoItem.APAGADO_HOY, confirmado=True)
+        db.commit()
+
+        # Y este ademas no aparecio en la ultima lectura del portal: es el
+        # apagado que la app NO puede confirmar.
+        worker.no_encontrados = {"pedidosya": [{
+            "producto_id": dudoso.id, "producto": dudoso.nombre,
+            "plataforma": "pedidosya", "nombre_remoto": dudoso.nombre,
+            "estado": EstadoItem.APAGADO_HOY, "verificado_en": None,
+        }]}
+    finally:
+        db.close()
+
+    await pagina.reload()
+    await pagina.locator("#lista .item").first.wait_for(timeout=10000)
+
+    revisar(await pagina.locator(".chip-vista").count() == 3,
+            "hay tres vistas para elegir")
+    revisar("prendido" in await pagina.locator("#cuenta-prendidos").inner_text(),
+            "la cabecera dice cuántos hay prendidos")
+
+    todos = await pagina.locator("#lista .item").count()
+
+    # --- Prendidos primero: reordena, no esconde ---
+    await pagina.locator(".chip-vista[data-vista='primero']").click()
+    # La vista se repinta despues de traer /api/productos: esperar el titulo
+    # nuevo y no ".categoria", que ya esta en pantalla desde antes del click.
+    revisar(await esperar(
+                pagina.locator("#lista .categoria", has_text="Prendidos —")),
+            "aparece la sección de prendidos")
+
+    # Los titulos van en mayuscula por CSS, y eso es lo que devuelve
+    # inner_text: hay que comparar sin distinguirlas.
+    titulos = [t.upper()
+               for t in await pagina.locator("#lista .categoria").all_inner_texts()]
+    revisar(titulos and titulos[0].startswith("PRENDIDOS"),
+            f"el primer título es el de los prendidos ({titulos[:1]})")
+    revisar(any(t.startswith("APAGADOS") for t in titulos),
+            "los apagados siguen estando, abajo")
+    revisar(await pagina.locator("#lista .item").count() == todos,
+            "no esconde ningún producto")
+
+    # El primer producto de la lista tiene que ser uno prendido.
+    primero = await pagina.locator("#lista .item").first.inner_text()
+    revisar("Arroz Chaufa" in primero,
+            f"y el prendido quedó arriba de todo ({primero.split(chr(10))[0]})")
+
+    # --- Solo los prendidos: filtra ---
+    await pagina.locator(".chip-vista[data-vista='solo']").click()
+    await pagina.wait_for_timeout(800)
+
+    visibles = await pagina.locator("#lista .item").count()
+    revisar(0 < visibles < todos, f"esconde los apagados ({visibles} de {todos})")
+
+    texto = await pagina.locator("#lista").inner_text()
+    revisar("Risotto" not in texto,
+            "el apagado confirmado no está")
+    revisar("Pastel de papa" in texto,
+            "pero el apagado que NO se puede confirmar SÍ está: "
+            "puede estar vendiéndose")
+    revisar("no se muestran en esta vista" in texto,
+            "y dice cuántos escondió, en vez de esconderlos calladito")
+
+    # --- La elección sobrevive al repintado automático y a recargar ---
+    await pagina.wait_for_timeout(4500)
+    revisar(await pagina.locator("#lista .item").count() == visibles,
+            "la vista sigue puesta después de que la lista se repinte sola")
+
+    await pagina.reload()
+    await pagina.locator("#lista .item").first.wait_for(timeout=10000)
+    revisar("sel" in (await pagina.locator(".chip-vista[data-vista='solo']")
+                      .get_attribute("class")),
+            "y también después de recargar la pantalla")
+
+    # Dejar la pantalla como estaba para las pruebas que siguen.
+    worker.no_encontrados = {}
+    db = SessionLocal()
+    try:
+        for nombre in ("Arroz Chaufa", "Risotto", "Pastel de papa"):
+            p = db.query(Producto).filter_by(nombre=nombre).first()
+            for e in p.estados:
+                e.estado = EstadoItem.DESCONOCIDO
+                e.verificado_en = None
+        db.commit()
+    finally:
+        db.close()
+
+    await pagina.locator(".chip-vista[data-vista='todos']").click()
+    await pagina.wait_for_timeout(800)
+    revisar(await pagina.locator("#lista .item").count() == todos,
+            "volver a 'por categoría' devuelve la lista entera")
+
+
 async def probar_seleccion_de_plataforma(pagina):
     """El chip excluido tiene que sobrevivir al repintado automatico.
 
@@ -542,6 +669,7 @@ async def main():
 
         await probar_sin_platos_del_dia(pagina)
         await probar_buscador(pagina)
+        await probar_vista_de_prendidos(pagina)
         await probar_seleccion_de_plataforma(pagina)
         await probar_aviso_de_apagado_sin_confirmar(pagina)
 

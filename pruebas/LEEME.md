@@ -53,7 +53,10 @@ devuelve `carta_2026-07-27.json`, que es la lectura **real** de los dos
 portales de ese día: sirve para probar la pantalla sin estar en el local.
 
 Además del recorrido de la Carta cubre el panel de **Apagar todo**, el de
-**Ajustes**, y una regresión que costó caro: el chip de plataforma se
+**Ajustes**, las **vistas de prendidos** (que "prendidos primero" no esconda
+nada, que "solo los prendidos" sí, que ninguna de las dos esconda un apagado
+que la app no puede confirmar, y que la vista elegida sobreviva al repintado
+y a recargar), y una regresión que costó caro: el chip de plataforma se
 deseleccionaba solo. La lista se repinta cada pocos segundos, y la selección
 vivía en una variable local del repintado; si tardabas más que el refresco en
 apretar el botón, la acción salía a los dos portales sin decir nada.
