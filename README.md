@@ -41,6 +41,12 @@ La unica vez que hay que hacer algo a mano es la primera: bajar el zip desde
 GitHub (botón verde **Code → Download ZIP**), descomprimirlo, y de ahi en mas
 el `.bat` se actualiza solo.
 
+**Acceso directo.** La primera vez que arranca, la app deja en el escritorio un
+acceso directo **TODO-SELECTOR** con el icono de `todo2.ico`. Se hace una sola
+vez: queda una marca en `%LOCALAPPDATA%\TodoSelector\acceso-directo.ok`, así que
+si lo borrás no vuelve a aparecer. El mismo icono es el de la pestaña del
+navegador (se sirve en `/favicon.ico`).
+
 Variantes:
 
 ```
@@ -258,6 +264,7 @@ plataformas/
   pedidosya.py            # confirmado en vivo
   rappi.py                # TODO-SELECTOR (tarjeta y sesión expirada)
 static/index.html         # UI
+todo2.ico                 # icono: pestaña del navegador y acceso directo
 pruebas/                  # corren sin tocar los portales, ver pruebas/LEEME.md
 ```
 

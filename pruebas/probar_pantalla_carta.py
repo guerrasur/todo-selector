@@ -216,6 +216,32 @@ async def main():
         pagina = await navegador.new_page()
         await pagina.goto(BASE)
 
+        print("\n== El icono de la pestaña ==")
+        icono = await pagina.evaluate("""
+            fetch('/favicon.ico').then(r => r.arrayBuffer().then(b => ({
+                estado: r.status,
+                tipo: r.headers.get('content-type'),
+                bytes: b.byteLength,
+                // Los .ico arrancan con 00 00 01 00
+                cabecera: [...new Uint8Array(b).slice(0, 4)].join(','),
+            })))""")
+        revisar(icono["estado"] == 200, "/favicon.ico responde")
+        revisar(icono["cabecera"] == "0,0,1,0",
+                f"y lo que sirve es un .ico de verdad ({icono['bytes']} bytes)")
+        revisar(await pagina.locator("link[rel='icon']").count() == 1,
+                "la pagina lo declara con <link rel='icon'>")
+
+        # Que sea un .ico valido no alcanza: tiene que poder decodificarlo
+        # el navegador, que es lo unico que decide si se ve en la pestaña.
+        medida = await pagina.evaluate("""
+            new Promise(ok => {
+                const img = new Image();
+                img.onload  = () => ok(img.naturalWidth + 'x' + img.naturalHeight);
+                img.onerror = () => ok('no se pudo decodificar');
+                img.src = '/favicon.ico';
+            })""")
+        revisar("x" in medida, f"Chrome lo decodifica como imagen ({medida})")
+
         print("\n== Abrir la carta ==")
         await pagina.click("#btn-carta")
         await pagina.click("#btn-leer-carta")
