@@ -134,6 +134,42 @@
   .par.ok { border-left: 3px solid var(--on); }
   .par .hecho { color: var(--on); font-size: 12px; }
   .carta .cargando { color: var(--curso); }
+
+  /* ---- Cierre: apagar/prender una plataforma entera ---- */
+  .fila-cierre {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 0; border-top: 1px solid var(--borde);
+  }
+  .fila-cierre:first-of-type { border-top: none; }
+  .fila-cierre .quien-cierre { min-width: 96px; font-weight: 500; }
+  .fila-cierre .cuantos { color: var(--tenue); font-size: 12px; }
+  button.grande { padding: 9px 14px; }
+  #resultado-cierre { font-size: 13px; margin-top: 12px; white-space: pre-line; }
+
+  /* ---- Ajustes ---- */
+  .ajuste {
+    display: grid; grid-template-columns: 1fr auto; gap: 8px 14px;
+    align-items: center; padding: 10px 0; border-top: 1px solid var(--borde);
+  }
+  .ajuste:first-of-type { border-top: none; }
+  .ajuste .ayuda-ajuste {
+    grid-column: 1; font-size: 12px; color: var(--tenue); margin-top: 2px;
+  }
+  .ajuste .control { grid-row: 1 / span 2; display: flex;
+                     align-items: center; gap: 8px; }
+  .ajuste input[type="number"] { width: 84px; }
+  .ajuste input[type="text"] { width: 160px; }
+  .ajuste input[type="number"], .ajuste input[type="text"], .ajuste select {
+    padding: 7px 9px; border-radius: 7px; font: inherit; font-size: 13px;
+    border: 1px solid var(--borde); background: var(--bg); color: var(--texto);
+  }
+  .ajuste .unidad { color: var(--tenue); font-size: 12px; }
+  .ajuste.cambiado { background: #1f2330; }
+  .pie-ajustes {
+    display: flex; align-items: center; gap: 10px; margin-top: 16px;
+    padding-top: 14px; border-top: 1px solid var(--borde);
+  }
+  #estado-ajustes { font-size: 13px; color: var(--tenue); }
 </style>
 </head>
 <body>
@@ -143,9 +179,11 @@
   <span class="badge" id="estado-sistema">cargando…</span>
   <span class="badge" id="pendientes"></span>
   <span class="badge" id="lectura"></span>
-  <button id="btn-leer-estado" style="margin-left:auto">Leer estado real</button>
+  <button id="btn-cierre" style="margin-left:auto">Apagar todo</button>
+  <button id="btn-leer-estado">Leer estado real</button>
   <button id="btn-carta">Actualizar carta</button>
   <button id="btn-revalidar">Revalidar sesión</button>
+  <button id="btn-ajustes" title="Ajustes">⚙</button>
 </header>
 
 <main>
@@ -156,6 +194,8 @@
     <span id="resultado-busqueda"></span>
   </div>
   <div id="panel-novedades" style="display:none"></div>
+  <div id="panel-cierre" class="carta" style="display:none"></div>
+  <div id="panel-ajustes" class="carta" style="display:none"></div>
   <div id="panel-carta" class="carta" style="display:none"></div>
   <div id="lista" class="vacio">Cargando productos…</div>
 </main>
@@ -200,10 +240,16 @@ function pintarNovedades(novedades) {
     fila.style.cssText = 'display:flex;gap:10px;align-items:center;' +
                          'justify-content:space-between;margin-top:6px';
 
+    // Los dos nombres vienen del portal: van por textContent, no por
+    // innerHTML, o un producto con un < en el nombre rompe el aviso.
     const texto = document.createElement('div');
-    texto.innerHTML =
-      `<b>${n.producto}</b> ahora también está en ${NOMBRE_PLAT[n.plataforma]}` +
-      ` como <b>${n.nombre_en_el_portal}</b>`;
+    const cual = document.createElement('b');
+    cual.textContent = n.producto;
+    const comoAlla = document.createElement('b');
+    comoAlla.textContent = n.nombre_en_el_portal;
+    texto.append(cual,
+                 ` ahora también está en ${NOMBRE_PLAT[n.plataforma]} como `,
+                 comoAlla);
 
     const acc = document.createElement('div');
     acc.className = 'acciones';
@@ -275,6 +321,11 @@ function hora(iso) {
 
 let filtro = '';
 
+// producto_id -> Set de plataformas que sacaste de la selección con un click
+// en el chip. Vive acá afuera para que el repintado automático no te la
+// borre: ver el comentario largo en fila().
+const excluidas = new Map();
+
 // Sin tildes y en minúsculas: buscar "clasica" tiene que encontrar "Clásica".
 // El rango \u0300-\u036f son las marcas que NFD deja sueltas al separar la
 // letra de su tilde.
@@ -321,9 +372,12 @@ function pintarProductos(productos) {
   const enUso = productos.filter(p => !p.pausado);
   const pausados = productos.filter(p => p.pausado);
 
+  // Los que se agregan desde la pantalla Carta vienen sin categoría, y el
+  // título quedaba en blanco: una franja vacía arriba de un grupo de
+  // productos, que parecía un error de la pantalla.
   const porCategoria = {};
   for (const p of enUso) {
-    (porCategoria[p.categoria] ||= []).push(p);
+    (porCategoria[p.categoria || 'Sin categoría'] ||= []).push(p);
   }
 
   for (const [cat, items] of Object.entries(porCategoria)) {
@@ -380,10 +434,18 @@ function fila(item) {
   };
   div.appendChild(nombre);
 
-  // Cada plataforma es un chip clickeable: define sobre cuales actuar
+  // Cada plataforma es un chip clickeable: define sobre cuales actuar.
+  //
+  // La selección vive en `excluidas` (afuera de esta función) y NO en una
+  // variable local. Tiene que ser así porque la lista se repinta sola cada
+  // pocos segundos: con la selección local, excluías PedidosYa, tardabas
+  // más que el refresco en apretar el botón, y el chip volvía a quedar
+  // seleccionado sin que se notara. El click terminaba apagando en los DOS
+  // portales, que es exactamente lo contrario de lo que habías pedido.
   const plats = document.createElement('div');
   plats.className = 'plats';
-  const seleccion = new Set(PLATS);
+  const fuera = excluidas.get(item.id) || new Set();
+  const seleccion = new Set();
 
   for (const plat of PLATS) {
     const est = item.estados[plat];
@@ -395,12 +457,13 @@ function fila(item) {
       na.textContent = `${NOMBRE_PLAT[plat]}: —`;
       na.title = 'Este producto no existe en ' + NOMBRE_PLAT[plat];
       plats.appendChild(na);
-      seleccion.delete(plat);
       continue;
     }
 
+    if (!fuera.has(plat)) seleccion.add(plat);
+
     const pill = document.createElement('button');
-    pill.className = 'pill sel';
+    pill.className = 'pill' + (fuera.has(plat) ? '' : ' sel');
     pill.dataset.plat = plat;
     pill.title = (est.detalle || '') + '  (click para incluir/excluir)';
     pill.innerHTML =
@@ -410,14 +473,23 @@ function fila(item) {
     pill.onclick = () => {
       if (seleccion.has(plat)) {
         seleccion.delete(plat);
+        fuera.add(plat);
         pill.classList.remove('sel');
       } else {
         seleccion.add(plat);
+        fuera.delete(plat);
         pill.classList.add('sel');
       }
-      // Si no queda ninguna, deshabilitamos los botones
+      // Solo se recuerdan las filas donde sacaste algo: si están las dos,
+      // no hay nada que guardar y el mapa no crece al pedo.
+      if (fuera.size) excluidas.set(item.id, fuera);
+      else excluidas.delete(item.id);
+
+      // Si no queda ninguna, deshabilitamos los botones de apagar/prender
+      // (no el de pausar, que no depende de la plataforma).
       const vacio = seleccion.size === 0;
-      div.querySelectorAll('.acciones button').forEach(b => b.disabled = vacio);
+      div.querySelectorAll('.acciones button:not(.pausa)')
+         .forEach(b => b.disabled = vacio);
     };
 
     plats.appendChild(pill);
@@ -472,6 +544,13 @@ function fila(item) {
   bOn.onclick = () => accion(item.id, 'prender', [...seleccion]);
 
   acc.append(bHoy, bIndef, bOn);
+
+  // Si excluiste las dos plataformas, no hay sobre qué actuar. Se repinta
+  // así también después del refresco, no solo al clickear el chip.
+  if (seleccion.size === 0) {
+    for (const b of [bHoy, bIndef, bOn]) b.disabled = true;
+  }
+
   div.appendChild(acc);
 
   return div;
@@ -502,6 +581,335 @@ async function accion(producto_id, accion, plataformas) {
   cargar();
 }
 
+// ---------------------------------------------------------------- Cierre
+//
+// Apagar (o prender) la carta entera de UNA plataforma o de las dos. Cada
+// portal tiene su propio botón a propósito: a veces hay que apagar PedidosYa
+// antes que Rappi, y con un solo botón "apagar todo" eso no se podía.
+
+function panelCierre() { return document.getElementById('panel-cierre'); }
+
+async function abrirCierre() {
+  const panel = panelCierre();
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  cerrarPaneles();
+  panel.style.display = 'block';
+  await pintarCierre();
+}
+
+// Cuánto tocaría cada botón, para que el número esté a la vista antes de
+// apretar y no recién en la confirmación.
+async function contarCierre(accion) {
+  try {
+    const r = await fetch('/api/masivo/previo?accion=' + accion)
+                    .then(r => r.json());
+    return r.por_plataforma || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+// `mensaje` es el resumen de lo que se acaba de encolar. Va acá y no se
+// escribe después de repintar: entre el repintado y el restore el panel
+// quedaba un instante en blanco, y eso es lo único que el usuario mira
+// para saber si su click hizo algo.
+async function pintarCierre(mensaje = '') {
+  const panel = panelCierre();
+  panel.innerHTML = `
+    <h2>Apagar todo</h2>
+    <div class="ayuda">
+      Apaga o prende la carta entera de un portal. Podés hacer uno solo:
+      la cola respeta el orden en que apretás, así que si PedidosYa tiene
+      que apagarse antes que Rappi, apretá PedidosYa y después Rappi.
+      <br>Salteo lo que ya está como quiere quedar, lo que está en pausa y
+      lo que ya está en la cola. Se puede cambiar en Ajustes.
+    </div>
+    <div id="filas-cierre"></div>
+    <div id="resultado-cierre"></div>`;
+  document.getElementById('resultado-cierre').textContent = mensaje;
+
+  const cont = document.getElementById('filas-cierre');
+  const [paraApagar, paraPrender] = await Promise.all([
+    contarCierre('apagar_hoy'), contarCierre('prender'),
+  ]);
+
+  const destinos = [
+    ['pedidosya', 'PedidosYa', ['pedidosya']],
+    ['rappi', 'Rappi', ['rappi']],
+    ['ambas', 'Los dos', ['pedidosya', 'rappi']],
+  ];
+
+  for (const [clave, titulo, plats] of destinos) {
+    const fila = document.createElement('div');
+    fila.className = 'fila-cierre';
+    fila.dataset.destino = clave;
+
+    const quien = document.createElement('div');
+    quien.className = 'quien-cierre';
+    quien.textContent = titulo;
+    fila.appendChild(quien);
+
+    const suma = (cuentas) =>
+      plats.reduce((t, p) => t + (cuentas[p] || 0), 0);
+
+    const bApagar = document.createElement('button');
+    bApagar.className = 'off grande';
+    bApagar.textContent = 'Apagar todo';
+    bApagar.onclick = () => correrMasivo('apagar', plats, titulo, bApagar);
+
+    const bPrender = document.createElement('button');
+    bPrender.className = 'on grande';
+    bPrender.textContent = 'Prender todo';
+    bPrender.onclick = () => correrMasivo('prender', plats, titulo, bPrender);
+
+    const cuenta = document.createElement('span');
+    cuenta.className = 'cuantos';
+    cuenta.textContent =
+      `${suma(paraApagar)} para apagar · ${suma(paraPrender)} para prender`;
+
+    fila.append(bApagar, bPrender, cuenta);
+    cont.appendChild(fila);
+  }
+}
+
+// `que` es 'apagar' o 'prender'. El tipo de apagado (por hoy / indefinido)
+// sale de Ajustes: al cierre siempre se usa el mismo y preguntarlo cada vez
+// es una decisión de más en el momento en que menos ganas hay de decidir.
+async function correrMasivo(que, plats, titulo, boton) {
+  const opciones = await fetch('/api/config').then(r => r.json());
+  const cfg = {};
+  for (const o of opciones.opciones) cfg[o.clave] = o.valor;
+
+  const accion = que === 'prender' ? 'prender' : cfg.cierre_accion;
+  const cuentas = await contarCierre(accion);
+  const total = plats.reduce((t, p) => t + (cuentas[p] || 0), 0);
+
+  if (!total) {
+    document.getElementById('resultado-cierre').textContent =
+      `No hay nada para ${que} en ${titulo}: ya está todo como querés.`;
+    return;
+  }
+
+  const comoApaga = accion === 'apagar_indef'
+    ? 'apagado indefinido' : 'apagado por hoy';
+  const detalle = que === 'prender'
+    ? `Prender ${total} producto(s) en ${titulo}.`
+    : `Apagar ${total} producto(s) en ${titulo} (${comoApaga}).`;
+
+  if (!confirm(detalle + '\n\nVa producto por producto, así que tarda un ' +
+               'rato. ¿Sigo?')) return;
+
+  boton.disabled = true;
+  const antes = boton.textContent;
+  boton.textContent = cfg.cierre_releer ? 'Leyendo el portal…' : 'Encolando…';
+  const salida = document.getElementById('resultado-cierre');
+  salida.textContent = '';
+
+  try {
+    const r = await fetch('/api/masivo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accion, plataformas: plats }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      salida.textContent = 'No se pudo: ' + (err.detail || r.status);
+      boton.disabled = false;
+      boton.textContent = antes;
+      return;
+    }
+    const { resultado } = await r.json();
+    const resumen = PLATS
+      .filter(p => resultado[p])
+      .map(p => {
+        const d = resultado[p];
+        const error = d.lectura && d.lectura.error
+          ? `  (no pude releer el portal: ${d.lectura.error})` : '';
+        return `${NOMBRE_PLAT[p]}: ${d.total} encoladas, ` +
+               `${d.salteados.length} salteadas.${error}`;
+      })
+      .join('\n');
+
+    // Los números de arriba ya no valen: lo que acabo de encolar sale de la
+    // cuenta. Se repinta con el resumen adentro, de una sola vez, así el
+    // panel nunca se ve vacío. El botón vuelve solo, es uno nuevo.
+    await pintarCierre(resumen);
+    await cargar();
+    return;
+  } catch (e) {
+    salida.textContent = 'No se pudo: ' + e;
+  }
+
+  // Solo se llega acá si no se repintó (error): hay que devolver el botón.
+  boton.disabled = false;
+  boton.textContent = antes;
+}
+
+// ---------------------------------------------------------------- Ajustes
+
+function panelAjustes() { return document.getElementById('panel-ajustes'); }
+
+async function abrirAjustes() {
+  const panel = panelAjustes();
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  cerrarPaneles();
+  panel.style.display = 'block';
+  await pintarAjustes();
+}
+
+// La pantalla no sabe qué ajustes existen: los dibuja de lo que devuelve
+// /api/config (tipo, ayuda, límites). Agregar uno es tocar app/config.py
+// y nada más.
+async function pintarAjustes() {
+  const panel = panelAjustes();
+  panel.innerHTML = `<h2>Ajustes</h2>
+    <div class="ayuda cargando">Cargando…</div>`;
+
+  let opciones;
+  try {
+    opciones = (await fetch('/api/config').then(r => r.json())).opciones;
+  } catch (e) {
+    panel.innerHTML = `<h2>Ajustes</h2>
+      <div class="ayuda">No pude leerlos: ${e}</div>`;
+    return;
+  }
+
+  panel.innerHTML = `<h2>Ajustes</h2>
+    <div class="ayuda">Se guardan en la base, que vive afuera de la carpeta
+      de la app: un autoupdate no se los lleva puestos.</div>
+    <div id="cuerpo-ajustes"></div>
+    <div class="pie-ajustes">
+      <button id="btn-guardar-ajustes" class="on">Guardar</button>
+      <button id="btn-restablecer">Volver a los valores por defecto</button>
+      <span id="estado-ajustes"></span>
+    </div>`;
+
+  const cuerpo = document.getElementById('cuerpo-ajustes');
+  const grupos = {};
+  for (const o of opciones) (grupos[o.grupo] ||= []).push(o);
+
+  for (const [nombre, items] of Object.entries(grupos)) {
+    const div = document.createElement('div');
+    div.className = 'grupo';
+    const h = document.createElement('h3');
+    h.textContent = nombre;
+    div.appendChild(h);
+    for (const o of items) div.appendChild(filaAjuste(o));
+    cuerpo.appendChild(div);
+  }
+
+  document.getElementById('btn-guardar-ajustes').onclick = guardarAjustes;
+  document.getElementById('btn-restablecer').onclick = restablecerAjustes;
+}
+
+function filaAjuste(o) {
+  const div = document.createElement('div');
+  div.className = 'ajuste';
+
+  const titulo = document.createElement('div');
+  titulo.textContent = o.titulo;
+  div.appendChild(titulo);
+
+  const control = document.createElement('div');
+  control.className = 'control';
+
+  let campo;
+  if (o.tipo === 'bool') {
+    campo = document.createElement('input');
+    campo.type = 'checkbox';
+    campo.checked = !!o.valor;
+    campo.style.cssText = 'width:18px;height:18px;accent-color:#22c55e';
+  } else if (o.tipo === 'eleccion') {
+    campo = document.createElement('select');
+    for (const op of o.opciones) {
+      const item = document.createElement('option');
+      item.value = op.valor;
+      item.textContent = op.etiqueta;   // textContent: nada de innerHTML acá
+      campo.appendChild(item);
+    }
+    campo.value = o.valor;
+  } else if (o.tipo === 'entero') {
+    campo = document.createElement('input');
+    campo.type = 'number';
+    if (o.minimo !== null) campo.min = o.minimo;
+    if (o.maximo !== null) campo.max = o.maximo;
+    campo.value = o.valor;
+  } else {
+    campo = document.createElement('input');
+    campo.type = 'text';
+    campo.value = o.valor;
+  }
+
+  campo.dataset.clave = o.clave;
+  campo.dataset.tipo = o.tipo;
+  // Que se vea cuál tocaste antes de guardar: son ajustes que cambian cómo
+  // se comporta el navegador, no un formulario cualquiera.
+  campo.oninput = () => div.classList.add('cambiado');
+  campo.onchange = () => div.classList.add('cambiado');
+  control.appendChild(campo);
+
+  if (o.unidad) {
+    const u = document.createElement('span');
+    u.className = 'unidad';
+    u.textContent = o.unidad;
+    control.appendChild(u);
+  }
+  div.appendChild(control);
+
+  if (o.ayuda) {
+    const ayuda = document.createElement('div');
+    ayuda.className = 'ayuda-ajuste';
+    ayuda.textContent = o.ayuda;
+    div.appendChild(ayuda);
+  }
+  return div;
+}
+
+function leerAjustes() {
+  const cambios = {};
+  for (const campo of document.querySelectorAll('#cuerpo-ajustes [data-clave]')) {
+    cambios[campo.dataset.clave] =
+      campo.dataset.tipo === 'bool' ? campo.checked :
+      campo.dataset.tipo === 'entero' ? Number(campo.value) : campo.value;
+  }
+  return cambios;
+}
+
+async function guardarAjustes() {
+  const boton = document.getElementById('btn-guardar-ajustes');
+  const estado = document.getElementById('estado-ajustes');
+  boton.disabled = true;
+  estado.textContent = 'Guardando…';
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cambios: leerAjustes() }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      estado.textContent = 'No se pudo: ' + (err.detail || r.status);
+      return;
+    }
+    await pintarAjustes();
+    document.getElementById('estado-ajustes').textContent = 'Guardado.';
+    aplicarRefresco();
+  } catch (e) {
+    estado.textContent = 'No se pudo: ' + e;
+  } finally {
+    boton.disabled = false;
+  }
+}
+
+async function restablecerAjustes() {
+  if (!confirm('¿Volver todos los ajustes a los valores por defecto?')) return;
+  await fetch('/api/config/restablecer', { method: 'POST' });
+  await pintarAjustes();
+  document.getElementById('estado-ajustes').textContent =
+    'Listo, quedaron como venían de fábrica.';
+  aplicarRefresco();
+}
+
 // ---------------------------------------------------------------- Carta
 //
 // Muestra lo que dicen los dos portales y lo cruza con lo que hay cargado.
@@ -513,9 +921,18 @@ let catalogo = null;     // ultimo /api/catalogo
 
 function panelCarta() { return document.getElementById('panel-carta'); }
 
+// Los tres paneles de arriba (cierre, ajustes, carta) son grandes y se
+// turnan: dos abiertos a la vez empujan la lista fuera de la pantalla.
+function cerrarPaneles(salvo) {
+  for (const id of ['panel-cierre', 'panel-ajustes', 'panel-carta']) {
+    if (id !== salvo) document.getElementById(id).style.display = 'none';
+  }
+}
+
 async function abrirCarta() {
   const panel = panelCarta();
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  cerrarPaneles();
   panel.style.display = 'block';
 
   // Al abrir se muestra la última lectura guardada en el server: recargar el
@@ -664,12 +1081,19 @@ function vinculadorManual() {
     sel.style.cssText = 'width:100%;padding:6px 8px;border-radius:6px;' +
       'border:1px solid var(--borde);background:var(--bg);color:var(--texto);' +
       'font:inherit;font-size:13px';
-    sel.innerHTML = '<option value="">— elegir —</option>' +
-      todosLosNombres(plataforma).map(n => {
-        const con = vinculoActual(plataforma, n);
-        const etiqueta = con ? `${n}   → hoy va con «${con}»` : n;
-        return `<option value="${n.replace(/"/g, '&quot;')}">${etiqueta}</option>`;
-      }).join('');
+    // Con DOM y no con innerHTML: los nombres los escribe el portal, y uno
+    // con comillas o con un < rompía el <select> entero.
+    const vacia = document.createElement('option');
+    vacia.value = '';
+    vacia.textContent = '— elegir —';
+    sel.appendChild(vacia);
+    for (const n of todosLosNombres(plataforma)) {
+      const con = vinculoActual(plataforma, n);
+      const op = document.createElement('option');
+      op.value = n;
+      op.textContent = con ? `${n}   → hoy va con «${con}»` : n;
+      sel.appendChild(op);
+    }
     lado.append(quien, sel);
     sel.onchange = avisarDeLoQueRompe;
     return { lado, sel };
@@ -871,6 +1295,8 @@ function limpiarBusqueda() {
 document.getElementById('btn-limpiar').onclick = limpiarBusqueda;
 
 document.getElementById('btn-carta').onclick = abrirCarta;
+document.getElementById('btn-cierre').onclick = abrirCierre;
+document.getElementById('btn-ajustes').onclick = abrirAjustes;
 
 document.getElementById('btn-leer-estado').onclick = async (e) => {
   const b = e.target;
@@ -903,8 +1329,24 @@ document.getElementById('btn-revalidar').onclick = async (e) => {
   }
 };
 
+// Cada cuánto se repinta la lista. Sale de Ajustes; 3 segundos es el
+// default de siempre, y se usa también si /api/config no contesta.
+let temporizador = null;
+
+async function aplicarRefresco() {
+  let segundos = 3;
+  try {
+    const { opciones } = await fetch('/api/config').then(r => r.json());
+    const o = opciones.find(o => o.clave === 'refresco_pantalla');
+    if (o && o.valor > 0) segundos = o.valor;
+  } catch (e) { /* con el default alcanza */ }
+
+  if (temporizador) clearInterval(temporizador);
+  temporizador = setInterval(cargar, segundos * 1000);
+}
+
 cargar();
-setInterval(cargar, 3000);
+aplicarRefresco();
 </script>
 
 </body>

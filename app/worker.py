@@ -14,6 +14,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
+from . import config
 from .carta import emparejar, resumen
 from .database import SessionLocal, PERFIL_CHROME
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion
@@ -51,10 +52,14 @@ def _carta_de_muestra() -> dict:
 
 
 INTERVALO_COLA = 2               # segundos entre chequeos de la cola
-VERIFICACION_RAPIDA = 120        # 2 min: confirma lo recien apagado
-INTERVALO_REVERIFICACION = 900   # 15 min: ronda general de lo apagado
-FRESCURA_MAX = 120               # seg: si la pestaña es mas vieja, refrescar
-MAX_INTENTOS = 3
+
+# Lo que antes eran constantes hoy sale de Ajustes (app/config.py). Los
+# valores por defecto son estos mismos, asi que sin tocar nada la app se
+# comporta igual que siempre:
+#   verificacion_rapida  120   2 min: confirma lo recien apagado
+#   minutos_ronda         15   ronda general de lo apagado
+#   frescura_pestana     120   si la pestaña es mas vieja, refrescar
+#   max_intentos           3
 
 
 class Worker:
@@ -128,8 +133,15 @@ class Worker:
         pag_py = self.browser.pages[0] if self.browser.pages else await self.browser.new_page()
         pag_rappi = await self.browser.new_page()
 
-        self.plataformas["pedidosya"] = PedidosYa(pag_py)
-        self.plataformas["rappi"] = Rappi(pag_rappi)
+        # Que sucursal es sale de Ajustes: el id de menu de PedidosYa y el
+        # storeId de Rappi estaban hardcodeados, y hasta que fueran
+        # configurables "sirve para otro local" estaba a medias.
+        self.plataformas["pedidosya"] = PedidosYa(
+            pag_py, menu_id=config.texto("pedidosya_menu_id"))
+        self.plataformas["rappi"] = Rappi(
+            pag_rappi,
+            store_id=config.texto("rappi_store_id"),
+            brand_id=config.texto("rappi_brand_id"))
 
         for nombre, plat in self.plataformas.items():
             try:
@@ -174,11 +186,21 @@ class Worker:
             db.commit()
 
             producto = db.query(Producto).get(op.producto_id)
+            if producto is None:
+                # El producto se borro (lo absorbio un vincular). Sin esto el
+                # worker revienta al tomarla y la cola se traba.
+                op.estado = Operacion.ERROR
+                op.detalle = "el producto ya no existe"
+                op.finalizada_en = datetime.now()
+                db.commit()
+                return
+
+            max_intentos = config.entero("max_intentos")
             nombre_remoto = self._nombre_remoto(db, producto, op.plataforma)
 
             log.info("op#%s %s '%s' en %s (intento %s/%s)",
                      op.id, op.accion, nombre_remoto, op.plataforma,
-                     op.intentos, MAX_INTENTOS)
+                     op.intentos, max_intentos)
 
             exito, detalle = await self._ejecutar(
                 op.plataforma, op.accion, nombre_remoto
@@ -186,7 +208,7 @@ class Worker:
 
             if exito:
                 log.info("op#%s OK", op.id)
-            elif op.intentos < MAX_INTENTOS:
+            elif op.intentos < max_intentos:
                 log.warning("op#%s fallo: %s", op.id, detalle)
             else:
                 log.error("op#%s ERROR definitivo tras %s intentos: %s",
@@ -199,12 +221,13 @@ class Worker:
 
                 # Verificacion rapida: a los 2 min confirmamos que siga asi.
                 # PedidosYa a veces revive el item unos minutos despues.
-                if op.accion != "prender":
+                demora = config.entero("verificacion_rapida")
+                if op.accion != "prender" and demora > 0:
                     asyncio.create_task(
                         self._verificar_luego(op.producto_id, op.plataforma,
-                                              op.accion, VERIFICACION_RAPIDA)
+                                              op.accion, demora)
                     )
-            elif op.intentos < MAX_INTENTOS:
+            elif op.intentos < max_intentos:
                 op.estado = Operacion.PENDIENTE   # reintenta despues
                 op.detalle = detalle
             else:
@@ -343,7 +366,8 @@ class Worker:
 
         ultimo = self.ultimo_refresco.get(plataforma)
         vieja = (ultimo is None or
-                 (datetime.now() - ultimo).total_seconds() > FRESCURA_MAX)
+                 (datetime.now() - ultimo).total_seconds()
+                 > config.entero("frescura_pestana"))
 
         if vieja:
             # La URL importa: si quedaste logueado en otra sucursal, el
@@ -369,6 +393,31 @@ class Worker:
             return False, "sesion caida: logueate en la ventana del navegador"
 
         return True, ""
+
+    async def aplicar_config(self) -> dict:
+        """Le pasa a las pestañas los ids de sucursal que se acaban de guardar.
+
+        Sin esto, cambiar de local en Ajustes no hacia nada hasta reiniciar
+        la app, que es justo lo que un ajuste no deberia pedir. Al cambiar
+        se fuerza el refresco: la pestaña esta parada en el menu viejo y
+        `en_el_menu()` va a decir que no, asi que la proxima operacion
+        navega sola al nuevo.
+        """
+        py = self.plataformas.get("pedidosya")
+        if py is not None:
+            py.configurar(menu_id=config.texto("pedidosya_menu_id"))
+
+        rappi = self.plataformas.get("rappi")
+        if rappi is not None:
+            rappi.configurar(store_id=config.texto("rappi_store_id"),
+                             brand_id=config.texto("rappi_brand_id"))
+
+        for nombre, plat in self.plataformas.items():
+            if not plat.en_el_menu():
+                self.ultimo_refresco.pop(nombre, None)
+
+        return {nombre: plat.url_menu
+                for nombre, plat in self.plataformas.items()}
 
     async def revalidar_sesion(self, plataforma: str = None) -> dict:
         """Fuerza refresco y chequeo de sesion. La UI lo llama con un boton."""
@@ -553,7 +602,12 @@ class Worker:
             self.novedades[nombre] = self._buscar_novedades(nombre, leidos)
             salida[nombre]["novedades"] = len(self.novedades[nombre])
 
-        self.ultima_lectura = datetime.now()
+        # Solo si algo se leyo de verdad. Antes se sellaba la hora igual, asi
+        # que con la sesion caida la pantalla decia "estado leído 20:14" sin
+        # haber leido nada: el peor cartel posible, porque el usuario decide
+        # mirando eso si lo que ve esta al dia.
+        if any(isinstance(d, dict) and "error" not in d for d in salida.values()):
+            self.ultima_lectura = datetime.now()
         return salida
 
     @staticmethod
@@ -749,13 +803,40 @@ class Worker:
     # ---------- Reverificacion ----------
 
     async def _loop_reverificacion(self):
-        """PedidosYa a veces revive productos apagados. Chequeamos periodicamente."""
+        """PedidosYa a veces revive productos apagados. Chequeamos periodicamente.
+
+        Se duerme de a un minuto en vez de los 15 de una: asi cambiar el
+        intervalo desde Ajustes (o ponerlo en 0) tiene efecto en el minuto,
+        y no despues de esperar la ronda vieja entera.
+        """
+        proxima = self._proxima_ronda()
         while self.corriendo:
-            await asyncio.sleep(INTERVALO_REVERIFICACION)
+            await asyncio.sleep(60)
+
+            minutos = config.entero("minutos_ronda")
+            if minutos <= 0:
+                proxima = None          # ronda apagada desde Ajustes
+                continue
+
+            if proxima is None:
+                proxima = datetime.now() + timedelta(minutes=minutos)
+                continue
+
+            if datetime.now() < proxima:
+                continue
+
+            proxima = datetime.now() + timedelta(minutes=minutos)
             try:
                 await self._reverificar()
             except Exception as e:
                 log.exception("Error reverificando: %s", e)
+
+    @staticmethod
+    def _proxima_ronda():
+        minutos = config.entero("minutos_ronda")
+        if minutos <= 0:
+            return None
+        return datetime.now() + timedelta(minutes=minutos)
 
     async def _reverificar(self):
         """Relee las dos cartas enteras y actualiza todo lo que se ve.
@@ -772,7 +853,10 @@ class Worker:
         if self.modo_simulado:
             return
 
-        resultado = await self.sincronizar_estados(sostener=True)
+        # Con `sostener_apagados` en off la ronda sigue leyendo (que es lo que
+        # mantiene la pantalla al dia) pero no se mete a reencolar nada.
+        sostener = config.activo("sostener_apagados")
+        resultado = await self.sincronizar_estados(sostener=sostener)
 
         revividos = []
         for datos in resultado.values():

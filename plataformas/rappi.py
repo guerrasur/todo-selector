@@ -49,6 +49,9 @@ log = logging.getLogger("rappi")
 class Rappi(PlataformaBase):
     nombre = "rappi"
 
+    # Defaults del local para el que se escribio esto. Se cambian desde
+    # Ajustes sin tocar codigo (era lo que faltaba para que sirva en otro
+    # local); estos valores son solo el punto de partida.
     BRAND_ID = "AR75000"
     # CONFIRMADO: AR221056 es Carabelas - Turbo.
     # Al apagar en Turbo tambien se apaga en Rappi normal, asi que
@@ -66,16 +69,26 @@ class Rappi(PlataformaBase):
     TXT_POR_HOY = "Sólo por hoy"
     TXT_INDEFINIDO = "No disponible indefinidamente"
 
-    def __init__(self, page, store_id: str = None):
+    def __init__(self, page, store_id: str = None, brand_id: str = None):
         super().__init__(page)
         self.store_id = store_id or self.STORE_IDS[0]
+        self.brand_id = brand_id or self.BRAND_ID
+
+    def configurar(self, store_id: str = None, brand_id: str = None):
+        """Cambia de tienda/marca sin reiniciar la app (viene de Ajustes)."""
+        if store_id and store_id != self.store_id:
+            log.info("Rappi pasa a la tienda %s (antes %s)", store_id, self.store_id)
+            self.store_id = store_id
+        if brand_id and brand_id != self.brand_id:
+            log.info("Rappi pasa a la marca %s (antes %s)", brand_id, self.brand_id)
+            self.brand_id = brand_id
 
     @property
     def url_menu(self) -> str:
-        ids = ",".join(self.STORE_IDS)
         return (
             f"https://partners.rappi.com/menu"
-            f"?brandId={self.BRAND_ID}&storeIds={ids}&storeId={self.store_id}"
+            f"?brandId={self.brand_id}&storeIds={self.store_id}"
+            f"&storeId={self.store_id}"
         )
 
     def en_el_menu(self) -> bool:

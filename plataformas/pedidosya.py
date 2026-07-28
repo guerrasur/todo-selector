@@ -66,9 +66,14 @@ class PedidosYa(PlataformaBase):
     nombre = "pedidosya"
 
     # El id del menu es el de la sucursal: si te logueas en otra, la app
-    # navega de vuelta a esta.
+    # navega de vuelta a esta. Se puede cambiar desde Ajustes (es lo que
+    # hacia falta para que la app sirva en otro local); esto es el default.
     MENU_ID = "460348"
-    url_menu = f"https://web-ar.us.restaurant-partners.com/menus/PY_AR/{MENU_ID}"
+    BASE_MENU = "https://web-ar.us.restaurant-partners.com/menus/PY_AR"
+
+    @property
+    def url_menu(self) -> str:
+        return f"{self.BASE_MENU}/{self.menu_id}"
 
     # --- Opciones del popup de disponibilidad ---
     # CONFIRMADO POR LOG (2026-07-27): el portal esta EN INGLES. El popup
@@ -102,11 +107,23 @@ class PedidosYa(PlataformaBase):
     # apagados) y #toppings-category.
     SELECTOR_CATEGORIAS = "wk-menu-list wk-menu-list-category-item"
 
-    def __init__(self, page):
+    def __init__(self, page, menu_id: str = None):
         super().__init__(page)
+        self.menu_id = menu_id or self.MENU_ID
         # nombre_remoto -> indice de la categoria donde lo encontramos, para
         # no tener que recorrerlas todas cada vez.
         self._categoria_de = {}
+
+    def configurar(self, menu_id: str):
+        """Cambia de sucursal sin reiniciar la app. Olvida lo aprendido.
+
+        El mapa de categorias es de ESTE menu: si cambia el local, las
+        categorias son otras y buscar en la #2 de antes no significa nada.
+        """
+        if menu_id and menu_id != self.menu_id:
+            log.info("PedidosYa pasa al menu %s (antes %s)", menu_id, self.menu_id)
+            self.menu_id = menu_id
+            self._categoria_de = {}
 
     async def _cerrar_popups(self) -> bool:
         """Cierra el popup de sonido que PedidosYa muestra al reloguear.

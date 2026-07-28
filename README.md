@@ -111,6 +111,60 @@ Cada producto muestra dos chips (PedidosYa / Rappi). **Están los dos activos po
 defecto**; clickeás uno para excluirlo y el botón actúa solo sobre el otro.
 Sirve cuando una plataforma ya está bien y solo hay que corregir la otra.
 
+La exclusión **se queda puesta** hasta que vuelvas a clickear el chip. Antes se
+perdía sola: la lista se repinta cada pocos segundos y con eso el chip volvía a
+quedar seleccionado, así que si tardabas más que el refresco en apretar el
+botón, la acción salía a los dos portales sin decir nada.
+
+## Apagar todo (el botón de cierre)
+
+El botón **Apagar todo** de arriba abre un panel con **un juego de botones por
+portal**:
+
+| | |
+|---|---|
+| **PedidosYa** | Apagar todo · Prender todo |
+| **Rappi** | Apagar todo · Prender todo |
+| **Los dos** | Apagar todo · Prender todo |
+
+Que estén separados es el punto: a veces **PedidosYa tiene que apagarse antes
+que Rappi**. Apretás PedidosYa, y cuando quieras, Rappi. La cola respeta el
+orden en que apretaste.
+
+Antes de encolar nada dice cuántos productos va a tocar cada portal, y pide
+confirmación: apagar la carta entera es de las pocas cosas de esta app que no se
+deshacen con un click.
+
+**No encola de más**, que es lo que hace que esto sea usable:
+
+- lo que **ya figura como querés que quede** no se toca (apagar toda la carta son
+  ~30 operaciones por portal y cada una recarga la página);
+- lo que **está en pausa** tampoco;
+- lo que **ya está en la cola** tampoco, así que apretarlo dos veces no duplica
+  nada;
+- **Prender todo** no toca lo que está `apagado (afuera)`: si lo apagó alguien
+  desde el portal, fue a propósito.
+
+Por defecto **relee el portal antes de decidir** (~35 s), para que "ya está
+apagado" sea un hecho y no una suposición sobre una lectura vieja. Todo esto se
+cambia en Ajustes.
+
+## Ajustes
+
+El engranaje de arriba a la derecha abre la configuración. Se guarda en la base,
+que vive afuera de la carpeta de la app: **un autoupdate no se la lleva puesta**.
+Todos los valores por defecto son exactamente lo que la app venía haciendo, así
+que sin tocar nada se comporta igual que siempre.
+
+| Grupo | Qué se puede cambiar |
+|---|---|
+| **Apagar todo** | Si el cierre apaga *por hoy* o *indefinido*; si relee el portal antes; si incluye los pausados; si "Prender todo" toca lo apagado desde afuera. |
+| **Ritmo** | Cada cuántos minutos se releen las cartas (0 = nunca); si se vuelve a apagar lo que el portal revive; a los cuántos segundos se confirma un apagado; cuándo se considera vieja la pestaña; reintentos por operación; cada cuánto se repinta la pantalla. |
+| **Sucursal** | El **id de menú de PedidosYa** y el **storeId / brandId de Rappi**. Estaban clavados en el código: hasta que fueran configurables, "sirve para otro local" estaba a medias. |
+
+Cambiar de sucursal **no pide reiniciar**: las pestañas se enteran y navegan
+solas al menú nuevo en la próxima operación.
+
 ## Buscador
 
 Arriba de la lista hay un campo de búsqueda. Filtra a medida que escribís y
@@ -266,6 +320,8 @@ app/
   seed.py                 # carga inicial de productos
   carta.py                # cruza la carta de los dos portales
   catalogo.py             # vincular / separar / agregar productos
+  cierre.py               # apagar/prender la carta entera de una plataforma
+  config.py               # los ajustes de la pantalla, guardados en la base
   worker.py               # navegador persistente + cola + reverificación
 plataformas/
   base.py                 # contrato: 4 métodos por plataforma
@@ -297,6 +353,19 @@ POST /api/separar    {"producto_id": 12, "plataforma": "rappi"}
 POST /api/agregar    {"plataforma": "rappi", "nombre_remoto": "Bowl Huerta"}
 GET  /api/catalogo   qué nombre tiene cada producto en cada portal
 ```
+
+## API del cierre y de los ajustes
+
+```
+POST /api/masivo          {"accion": "apagar_hoy", "plataformas": ["pedidosya"]}
+GET  /api/masivo/previo?accion=apagar_hoy    cuántos tocaría cada portal
+GET  /api/config          los ajustes con su definición y su valor actual
+POST /api/config          {"cambios": {"minutos_ronda": 30}}
+POST /api/config/restablecer
+```
+
+`/api/masivo` acepta además `releer`, `incluir_pausados` y `solo_propios` para
+forzar el comportamiento sin tocar la configuración guardada.
 
 ---
 
@@ -430,13 +499,14 @@ En Todo-Selector se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
 
 ## 4. Pendientes de producto
 
-- [ ] Botón de "apagar todo" al cierre.
+- [x] Botón de "apagar todo" al cierre. Hecho, y **por plataforma**: a veces
+      PedidosYa tiene que apagarse antes que Rappi. Ver "Apagar todo".
 - [x] Sincronizar el estado real al arrancar. Hecho: al levantar, la app lee
       los dos portales y guarda cómo está cada producto. Ver más arriba.
 - [ ] Mostrar el historial en pantalla (la API ya lo devuelve).
-- [ ] **Sacar del código el id de menú de PedidosYa (`460348`) y el `storeId`
-      de Rappi (`AR221056`).** Hasta que sean configurables, "sirve para otro
-      local" está a medias.
+- [x] **Sacar del código el id de menú de PedidosYa (`460348`) y el `storeId`
+      de Rappi (`AR221056`).** Hecho: salen de Ajustes, y cambiarlos no pide
+      reiniciar la app.
 
 ## Nota sobre términos de servicio
 
