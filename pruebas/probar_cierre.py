@@ -9,6 +9,7 @@ importante para el usuario es que se pueda hacer UNA plataforma sola.
 """
 
 import asyncio
+import logging
 import os
 import shutil
 import sys
@@ -243,6 +244,43 @@ def ajustes(db):
             "restablecer los vuelve a los valores por defecto")
 
 
+def ruido_del_log():
+    """La ventana del .bat tiene que dejar ver lo que hizo el worker.
+
+    La pantalla pide 4 endpoints cada 3 segundos: son ~80 lineas por minuto
+    de "GET /api/productos 200 OK". El 2026-07-28 el usuario cerro la app
+    porque el log se habia hecho inmanejable.
+    """
+    print("\n== El log no se llena con el repintado ==")
+    from app.main import SinRuidoDeRefresco
+
+    filtro = SinRuidoDeRefresco()
+
+    def pasa(metodo, ruta, codigo=200):
+        registro = logging.LogRecord("uvicorn.access", logging.INFO, "", 0,
+                                     '%s - "%s %s HTTP/%s" %d',
+                                     ("127.0.0.1:1", metodo, ruta, "1.1", codigo),
+                                     None)
+        return filtro.filter(registro)
+
+    revisar(not pasa("GET", "/api/productos"), "no loguea el refresco de la lista")
+    revisar(not pasa("GET", "/api/alertas"), "ni el de las alertas")
+    revisar(not pasa("GET", "/api/estado-sistema"), "ni el del estado")
+    revisar(not pasa("GET", "/api/novedades"), "ni el de las novedades")
+
+    revisar(pasa("POST", "/api/accion"),
+            "pero SI loguea lo que pediste vos (un POST)")
+    revisar(pasa("GET", "/api/productos", 500),
+            "y tambien si el refresco falla, que es cuando queres verlo")
+    revisar(pasa("GET", "/api/historial"),
+            "un GET que no es del refresco se sigue viendo")
+
+    # Un record raro no puede hacer desaparecer una linea de log.
+    roto = logging.LogRecord("uvicorn.access", logging.INFO, "", 0,
+                             "algo raro", None, None)
+    revisar(filtro.filter(roto), "si no entiende el record, deja pasar")
+
+
 def sucursal_configurable(db):
     """El id de menu y el storeId dejaron de estar clavados en el codigo."""
     print("\n== La sucursal sale de los ajustes ==")
@@ -361,6 +399,7 @@ async def main():
         await previo(db, worker)
         await sesion_caida(db)
         ajustes(db)
+        ruido_del_log()
         sucursal_configurable(db)
     finally:
         db.close()
