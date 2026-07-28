@@ -24,7 +24,7 @@ os.environ["LOCALAPPDATA"] = TEMPORAL
 from app import catalogo, seed                                    # noqa: E402
 from app.database import SessionLocal, init_db                    # noqa: E402
 from app.models import (Producto, AliasPlataforma, EstadoItem,    # noqa: E402
-                        Operacion)
+                        Operacion, HistorialCatalogo)
 
 fallos = []
 
@@ -45,7 +45,10 @@ def remotos(db, nombre):
 
 
 def limpiar(db):
-    for modelo in (Operacion, AliasPlataforma, EstadoItem, Producto):
+    # El historial va tambien: si queda un paso de otro escenario, el
+    # "deshacer" de este restaura un catalogo que no es el suyo.
+    for modelo in (Operacion, AliasPlataforma, EstadoItem, Producto,
+                   HistorialCatalogo):
         db.query(modelo).delete()
     from app.models import Preferencia
     db.query(Preferencia).delete()
@@ -310,6 +313,104 @@ def vincular_no_pisa_lo_que_ya_estaba(db):
             "y quedo sin plataforma de Rappi, no vinculado a la fuerza")
 
 
+def deshacer_vuelve_atras(db):
+    """El caso real del 2026-07-28: tres vinculaciones y un lio.
+
+    Vincular toca varios productos a la vez (suelta al que estaba
+    emparejado), asi que revertirlo a mano es un rompecabezas. Deshacer
+    tiene que devolver TODO como estaba.
+    """
+    print("\n== Deshacer ==")
+    limpiar(db)
+    seed.sembrar()
+    db.expire_all()
+
+    antes_caesar = remotos(db, "Wrap caesar")
+    cuantos = db.query(Producto).count()
+
+    revisar(catalogo.hay_para_deshacer(db) is None,
+            "recien sembrado no hay nada para deshacer")
+
+    catalogo.vincular(db, "Wrap caesar con batatas", "Wrap caesar")
+    db.commit()
+    db.expire_all()
+
+    revisar(remotos(db, "Wrap caesar con batatas") ==
+            {"pedidosya": "Wrap caesar con batatas", "rappi": "Wrap caesar"},
+            "la vinculacion se hizo")
+    revisar(remotos(db, "Wrap caesar (PedidosYa)") ==
+            {"pedidosya": "Wrap caesar", "rappi": None},
+            "el de PedidosYa que se solto queda con un nombre que se entiende")
+    revisar(db.query(Producto).count() == cuantos,
+            "la cuenta no cambia: uno se solto y el otro se absorbio")
+
+    pendiente = catalogo.hay_para_deshacer(db)
+    revisar(pendiente is not None and "Wrap caesar" in pendiente,
+            f"queda anotado que se puede deshacer ({pendiente})")
+
+    catalogo.deshacer(db)
+    db.commit()
+    db.expire_all()
+
+    revisar(remotos(db, "Wrap caesar") == antes_caesar,
+            "deshacer devuelve el vinculo original")
+    revisar(db.query(Producto).filter_by(nombre="Wrap caesar (PedidosYa)")
+            .first() is None,
+            "y se lleva el producto suelto que habia aparecido")
+    revisar(catalogo.hay_para_deshacer(db) is None,
+            "no queda nada mas para deshacer")
+
+
+def deshacer_varios_pasos(db):
+    print("\n== Deshacer varios pasos, en orden ==")
+    limpiar(db)
+    seed.sembrar()
+    db.expire_all()
+
+    catalogo.agregar(db, "rappi", "Pollo al Curry")
+    db.commit()
+    catalogo.agregar(db, "rappi", "Bowl Huerta")
+    db.commit()
+    db.expire_all()
+
+    revisar(remotos(db, "Bowl Huerta") is not None and
+            remotos(db, "Pollo al Curry") is not None,
+            "los dos productos estan cargados")
+
+    catalogo.deshacer(db)
+    db.commit()
+    db.expire_all()
+    revisar(remotos(db, "Bowl Huerta") is None and
+            remotos(db, "Pollo al Curry") is not None,
+            "el primer deshacer saca solo el ultimo")
+
+    catalogo.deshacer(db)
+    db.commit()
+    db.expire_all()
+    revisar(remotos(db, "Pollo al Curry") is None,
+            "el segundo saca el anterior")
+
+    revisar(catalogo.deshacer(db) is None,
+            "y despues ya no hay nada que deshacer")
+
+
+def nombres_de_los_sueltos(db):
+    """El sobrante tiene que decir de que portal es, no llamarse "(2)"."""
+    print("\n== Nombre del producto que queda suelto ==")
+    limpiar(db)
+    seed.sembrar()
+    db.expire_all()
+
+    # "Wrap caesar" se llama igual en los dos portales: al separarlos, uno
+    # de los dos productos necesita otro nombre a la fuerza.
+    p = db.query(Producto).filter_by(nombre="Wrap caesar").first()
+    nuevo = catalogo.separar(db, p.id, "pedidosya")
+    db.commit()
+
+    revisar(nuevo.nombre == "Wrap caesar (PedidosYa)",
+            f"se llama '{nuevo.nombre}' y no 'Wrap caesar (2)'")
+
+
 def main():
     init_db()
     db = SessionLocal()
@@ -323,6 +424,9 @@ def main():
         seed_no_pisa_lo_manual(db)
         vincular_no_pisa_lo_que_ya_estaba(db)
         no_se_puede_separar_lo_que_no_esta(db)
+        deshacer_vuelve_atras(db)
+        deshacer_varios_pasos(db)
+        nombres_de_los_sueltos(db)
     finally:
         db.close()
         shutil.rmtree(TEMPORAL, ignore_errors=True)
