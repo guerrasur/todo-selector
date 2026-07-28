@@ -111,6 +111,16 @@ async def escenario(navegador, query: str, titulo: str):
     revisar(await plat.leer_estado("Producto que no existe") is None,
             "leer_estado() de algo inexistente devuelve None")
 
+    # La lectura de toda la carta: es lo que contesta "cual esta prendido"
+    # al arrancar, sin que el usuario toque nada.
+    todos = await plat.leer_todos()
+    revisar(len(todos) == 12,
+            f"leer_todos() trae los 12 productos de las 3 categorias (trajo {len(todos)})")
+    revisar(todos.get("Budín de pan") is True and todos.get("Tarta de verdura") is False,
+            "leer_todos() devuelve bien prendidos y apagados")
+    revisar(todos.get("Gaseosa cola") is True,
+            "leer_todos() llega tambien a la categoria que estaba abierta")
+
     await pagina.close()
 
 

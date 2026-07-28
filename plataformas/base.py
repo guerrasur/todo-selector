@@ -332,6 +332,27 @@ class PlataformaBase(ABC):
         """
         return []
 
+    async def leer_todos(self) -> dict:
+        """{nombre_remoto: disponible} de TODA la carta, de una pasada.
+
+        La app arrancaba sin saber nada: cada producto quedaba en
+        "desconocido" hasta que vos tocaras un boton, asi que la pantalla no
+        contestaba la pregunta mas basica, cual esta prendido.
+
+        Esta implementacion sirve para cualquier plataforma porque se apoya
+        en los dos metodos que ya estan confirmados. Si una puede leerlo mas
+        rapido, que lo sobreescriba (PedidosYa lo hace: recorre las
+        categorias una sola vez en vez de buscar producto por producto).
+        """
+        salida = {}
+        for nombre in await self.listar_productos():
+            if nombre in salida:
+                continue
+            estado = await self.leer_estado(nombre)
+            if estado is not None:
+                salida[nombre] = estado.disponible
+        return salida
+
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         """Diagnostico: el HTML crudo de la fila/tarjeta del producto.
 

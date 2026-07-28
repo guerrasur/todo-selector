@@ -66,6 +66,7 @@ class Worker:
         self.ultimo_refresco = {}   # nombre -> datetime del ultimo reload
         self.corriendo = False
         self.ultimo_chequeo = None
+        self.ultima_lectura = None   # ultima vez que leimos el estado real
         # Una pestaña por plataforma = un solo usuario a la vez. Sin esto,
         # el worker y los endpoints de diagnostico navegan la misma pagina
         # al mismo tiempo y se cancelan entre si (net::ERR_ABORTED en el
@@ -91,7 +92,21 @@ class Worker:
 
         asyncio.create_task(self._loop_cola())
         asyncio.create_task(self._loop_reverificacion())
+
+        # Arrancar sin saber que hay prendido era la queja mas directa que
+        # se le podia hacer a la pantalla. Va en background para no demorar
+        # el arranque: la UI se actualiza sola cuando termina.
+        if not modo_simulado:
+            asyncio.create_task(self._lectura_inicial())
+
         log.info("Worker iniciado (simulado=%s)", modo_simulado)
+
+    async def _lectura_inicial(self):
+        try:
+            log.info("Leyendo el estado real de las dos plataformas...")
+            await self.sincronizar_estados()
+        except Exception as e:
+            log.exception("Error en la lectura inicial de estados: %s", e)
 
     async def _abrir_navegador(self):
         from plataformas.rappi import Rappi
@@ -476,6 +491,103 @@ class Worker:
                  len(cartas.get("pedidosya", [])), len(cartas.get("rappi", [])),
                  salida["emparejados"], len(salida["a_confirmar"]))
         return salida
+
+    async def sincronizar_estados(self, plataforma: str = None) -> dict:
+        """Lee la carta de los portales y guarda como esta cada producto.
+
+        Sin esto la app arrancaba sin saber nada: todo en "desconocido"
+        hasta que tocaras un boton. Ahora la pantalla contesta de entrada
+        cual esta prendido y cual no.
+
+        Lo que NO hace: apropiarse de lo que apago el local por su cuenta.
+        Eso queda como APAGADO_AJENO y la ronda de reverificacion lo deja
+        en paz; solo sostiene lo que apago la app.
+        """
+        if self.modo_simulado:
+            return {"error": "modo simulado: no hay navegador"}
+
+        objetivo = [plataforma] if plataforma else list(self.plataformas.keys())
+        salida = {}
+
+        for nombre in objetivo:
+            plat = self.plataformas.get(nombre)
+            if plat is None:
+                salida[nombre] = {"error": "no hay pestaña"}
+                continue
+
+            async with self.bloqueo(nombre):
+                listo, motivo = await self._preparar(nombre)
+                if not listo:
+                    salida[nombre] = {"error": motivo}
+                    continue
+                try:
+                    leidos = await plat.leer_todos()
+                except Exception as e:
+                    log.exception("Leyendo el estado de %s", nombre)
+                    salida[nombre] = {"error": _resumen(e)}
+                    continue
+
+            salida[nombre] = self._guardar_estados(nombre, leidos)
+            log.info("Estado real de %s: %s prendidos, %s apagados, "
+                     "%s del catalogo no aparecieron",
+                     nombre, salida[nombre]["prendidos"],
+                     salida[nombre]["apagados"], salida[nombre]["no_estan"])
+
+        self.ultima_lectura = datetime.now()
+        return salida
+
+    @staticmethod
+    def _guardar_estados(plataforma: str, leidos: dict) -> dict:
+        """Vuelca al catalogo lo que se leyo del portal."""
+        from .catalogo import nombre_remoto as remoto_de
+
+        db = SessionLocal()
+        try:
+            prendidos = apagados = no_estan = en_curso = 0
+
+            for producto in db.query(Producto).all():
+                remoto = remoto_de(producto, plataforma)
+                if remoto is None:
+                    continue
+
+                est = next((e for e in producto.estados
+                            if e.plataforma == plataforma), None)
+                if est is None:
+                    continue
+
+                # Una operacion en vuelo manda sobre la lectura.
+                if est.estado in EstadoItem.EN_CURSO:
+                    en_curso += 1
+                    continue
+
+                if remoto not in leidos:
+                    # No aparecio en el portal. No lo pisamos con
+                    # "desconocido" si ya sabiamos algo: puede ser que el
+                    # nombre no coincida, y eso lo dice /api/verificar-catalogo.
+                    no_estan += 1
+                    continue
+
+                disponible = leidos[remoto]
+                est.verificado_en = datetime.now()
+
+                if disponible:
+                    est.estado = EstadoItem.PRENDIDO
+                    est.detalle = ""
+                    prendidos += 1
+                else:
+                    # Si lo apago la app, se respeta el tipo de apagado que
+                    # eligio el usuario (por hoy / indefinido).
+                    if est.estado not in EstadoItem.APAGADOS_PROPIOS:
+                        est.estado = EstadoItem.APAGADO_AJENO
+                        est.detalle = ""
+                    apagados += 1
+
+            db.commit()
+            return {"leidos": len(leidos), "prendidos": prendidos,
+                    "apagados": apagados, "no_estan": no_estan,
+                    "en_curso": en_curso}
+        finally:
+            db.close()
 
     async def verificar_catalogo(self, plataforma: str) -> dict:
         """Busca TODOS los productos del catalogo en el portal, sin tocar nada.

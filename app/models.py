@@ -61,6 +61,20 @@ class EstadoItem(Base):
     FALLO = "fallo"
     DESCONOCIDO = "desconocido"
 
+    # Apagado en el portal, pero no por la app: lo leimos asi. Se distingue
+    # de los otros dos apagados A PROPOSITO. La ronda de reverificacion
+    # reencola un apagado cuando ve "revivido" algo que ella apago, y no
+    # queremos que se apropie de todo lo que el local apago por su cuenta:
+    # bastaria una lectura mala para que lo vuelva a apagar sin que nadie
+    # se lo haya pedido.
+    APAGADO_AJENO = "apagado_ajeno"
+
+    # Los que la app impuso ella misma, y por lo tanto sostiene.
+    APAGADOS_PROPIOS = (APAGADO_HOY, APAGADO_INDEF)
+    # Mientras hay una operacion en curso, lo que diga el portal es
+    # transitorio: no lo pisamos con una lectura.
+    EN_CURSO = (APAGANDO, PRENDIENDO)
+
     id = Column(Integer, primary_key=True)
     producto_id = Column(Integer, ForeignKey("productos.id"), nullable=False)
     plataforma = Column(String(20), nullable=False)
