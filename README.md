@@ -111,16 +111,14 @@ Cada producto muestra dos chips (PedidosYa / Rappi). **Están los dos activos po
 defecto**; clickeás uno para excluirlo y el botón actúa solo sobre el otro.
 Sirve cuando una plataforma ya está bien y solo hay que corregir la otra.
 
-## Platos del día
+## Buscador
 
-Al abrir la app, si todavía no se cargaron los platos de hoy, aparece un panel
-arriba preguntándolos. Se escriben separados por coma. Si no hay, "Hoy no hay".
+Arriba de la lista hay un campo de búsqueda. Filtra a medida que escribís y
+busca **por el nombre de los dos portales**, no solo por el que ves: buscando
+`manantial` aparece "Agua chica con gas". Ignora tildes y mayúsculas, así que
+`milanesa` encuentra "Milanesa con puré".
 
-Los platos quedan asociados a la fecha: al día siguiente vuelve a preguntar y
-los del día anterior desaparecen de la lista.
-
-**Pendiente:** tomar este dato de Suipacha Loader en vez de preguntarlo dos
-veces. Ver tareas pendientes.
+La cruz (o la tecla `Esc`) borra la búsqueda y vuelve la lista completa.
 
 ## Qué está prendido: se lee del portal
 
@@ -430,23 +428,7 @@ En PedidosYa, los platos (Ensalada mixta, Tarta de jamon y queso, Guisos, fideos
 Empanada) están bajo **"Platos"**. En Rappi están bajo **"Plato del Día"**.
 En Todo-Selector se agrupan en "Platos". Es solo visual, no afecta la búsqueda.
 
-## 4. Integración con Suipacha Loader
-
-Suipacha Loader también pregunta los platos del día al inicio de la jornada.
-Hoy Todo-Selector los pregunta por separado — habría que tomarlos de ahí.
-
-Suipacha Loader corre en `http://127.0.0.1:8000` con FastAPI y SQLite.
-Opciones:
-
-- [ ] **Leer su API** (si expone un endpoint con los platos del día), es lo
-      más limpio: Todo-Selector consulta `localhost:8000` al arrancar.
-- [ ] **Leer su base directo** (`%LOCALAPPDATA%\SuipachaLoader\el local.db`)
-      en modo solo-lectura. Más frágil pero no requiere tocar la otra app.
-
-Si Suipacha Loader no guarda hoy los platos del día de forma estructurada,
-hay que agregarle ese modelo primero.
-
-## 5. Pendientes de producto
+## 4. Pendientes de producto
 
 - [ ] Botón de "apagar todo" al cierre.
 - [x] Sincronizar el estado real al arrancar. Hecho: al levantar, la app lee

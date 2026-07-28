@@ -90,13 +90,29 @@
     font-size: 12px; color: var(--error); line-height: 1.4;
     word-break: break-word;
   }
-  .aviso-platos {
+  /* ---- Buscador ---- */
+  #panel-busqueda {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+  }
+  #buscador {
+    flex: 1; padding: 10px 12px; border-radius: 9px; font: inherit;
+    border: 1px solid var(--borde); background: var(--panel); color: var(--texto);
+  }
+  #buscador:focus {
+    outline: none; border-color: #4a5165; background: var(--panel-2);
+  }
+  #buscador::-webkit-search-cancel-button { display: none; }
+  #btn-limpiar { display: none; padding: 9px 12px; line-height: 1; }
+  #panel-busqueda.buscando #btn-limpiar { display: block; }
+  #resultado-busqueda { color: var(--tenue); font-size: 13px; white-space: nowrap; }
+
+  .aviso {
     background: var(--panel); border: 1px solid #4a4020;
     border-left: 3px solid var(--curso);
     border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
     display: flex; align-items: center; gap: 14px; justify-content: space-between;
   }
-  .aviso-platos.ok { border-color: var(--borde); border-left-color: var(--on); }
+  .aviso.ok { border-color: var(--borde); border-left-color: var(--on); }
 
   /* ---- Pantalla Carta: lo que dicen los portales vs lo que hay cargado ---- */
   .carta { background: var(--panel); border: 1px solid var(--borde);
@@ -133,7 +149,12 @@
 </header>
 
 <main>
-  <div id="panel-platos" style="display:none"></div>
+  <div id="panel-busqueda">
+    <input id="buscador" type="search" autocomplete="off"
+           placeholder="Buscar un producto…  (por el nombre de cualquiera de los dos portales)">
+    <button id="btn-limpiar" title="Borrar la búsqueda (Esc)">✕</button>
+    <span id="resultado-busqueda"></span>
+  </div>
   <div id="panel-novedades" style="display:none"></div>
   <div id="panel-carta" class="carta" style="display:none"></div>
   <div id="lista" class="vacio">Cargando productos…</div>
@@ -163,7 +184,7 @@ function pintarNovedades(novedades) {
   if (!novedades.length) { panel.style.display = 'none'; return; }
 
   panel.style.display = 'block';
-  panel.className = 'aviso-platos';
+  panel.className = 'aviso';
   panel.innerHTML = '<div style="width:100%"></div>';
   const cont = panel.firstChild;
 
@@ -246,10 +267,54 @@ function hora(iso) {
   return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 }
 
+// ---------------------------------------------------------------- Buscador
+//
+// La lista se repinta sola cada 3 segundos, así que el filtro NO puede vivir
+// adentro de #lista: el input queda afuera para no perder el foco ni lo que
+// estás tecleando mientras se refresca.
+
+let filtro = '';
+
+// Sin tildes y en minúsculas: buscar "milanesa" tiene que encontrar "Milanesa con puré".
+// El rango \u0300-\u036f son las marcas que NFD deja sueltas al separar la
+// letra de su tilde.
+function plano(texto) {
+  return (texto || '').normalize('NFD')
+                      .replace(/[\u0300-\u036f]/g, '')
+                      .toLowerCase();
+}
+
+function coincide(item) {
+  if (!filtro) return true;
+  // También por el nombre de cada portal: difieren tanto que buscar
+  // "Manantial" tiene que llegar igual a "Agua chica con gas".
+  const donde = [item.nombre, ...Object.values(item.alias || {})];
+  return donde.some(t => plano(t).includes(filtro));
+}
+
+function aplicarFiltro(texto) {
+  filtro = plano(texto.trim());
+  document.getElementById('panel-busqueda')
+          .classList.toggle('buscando', filtro !== '');
+  cargar();
+}
+
 function pintarProductos(productos) {
   const cont = document.getElementById('lista');
   cont.className = '';
   cont.innerHTML = '';
+
+  const total = productos.length;
+  productos = productos.filter(coincide);
+
+  document.getElementById('resultado-busqueda').textContent =
+    filtro ? `${productos.length} de ${total}` : '';
+
+  if (filtro && !productos.length) {
+    cont.className = 'vacio';
+    cont.textContent = 'No hay ningún producto que coincida.';
+    return;
+  }
 
   // Los pausados van al final y apagados de color: siguen en la carta del
   // portal pero este mes no se venden, y no tienen que estorbar arriba.
@@ -435,74 +500,6 @@ async function accion(producto_id, accion, plataformas) {
     body: JSON.stringify({ producto_id, accion, plataformas }),
   });
   cargar();
-}
-
-async function chequearPlatosDelDia() {
-  const info = await fetch('/api/platos-del-dia').then(r => r.json());
-  const panel = document.getElementById('panel-platos');
-
-  // ya_respondido cubre el caso "hoy no hay": no hay platos cargados pero
-  // la pregunta ya esta contestada, asi que no se vuelve a preguntar.
-  if (info.ya_cargados || info.ya_respondido) {
-    panel.style.display = 'block';
-    panel.className = 'aviso-platos ok';
-    panel.innerHTML =
-      (info.ya_cargados
-        ? `<span>Platos de hoy: <b>${info.platos.join(' · ')}</b></span>`
-        : `<span>Hoy no hay platos del día.</span>`) +
-      `<button id="btn-editar-platos">Cambiar</button>`;
-    document.getElementById('btn-editar-platos').onclick = () =>
-      pedirPlatos(info.platos);
-    return;
-  }
-
-  pedirPlatos([]);
-}
-
-function pedirPlatos(actuales) {
-  const panel = document.getElementById('panel-platos');
-  panel.style.display = 'block';
-  panel.className = 'aviso-platos';
-  panel.innerHTML = `
-    <div style="width:100%">
-      <div style="margin-bottom:8px">
-        <b>¿Cuáles son los platos del día?</b>
-        <span style="color:var(--tenue)">— separalos con coma</span>
-      </div>
-      <div style="display:flex;gap:8px">
-        <input id="inp-platos" placeholder="Ej: Milanesa napolitana, Tarta de verdura"
-               value="${actuales.join(', ')}"
-               style="flex:1;padding:8px 10px;border-radius:7px;
-                      border:1px solid var(--borde);background:var(--panel-2);
-                      color:var(--texto);font:inherit">
-        <button id="btn-guardar-platos">Guardar</button>
-        <button id="btn-sin-platos">Hoy no hay</button>
-      </div>
-    </div>`;
-
-  document.getElementById('btn-guardar-platos').onclick = async () => {
-    const txt = document.getElementById('inp-platos').value;
-    const nombres = txt.split(',').map(s => s.trim()).filter(Boolean);
-    await fetch('/api/platos-del-dia', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombres }),
-    });
-    await chequearPlatosDelDia();
-    await cargar();
-  };
-
-  document.getElementById('btn-sin-platos').onclick = async () => {
-    await fetch('/api/platos-del-dia', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombres: [] }),
-    });
-    await chequearPlatosDelDia();
-    await cargar();
-  };
-
-  document.getElementById('inp-platos').focus();
 }
 
 // ---------------------------------------------------------------- Carta
@@ -860,6 +857,19 @@ async function accionCarta(url, cuerpo, boton) {
   }
 }
 
+const buscador = document.getElementById('buscador');
+
+buscador.oninput = () => aplicarFiltro(buscador.value);
+buscador.onkeydown = (e) => { if (e.key === 'Escape') limpiarBusqueda(); };
+
+function limpiarBusqueda() {
+  buscador.value = '';
+  aplicarFiltro('');
+  buscador.focus();
+}
+
+document.getElementById('btn-limpiar').onclick = limpiarBusqueda;
+
 document.getElementById('btn-carta').onclick = abrirCarta;
 
 document.getElementById('btn-leer-estado').onclick = async (e) => {
@@ -893,7 +903,6 @@ document.getElementById('btn-revalidar').onclick = async (e) => {
   }
 };
 
-chequearPlatosDelDia();
 cargar();
 setInterval(cargar, 3000);
 </script>
