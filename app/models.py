@@ -106,8 +106,14 @@ class Preferencia(Base):
     # arranque y terminabas ignorandolo.
     NOVEDADES_IGNORADAS = "novedades_ignoradas"
 
+    # Los ajustes de la pantalla de configuracion viven aca tambien, con el
+    # prefijo "cfg_" para no mezclarse con estas dos marcas. Ver app/config.py.
+
     clave = Column(String(60), primary_key=True)
-    valor = Column(String(200), default="")
+    # Text y no String(200): NOVEDADES_IGNORADAS guarda una lista JSON que
+    # crece con cada "No, es otro" y se pasaba de largo. SQLite no valida el
+    # largo declarado, asi que el cambio no necesita migracion.
+    valor = Column(Text, default="")
 
 
 class HistorialCatalogo(Base):
