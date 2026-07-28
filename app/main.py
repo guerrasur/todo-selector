@@ -503,6 +503,21 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 SIN_CACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
 
 
+ICONO = RAIZ / "todo2.ico"
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """El icono de la pestaña. Chrome lo pide solo, sin que la pagina lo pida.
+
+    Se sirve desde la raiz del repo y no desde static/ porque el mismo
+    archivo lo usa el acceso directo del escritorio (ver actualizar.ps1).
+    """
+    if not ICONO.exists():
+        raise HTTPException(404, "no hay icono")
+    return FileResponse(str(ICONO), media_type="image/x-icon")
+
+
 @app.get("/")
 def index():
     return FileResponse(str(STATIC / "index.html"), headers=SIN_CACHE)

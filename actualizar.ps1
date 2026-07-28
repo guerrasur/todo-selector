@@ -85,6 +85,57 @@ function Actualizar-ConZip {
 }
 
 
+function Crear-AccesoDirecto {
+    # Deja "TODO-SELECTOR" en el escritorio, con el icono del repo.
+    #
+    # Se hace UNA sola vez y queda la marca en la carpeta de datos: si el
+    # usuario lo borra a proposito, no se lo volvemos a poner en cada
+    # arranque. La marca vive fuera del repo para que sobreviva a las
+    # actualizaciones y a bajar el zip de nuevo.
+    #
+    # Nada de esto puede impedir que la app arranque: si algo falla, se
+    # avisa y se sigue.
+
+    $datos = Join-Path $env:LOCALAPPDATA 'TodoSelector'
+    $marca = Join-Path $datos 'acceso-directo.ok'
+    if (Test-Path -LiteralPath $marca) { return }
+
+    $lanzador = Join-Path $Carpeta $LANZADOR
+    if (-not (Test-Path -LiteralPath $lanzador)) { return }
+
+    $escritorio = [Environment]::GetFolderPath('Desktop')
+    if (-not $escritorio -or -not (Test-Path -LiteralPath $escritorio)) { return }
+
+    $destino = Join-Path $escritorio 'TODO-SELECTOR.lnk'
+    if (Test-Path -LiteralPath $destino) {
+        # Ya estaba (lo hizo el usuario a mano, o una version anterior).
+        if (-not (Test-Path -LiteralPath $datos)) {
+            New-Item -ItemType Directory -Path $datos -Force | Out-Null
+        }
+        Set-Content -LiteralPath $marca -Value 'ya existia' -Encoding ASCII
+        return
+    }
+
+    $shell  = New-Object -ComObject WScript.Shell
+    $acceso = $shell.CreateShortcut($destino)
+    $acceso.TargetPath       = $lanzador
+    $acceso.WorkingDirectory = $Carpeta
+    $acceso.Description      = 'Todo-Selector: apagar y prender productos'
+
+    $icono = Join-Path $Carpeta 'todo2.ico'
+    if (Test-Path -LiteralPath $icono) { $acceso.IconLocation = "$icono,0" }
+
+    $acceso.Save()
+
+    if (-not (Test-Path -LiteralPath $datos)) {
+        New-Item -ItemType Directory -Path $datos -Force | Out-Null
+    }
+    Set-Content -LiteralPath $marca -Value (Get-Date -Format s) -Encoding ASCII
+
+    Write-Host '  te deje un acceso directo "TODO-SELECTOR" en el escritorio.'
+}
+
+
 $esClon = Test-Path -LiteralPath (Join-Path $Carpeta '.git')
 $hayGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 
@@ -109,6 +160,14 @@ try {
 catch {
     Write-Host "No se pudo actualizar: $($_.Exception.Message)"
     Write-Host 'Sigo con la version que ya tengo.'
+}
+
+# Despues de actualizar, porque el icono puede haber llegado recien ahora.
+try {
+    Crear-AccesoDirecto
+}
+catch {
+    Write-Host "No pude crear el acceso directo: $($_.Exception.Message)"
 }
 
 exit 0
