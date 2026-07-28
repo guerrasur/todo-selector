@@ -21,13 +21,24 @@ ese momento seed.py deja de pisar los alias en cada arranque. Sin eso, un
 reinicio deshacia lo que el usuario habia vinculado.
 """
 
+import json
 import logging
 
+from .carta import parecido
 from .models import Producto, AliasPlataforma, EstadoItem, Preferencia
 
 log = logging.getLogger("catalogo")
 
 PLATAFORMAS = ("pedidosya", "rappi")
+
+# Para avisar "esto aparecio en el otro portal" el parecido tiene que ser
+# casi identico, no solo alto. Con 0.82 (el umbral del emparejador) el
+# "Wrap caesar con batatas" de PedidosYa da 0.91 contra el "Wrap caesar con
+# ensalada" de Rappi, y son platos distintos: justamente lo que el usuario
+# nos corrigio. Un aviso que sugiere vincular lo que no va es peor que no
+# avisar, asi que aca solo entran los que son el mismo nombre salvo tildes
+# o mayusculas. Lo dudoso se decide en la pantalla Carta, con todo a la vista.
+UMBRAL_NOVEDAD = 0.95
 
 
 def marcar_manual(db):
@@ -197,6 +208,96 @@ def _absorber(db, destino: Producto, origen: Producto):
 
     db.delete(origen)
     db.flush()
+
+
+# ---------- Novedades: algo que aparecio en un portal donde no estaba ----------
+
+def _ignoradas(db) -> set:
+    marca = db.query(Preferencia).get(Preferencia.NOVEDADES_IGNORADAS)
+    if marca is None or not marca.valor:
+        return set()
+    try:
+        return set(json.loads(marca.valor))
+    except ValueError:
+        return set()
+
+
+def ignorar_novedad(db, plataforma: str, remoto: str):
+    """No avisar mas de este. El usuario ya lo vio y no lo quiere vincular."""
+    marca = db.query(Preferencia).get(Preferencia.NOVEDADES_IGNORADAS)
+    if marca is None:
+        marca = Preferencia(clave=Preferencia.NOVEDADES_IGNORADAS)
+        db.add(marca)
+    actuales = _ignoradas(db)
+    actuales.add(f"{plataforma}|{remoto}")
+    marca.valor = json.dumps(sorted(actuales))
+
+
+def detectar_novedades(db, plataforma: str, leidos) -> list:
+    """Productos del catalogo que APARECIERON en un portal donde no estaban.
+
+    El caso que lo motivo: la Suprema figuraba como exclusiva de Rappi
+    (confirmado en su momento), el usuario la agrego a la carta de PedidosYa,
+    y la app la seguia mostrando en gris con el chip "no existe ahi". Sin
+    este aviso, la unica forma de enterarse era acordarse de abrir la carta.
+
+    Solo mira productos QUE YA ESTAN en el catalogo y a los que les falta
+    una plataforma. Los nombres del portal que no corresponden a nada
+    cargado no entran: son los ~18 de Rappi que el usuario decidio no
+    cargar, y avisar de ellos en cada arranque seria puro ruido.
+    """
+    ignoradas = _ignoradas(db)
+
+    # Los nombres del portal que ya tienen dueño no son novedad.
+    tomados = set()
+    productos = db.query(Producto).filter(Producto.activo == True).all()  # noqa: E712
+    for p in productos:
+        remoto = nombre_remoto(p, plataforma)
+        if remoto is not None:
+            tomados.add(remoto)
+
+    sueltos = [n for n in leidos
+               if n not in tomados and f"{plataforma}|{n}" not in ignoradas]
+    if not sueltos:
+        return []
+
+    novedades = []
+    for p in productos:
+        if nombre_remoto(p, plataforma) is not None:
+            continue        # ya esta en esa plataforma
+
+        # Contra que comparamos: el canonico y como se llama en la otra.
+        conocidos = [p.nombre] + [a.nombre_remoto for a in p.alias]
+
+        mejor, punto = None, 0.0
+        for suelto in sueltos:
+            for conocido in conocidos:
+                valor = parecido(conocido, suelto)
+                if valor > punto:
+                    mejor, punto = suelto, valor
+
+        if mejor is None or punto < UMBRAL_NOVEDAD:
+            continue
+
+        otra = next((o for o in PLATAFORMAS
+                     if o != plataforma and nombre_remoto(p, o) is not None), None)
+        novedades.append({
+            "producto_id": p.id,
+            "producto": p.nombre,
+            "plataforma": plataforma,
+            "nombre_en_el_portal": mejor,
+            "confianza": round(punto, 3),
+            # Lo que hay que mandarle a /api/vincular para engancharlo.
+            "pedidosya": mejor if plataforma == "pedidosya" else nombre_remoto(p, "pedidosya"),
+            "rappi": mejor if plataforma == "rappi" else nombre_remoto(p, "rappi"),
+            "otra_plataforma": otra,
+        })
+
+    if novedades:
+        log.info("%s: aparecieron en el portal %s productos que el catalogo "
+                 "tenia como inexistentes ahi: %s", plataforma, len(novedades),
+                 ", ".join(n["nombre_en_el_portal"] for n in novedades))
+    return novedades
 
 
 def separar(db, producto_id: int, plataforma: str) -> Producto:

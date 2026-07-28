@@ -123,6 +123,7 @@
 
 <main>
   <div id="panel-platos" style="display:none"></div>
+  <div id="panel-novedades" style="display:none"></div>
   <div id="panel-carta" class="carta" style="display:none"></div>
   <div id="lista" class="vacio">Cargando productos…</div>
 </main>
@@ -132,13 +133,67 @@ const PLATS = ['pedidosya', 'rappi'];
 const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi' };
 
 async function cargar() {
-  const [productos, sistema] = await Promise.all([
+  const [productos, sistema, novedades] = await Promise.all([
     fetch('/api/productos').then(r => r.json()),
     fetch('/api/estado-sistema').then(r => r.json()),
+    fetch('/api/novedades').then(r => r.json()).catch(() => ({ novedades: [] })),
   ]);
 
   pintarSistema(sistema);
+  pintarNovedades(novedades.novedades || []);
   pintarProductos(productos);
+}
+
+// Algo que el catálogo tenía como "no existe en ese portal" y el portal
+// ahora muestra: lo agregaste a la carta. Sin este aviso, la app lo seguía
+// mostrando en gris y la única forma de enterarse era abrir la Carta.
+function pintarNovedades(novedades) {
+  const panel = document.getElementById('panel-novedades');
+  if (!novedades.length) { panel.style.display = 'none'; return; }
+
+  panel.style.display = 'block';
+  panel.className = 'aviso-platos';
+  panel.innerHTML = '<div style="width:100%"></div>';
+  const cont = panel.firstChild;
+
+  const titulo = document.createElement('div');
+  titulo.style.marginBottom = '8px';
+  titulo.innerHTML = novedades.length === 1
+    ? '<b>Un producto apareció en un portal donde no estaba.</b>'
+    : `<b>${novedades.length} productos aparecieron en un portal donde no estaban.</b>`;
+  cont.appendChild(titulo);
+
+  for (const n of novedades) {
+    const fila = document.createElement('div');
+    fila.style.cssText = 'display:flex;gap:10px;align-items:center;' +
+                         'justify-content:space-between;margin-top:6px';
+
+    const texto = document.createElement('div');
+    texto.innerHTML =
+      `<b>${n.producto}</b> ahora también está en ${NOMBRE_PLAT[n.plataforma]}` +
+      ` como <b>${n.nombre_en_el_portal}</b>`;
+
+    const acc = document.createElement('div');
+    acc.className = 'acciones';
+
+    const bSi = document.createElement('button');
+    bSi.className = 'on';
+    bSi.textContent = 'Es el mismo';
+    bSi.title = 'Que los dos se apaguen con el mismo botón';
+    bSi.onclick = () => accionCarta('/api/vincular',
+                                    { pedidosya: n.pedidosya, rappi: n.rappi }, bSi);
+
+    const bNo = document.createElement('button');
+    bNo.textContent = 'No, es otro';
+    bNo.title = 'Dejarlo como está y no volver a avisar';
+    bNo.onclick = () => accionCarta('/api/novedades/ignorar',
+                                    { plataforma: n.plataforma,
+                                      nombre_remoto: n.nombre_en_el_portal }, bNo);
+
+    acc.append(bSi, bNo);
+    fila.append(texto, acc);
+    cont.appendChild(fila);
+  }
 }
 
 function pintarSistema(s) {
