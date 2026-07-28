@@ -79,6 +79,54 @@ async def esperar_boton(fila, texto, timeout=10000):
         return False
 
 
+async def probar_aviso_de_novedad(pagina):
+    """El caso del 2026-07-28: agregaron la Locro a la carta de PedidosYa.
+
+    El catalogo la tenia como exclusiva de Rappi, asi que la app la mostraba
+    en gris con el chip "no existe ahi" y no habia forma de enterarse.
+    """
+    print("\n== Aviso: apareció en un portal donde no estaba ==")
+    from app import catalogo
+    from app.database import SessionLocal
+    from app.worker import worker
+
+    db = SessionLocal()
+    try:
+        leido = {"Locro del sábado": True}
+        worker.novedades = {
+            "pedidosya": catalogo.detectar_novedades(db, "pedidosya", leido)
+        }
+    finally:
+        db.close()
+
+    revisar(len(worker.novedades["pedidosya"]) == 1,
+            "la lectura del portal la detecta")
+
+    await pagina.reload()
+    panel = pagina.locator("#panel-novedades")
+    await panel.wait_for(timeout=10000)
+    texto = await panel.inner_text()
+    revisar("Locro" in texto and "PedidosYa" in texto,
+            "la pantalla avisa que apareció en PedidosYa")
+
+    await panel.locator("button", has_text="Es el mismo").click()
+    await pagina.wait_for_timeout(1500)
+
+    catalogo_json = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    locro = [p for p in catalogo_json["productos"]
+               if p["nombre"].startswith("Locro")]
+    revisar(len(locro) == 1 and
+            locro[0]["plataformas"]["pedidosya"] == "Locro del sábado",
+            "al aceptar, queda enganchada a PedidosYa con el nombre del portal")
+
+    revisar(await pagina.locator("#panel-novedades").is_hidden(),
+            "el aviso desaparece una vez resuelto")
+
+    texto_lista = await pagina.locator("#lista").inner_text()
+    revisar("PedidosYa: —" not in texto_lista.split("Locro")[1][:80],
+            "y el producto deja de figurar en gris en PedidosYa")
+
+
 async def main():
     servidor = levantar_app()
     for _ in range(100):                      # esperar a que levante
@@ -142,6 +190,8 @@ async def main():
         texto_lista = await pagina.locator("#lista").inner_text()
         revisar("Guiso de garbanzos" in texto_lista,
                 "y aparece en la lista de productos de la pantalla principal")
+
+        await probar_aviso_de_novedad(pagina)
 
         await navegador.close()
 

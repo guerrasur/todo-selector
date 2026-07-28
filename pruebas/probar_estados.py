@@ -20,7 +20,7 @@ TEMPORAL = tempfile.mkdtemp(prefix="todoselector-estados-")
 os.environ["HOME"] = TEMPORAL
 os.environ["LOCALAPPDATA"] = TEMPORAL
 
-from app import seed                                          # noqa: E402
+from app import catalogo, seed                                          # noqa: E402
 from app.database import SessionLocal, init_db                # noqa: E402
 from app.models import Producto, EstadoItem                   # noqa: E402
 from app.worker import Worker                                 # noqa: E402
@@ -47,6 +47,53 @@ def poner(db, nombre, valor, plataforma="rappi"):
     est = next(e for e in p.estados if e.plataforma == plataforma)
     est.estado = valor
     db.commit()
+
+
+def novedades(db):
+    print("\n== Avisar cuando algo aparece en un portal donde no estaba ==")
+
+    # El caso real: la Locro estaba cargada como exclusiva de Rappi y el
+    # usuario la agrego a la carta de PedidosYa. En el portal lleva tildes;
+    # el nombre canonico del catalogo no.
+    leido_py = {
+        "Locro del sábado": True,
+        "Tarta de choclo": True,
+    }
+    encontradas = catalogo.detectar_novedades(db, "pedidosya", leido_py)
+
+    revisar(len(encontradas) == 1,
+            f"detecta la Locro y nada mas (detecto {len(encontradas)})")
+    if encontradas:
+        n = encontradas[0]
+        revisar(n["producto"] == "Locro del sabado",
+                "la relaciona con el producto del catalogo pese a las tildes")
+        revisar(n["pedidosya"] == "Locro del sábado" and
+                n["rappi"] == "Locro del sábado",
+                "arma bien los dos nombres para vincular")
+
+    # Lo que NO tiene que avisar: el tarta de verdura. "Tarta de verdura chica"
+    # esta solo en PedidosYa, y en Rappi hay "individual" y "en porcion",
+    # que el usuario confirmo que son platos distintos. Da 0.91: alto, pero
+    # no identico.
+    leido_rappi = {
+        "Tarta de verdura individual": True,
+        "Tarta de verdura porción": True,
+    }
+    encontradas = catalogo.detectar_novedades(db, "rappi", leido_rappi)
+    revisar(not any(n["producto"] == "Tarta de verdura chica" for n in encontradas),
+            "NO propone vincular el tarta de verdura con la version 'individual'")
+
+    # Y los ~18 de Rappi que el usuario decidio no cargar tampoco son aviso.
+    encontradas = catalogo.detectar_novedades(
+        db, "rappi", {"Wok de vegetales": True, "Guiso de garbanzos": True})
+    revisar(encontradas == [],
+            "los productos que no estan en el catalogo no generan aviso")
+
+    print("\n== 'No, es otro' no vuelve a preguntar ==")
+    catalogo.ignorar_novedad(db, "pedidosya", "Locro del sábado")
+    db.commit()
+    encontradas = catalogo.detectar_novedades(db, "pedidosya", leido_py)
+    revisar(encontradas == [], "una vez ignorada, no vuelve a aparecer")
 
 
 def main():
@@ -117,6 +164,8 @@ def main():
                 "lo apagado desde el portal no entra en la ronda de reverificacion")
         revisar("Flan casero" in nombres,
                 "lo que apago la app si entra")
+
+        novedades(db)
     finally:
         db.close()
         shutil.rmtree(TEMPORAL, ignore_errors=True)

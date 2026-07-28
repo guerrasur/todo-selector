@@ -101,6 +101,11 @@ class Preferencia(Base):
     # productos), asi que seed.py deja de pisar los alias en cada arranque.
     CATALOGO_MANUAL = "catalogo_manual"
 
+    # Nombres que aparecieron en un portal y el usuario NO quiso vincular.
+    # Lista JSON de "plataforma|nombre". Sin esto, el aviso volvia en cada
+    # arranque y terminabas ignorandolo.
+    NOVEDADES_IGNORADAS = "novedades_ignoradas"
+
     clave = Column(String(60), primary_key=True)
     valor = Column(String(200), default="")
 
