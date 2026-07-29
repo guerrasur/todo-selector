@@ -668,9 +668,9 @@ async def probar_apagar_todo(pagina):
     await pagina.wait_for_selector(".fila-cierre", timeout=5000)
 
     filas = pagina.locator(".fila-cierre")
-    revisar(await filas.count() == 3,
-            "hay un juego de botones para PedidosYa, otro para Rappi y otro "
-            "para los dos")
+    revisar(await filas.count() == 4,
+            "hay un juego de botones para PedidosYa, otro para Rappi, otro "
+            "para Rappi Común y otro para los dos (PedidosYa+Rappi)")
 
     fila_py = pagina.locator(".fila-cierre[data-destino='pedidosya']")
     revisar("para apagar" in await fila_py.inner_text(),

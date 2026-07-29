@@ -235,6 +235,7 @@
   <button id="btn-leer-estado">Leer estado real</button>
   <button id="btn-carta">Actualizar carta</button>
   <button id="btn-revalidar">Revalidar sesión</button>
+  <button id="btn-avisos" title="Click para que te avise con una notificación si se cae una sesión">🔔</button>
   <button id="btn-ajustes" title="Ajustes">⚙</button>
 </header>
 
@@ -270,8 +271,87 @@
 </main>
 
 <script>
-const PLATS = ['pedidosya', 'rappi'];
-const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi' };
+const PLATS = ['pedidosya', 'rappi', 'rappi_comun'];
+const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi', rappi_comun: 'Rappi Común' };
+
+// ------------------------------------------------ Avisos de sesión caída
+//
+// El login sigue siendo 100% manual a propósito (Rappi suele pedir 2FA, y
+// guardar la contraseña para reloguear solo es más riesgo del que vale la
+// pena). Lo único que se agrega es avisar más fuerte y apenas pasa, en vez
+// de depender de que alguien mire el badge de arriba. Todo esto es 100%
+// frontend: el backend ya expone `sesiones` en /api/estado-sistema.
+
+const TITULO_NORMAL = document.title;
+let sesionesCaidasAntes = new Set();     // para detectar la TRANSICION, no el estado
+let parpadeoTitulo = null;               // id del setInterval, o null si no hay nada caido
+
+function sonarAviso() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    for (const inicio of [0, 0.22]) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.001, ctx.currentTime + inicio);
+      gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + inicio + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + inicio + 0.18);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + inicio);
+      osc.stop(ctx.currentTime + inicio + 0.2);
+    }
+  } catch (e) { /* AudioContext no disponible: sin sonido, no es grave */ }
+}
+
+function actualizarBotonAvisos() {
+  const b = document.getElementById('btn-avisos');
+  if (!b) return;
+  const permiso = (typeof Notification === 'undefined') ? 'unsupported' : Notification.permission;
+  if (permiso === 'granted') {
+    b.textContent = '🔔';
+    b.title = 'Avisos activados: te va a avisar con una notificación si Rappi o PedidosYa piden loguearse de nuevo';
+    b.disabled = true;
+  } else if (permiso === 'denied' || permiso === 'unsupported') {
+    b.textContent = '🔕';
+    b.title = permiso === 'denied'
+      ? 'El navegador bloqueó los avisos. Activalos desde el ícono de candado de la barra de direcciones.'
+      : 'Este navegador no soporta notificaciones de escritorio.';
+    b.disabled = true;
+  } else {
+    b.textContent = '🔔?';
+    b.title = 'Click para que te avise con una notificación si se cae una sesión';
+    b.disabled = false;
+  }
+}
+
+function avisarSesionCaida(plataformas) {
+  sonarAviso();
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    const quienes = plataformas.map(p => NOMBRE_PLAT[p]).join(', ');
+    new Notification('Todo-Selector: sesión caída', {
+      body: `${quienes} pide${plataformas.length === 1 ? '' : 'n'} que te vuelvas a loguear en la ventana del navegador.`,
+    });
+  }
+}
+
+// Alterna el titulo de la pestaña mientras haya algo caído, para que se
+// note aunque el usuario tenga otra pestaña al frente (y por ende no
+// reciba notificaciones del SO, que solo saltan con el navegador atras).
+function actualizarParpadeoTitulo(hayCaidas) {
+  if (hayCaidas && !parpadeoTitulo) {
+    let mostrando = false;
+    parpadeoTitulo = setInterval(() => {
+      document.title = mostrando ? TITULO_NORMAL : '⚠️ Login pendiente — Todo-Selector';
+      mostrando = !mostrando;
+    }, 1500);
+  } else if (!hayCaidas && parpadeoTitulo) {
+    clearInterval(parpadeoTitulo);
+    parpadeoTitulo = null;
+    document.title = TITULO_NORMAL;
+  }
+}
 
 // producto_id + '|' + plataforma  ->  por qué la app no puede confirmar que
 // siga apagado. Lo usa fila() para marcar el producto.
@@ -585,12 +665,21 @@ function pintarNovedades(novedades) {
     const acc = document.createElement('div');
     acc.className = 'acciones';
 
+    // PedidosYa y Rappi son el par principal (se fusionan/crean con
+    // /api/vincular). Cualquier otra plataforma (hoy, Rappi Común) es una
+    // plataforma DE MÁS sobre un producto que ya existe: eso es
+    // /api/enlazar, no vincular.
+    const esParPrincipal = n.plataforma === 'pedidosya' || n.plataforma === 'rappi';
+
     const bSi = document.createElement('button');
     bSi.className = 'on';
     bSi.textContent = 'Es el mismo';
     bSi.title = 'Que los dos se apaguen con el mismo botón';
-    bSi.onclick = () => accionCarta('/api/vincular',
-                                    { pedidosya: n.pedidosya, rappi: n.rappi }, bSi);
+    bSi.onclick = () => esParPrincipal
+      ? accionCarta('/api/vincular', { pedidosya: n.pedidosya, rappi: n.rappi }, bSi)
+      : accionCarta('/api/enlazar', { producto_id: n.producto_id,
+                                      plataforma: n.plataforma,
+                                      nombre_remoto: n.nombre_en_el_portal }, bSi);
 
     const bNo = document.createElement('button');
     bNo.textContent = 'No, es otro';
@@ -619,6 +708,13 @@ function pintarSistema(s) {
       el.textContent = 'Conectado';
       el.className = 'badge';
     }
+
+    // Avisar solo en la TRANSICION a caido (incluye el caso de arrancar la
+    // pantalla con la sesion ya caida), no en cada poll mientras sigue asi.
+    const nuevas = caidas.filter(p => !sesionesCaidasAntes.has(p));
+    if (nuevas.length) avisarSesionCaida(nuevas);
+    sesionesCaidasAntes = new Set(caidas);
+    actualizarParpadeoTitulo(caidas.length > 0);
   }
 
   const p = document.getElementById('pendientes');
@@ -1117,6 +1213,7 @@ async function pintarCierre(mensaje = '') {
   const destinos = [
     ['pedidosya', 'PedidosYa', ['pedidosya']],
     ['rappi', 'Rappi', ['rappi']],
+    ['rappi_comun', 'Rappi Común', ['rappi_comun']],
     ['ambas', 'Los dos', ['pedidosya', 'rappi']],
   ];
 
@@ -1786,6 +1883,13 @@ for (const chip of document.querySelectorAll('.chip-vista')) {
 document.getElementById('btn-carta').onclick = abrirCarta;
 document.getElementById('btn-cierre').onclick = abrirCierre;
 document.getElementById('btn-ajustes').onclick = abrirAjustes;
+
+document.getElementById('btn-avisos').onclick = async () => {
+  if (typeof Notification === 'undefined') return;
+  await Notification.requestPermission();
+  actualizarBotonAvisos();
+};
+actualizarBotonAvisos();
 
 document.getElementById('btn-leer-estado').onclick = async (e) => {
   const b = e.target;

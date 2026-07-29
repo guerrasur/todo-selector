@@ -71,10 +71,17 @@ class Rappi(PlataformaBase):
     TXT_POR_HOY = "Sólo por hoy"
     TXT_INDEFINIDO = "No disponible indefinidamente"
 
-    def __init__(self, page, store_id: str = None, brand_id: str = None):
+    def __init__(self, page, store_id: str = None, brand_id: str = None,
+                 nombre: str = None):
         super().__init__(page)
         self.store_id = store_id or self.STORE_ID
         self.brand_id = brand_id or self.BRAND_ID
+        # Rappi Turbo y Rappi Común son la MISMA plataforma (mismo portal,
+        # mismo login) pero tiendas independientes: una segunda instancia de
+        # esta clase con otro store_id es "rappi_comun". El nombre es solo
+        # para que los logs digan cual es cual.
+        if nombre:
+            self.nombre = nombre
 
     @property
     def configurado(self) -> bool:

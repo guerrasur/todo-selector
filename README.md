@@ -614,9 +614,13 @@ carta entera hay que recorrerlas (ver el punto 0).
       PedidosYa y el `brandId`/`storeId` de Rappi salen de Ajustes (cambiarlos
       no pide reiniciar la app), y `app/seed.py` quedó vacío — una instalación
       nueva arranca sin catálogo y lee el suyo. Ver «Primera vez».
-- [ ] **Apagar en varias tiendas de Rappi a la vez.** Hoy la app opera sobre
-      una sola. Si tus tiendas son independientes, hay que iterar cambiando
-      `storeId` en la URL.
+- [x] **Rappi Común, además de Rappi Turbo.** Son tiendas independientes
+      (apagar en una no apaga en la otra): `rappi_comun_store_id` en
+      Ajustes (grupo «Rappi Común», opcional — vacío = la app no la toca)
+      abre una tercera pestaña con el mismo `brandId` y otro `storeId`.
+      Aparece como una plataforma más (chip, «Apagar todo», etc.) en cuanto
+      se configura. Enganchar el catálogo existente a esta plataforma nueva
+      usa el mismo aviso de "novedad" que ya existía para PedidosYa/Rappi.
 
 ## Nota sobre términos de servicio
 

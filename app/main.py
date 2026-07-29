@@ -503,6 +503,37 @@ def vincular(data: VincularIn, db: Session = Depends(get_db)):
     return {"ok": True, "producto": _ver_producto(producto)}
 
 
+class EnlazarIn(BaseModel):
+    producto_id: int
+    plataforma: str
+    nombre_remoto: str
+
+
+@app.post("/api/enlazar")
+def enlazar(data: EnlazarIn, db: Session = Depends(get_db)):
+    """Suma una plataforma a un producto que YA existe (no crea uno nuevo).
+
+    Es lo que usa el aviso de "novedad" cuando la plataforma no es una de
+    las dos principales (PedidosYa/Rappi) — hoy, Rappi Común: un plato que
+    ya se apaga en las otras dos y ahora también hay que apagarlo ahí.
+    """
+    try:
+        producto = catalogo.enlazar(db, data.producto_id, data.plataforma,
+                                    data.nombre_remoto)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.commit()
+
+    for plataforma, lista in worker.novedades.items():
+        worker.novedades[plataforma] = [
+            n for n in lista
+            if not (n["plataforma"] == data.plataforma
+                    and n["nombre_en_el_portal"] == data.nombre_remoto)
+        ]
+
+    return {"ok": True, "producto": _ver_producto(producto)}
+
+
 @app.post("/api/separar")
 def separar(data: SepararIn, db: Session = Depends(get_db)):
     """Saca una plataforma del producto y la deja como producto aparte."""

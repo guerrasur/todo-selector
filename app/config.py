@@ -45,6 +45,13 @@ class Opcion:
     unidad: str = ""
     # Para tipo "eleccion": [(valor, etiqueta), ...]
     opciones: tuple = field(default_factory=tuple)
+    # Solo para tipo "texto": si puede guardarse vacío. Los ids de sucursal
+    # (pedidosya_menu_id, etc.) son obligatorios a propósito -- un vacío ahí
+    # es un error de tipeo, no una decisión. rappi_comun_store_id es el
+    # primer campo de verdad opcional: la mayoría de los locales no lo usa,
+    # y sin esto guardar CUALQUIER ajuste fallaba con "no puede quedar
+    # vacío" apenas ese campo existía sin llenar.
+    opcional: bool = False
 
 
 OPCIONES = (
@@ -186,6 +193,24 @@ OPCIONES = (
               "normalmente alcanza con esa: apagando ahí se apaga también "
               "en la normal. Conviene confirmarlo en tu caso.",
     ),
+    # Grupo aparte y NO "Sucursal" a propósito: ese grupo es el que la
+    # pantalla de primer arranque exige completar entero antes de dejar
+    # usar la app (ver pasoSucursal() en static/index.html). Esto es
+    # opcional — la mayoría de los locales no vende por Rappi Común — así
+    # que no puede bloquear a nadie que no lo tenga.
+    Opcion(
+        clave="rappi_comun_store_id",
+        titulo="storeId de Rappi Común",
+        defecto="",
+        tipo="texto",
+        grupo="Rappi Común",
+        opcional=True,
+        ayuda="Opcional. Completalo solo si tu local vende también por Rappi "
+              "Común además de Rappi Turbo: son independientes, apagar en "
+              "una no apaga en la otra. Mismo brandId de Rappi de arriba, "
+              "storeId distinto (se saca de la URL del menú de esa tienda). "
+              "Vacío = la app no la toca.",
+    ),
 )
 
 POR_CLAVE = {o.clave: o for o in OPCIONES}
@@ -287,6 +312,8 @@ def _validar(opcion: Opcion, valor: Any) -> Any:
         return valor
 
     limpio = str(valor).strip()
+    if opcion.opcional and not limpio:
+        return ""
     if not RE_ID.match(limpio):
         raise ValueError(f"«{opcion.titulo}»: solo letras, números, - y _")
     return limpio

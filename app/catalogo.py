@@ -30,7 +30,11 @@ from .models import (Producto, AliasPlataforma, EstadoItem, Preferencia,
 
 log = logging.getLogger("catalogo")
 
-PLATAFORMAS = ("pedidosya", "rappi")
+# "rappi_comun" es una tienda de Rappi independiente de "rappi" (Turbo):
+# mismo portal, mismo login, pero apagar en una no apaga en la otra. Es
+# opcional (ver app/config.py, rappi_comun_store_id); si no esta configurada
+# el worker ni le abre pestaña, y no aparece en ningun catalogo real.
+PLATAFORMAS = ("pedidosya", "rappi", "rappi_comun")
 
 # Para avisar "esto aparecio en el otro portal" el parecido tiene que ser
 # casi identico, no solo alto. Con 0.82 (el umbral del emparejador) una
@@ -172,7 +176,8 @@ def buscar_por_remoto(db, plataforma: str, remoto: str) -> Producto | None:
     return None
 
 
-NOMBRE_PLATAFORMA = {"pedidosya": "PedidosYa", "rappi": "Rappi"}
+NOMBRE_PLATAFORMA = {"pedidosya": "PedidosYa", "rappi": "Rappi",
+                     "rappi_comun": "Rappi Común"}
 
 
 def _nombre_libre(db, base: str, excluir_id: int = None,
@@ -257,6 +262,38 @@ def agregar(db, plataforma: str, remoto: str, categoria: str = "",
     _poner_estado(db, producto, plataforma)
     marcar_manual(db)
     log.info("Agregado '%s' (solo %s)", producto.nombre, plataforma)
+    return producto
+
+
+def enlazar(db, producto_id: int, plataforma: str, remoto: str) -> Producto:
+    """Suma una plataforma a un producto que YA EXISTE, sin crear uno nuevo.
+
+    `vincular()` fusiona/crea a partir de PedidosYa + Rappi, que es el par
+    principal. Esto es para el caso de agregarle una plataforma MAS a un
+    producto que ya esta cargado (hoy, Rappi Común: un plato que ya se
+    apaga en PedidosYa y en Rappi Turbo y ahora tambien hay que apagarlo
+    ahi). Se usa desde el aviso de "novedad" cuando la plataforma no es
+    ninguna de las dos principales.
+    """
+    if plataforma not in PLATAFORMAS:
+        raise ValueError(f"plataforma desconocida: {plataforma}")
+
+    producto = db.query(Producto).get(producto_id)
+    if producto is None:
+        raise ValueError("producto no encontrado")
+
+    ya = buscar_por_remoto(db, plataforma, remoto)
+    if ya is not None and ya.id != producto.id:
+        raise ValueError(f"'{remoto}' ya está cargado como '{ya.nombre}'")
+
+    guardar_paso(db, f"agregar {NOMBRE_PLATAFORMA.get(plataforma, plataforma)} "
+                     f"a '{producto.nombre}'")
+
+    _poner_alias(db, producto, plataforma, remoto)
+    _poner_estado(db, producto, plataforma)
+    marcar_manual(db)
+    log.info("'%s' ahora también existe en %s como '%s'",
+             producto.nombre, plataforma, remoto)
     return producto
 
 
