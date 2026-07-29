@@ -10,6 +10,7 @@ py pruebas/probar_estados.py          guardar el estado leído del portal
 py pruebas/probar_cierre.py           apagar todo por plataforma + ajustes
 py pruebas/probar_pantalla_carta.py   la pantalla entera, de punta a punta
 py pruebas/probar_primer_arranque.py  cómo arranca una instalación nueva
+py pruebas/probar_rappi_sync.py       las dos tiendas de Rappi (Turbo y Común)
 ```
 
 Las dos que usan navegador necesitan Playwright instalado
@@ -50,8 +51,10 @@ ajustes validen antes de guardar (una tanda con un valor malo no guarda ninguno)
 
 **`probar_pantalla_carta.py`** levanta la app entera en modo simulado y la
 maneja con Playwright como lo haría una persona. En modo simulado `/api/carta`
-devuelve `carta_2026-07-27.json`, que es la lectura **real** de los dos
-portales de ese día: sirve para probar la pantalla sin estar en el local.
+lee las cartas inventadas de `carta_ejemplo.json` y **las cruza con el
+emparejador de verdad**, así que la pantalla simulada muestra exactamente lo
+que mostraría contra los portales. (Antes ese archivo guardaba el resultado ya
+cruzado, escrito a mano, y se había despegado de lo que el código produce.)
 
 Además del recorrido de la Carta cubre el panel de **Apagar todo**, el de
 **Ajustes**, las **vistas de prendidos** (que "prendidos primero" no esconda
@@ -61,6 +64,19 @@ y a recargar), y una regresión que costó caro: el chip de plataforma se
 deseleccionaba solo. La lista se repinta cada pocos segundos, y la selección
 vivía en una variable local del repintado; si tardabas más que el refresco en
 apretar el botón, la acción salía a los dos portales sin decir nada.
+
+**`probar_rappi_sync.py`** cubre la segunda tienda de Rappi. Rappi Turbo y
+Rappi Común son dos tiendas del mismo local que **no comparten la carta**:
+apagar en una no apaga en la otra, un plato puede estar en una y no en la
+otra, y puede llamarse distinto en cada una. Cubre que el emparejador cruce
+tres cartas sin cambiar lo que hacía con dos, que **entre dos tiendas del
+mismo portal se exija más** para emparejar solo (la trampa: "Empanada de
+carne chica" puntúa 0.91 contra "Empanada de carne" y es otro plato), que el
+catálogo pueda representar dos o tres botones, que fusionar productos no
+borre en silencio la tercera tienda, que al apagar mande **la selección
+explícita** (nada de espejos por atrás), que lo no vinculado se saltee en vez
+de apagar cualquier cosa, y que quede avisado lo que terminó apagado en una
+tienda y prendido en la otra.
 
 **`probar_primer_arranque.py`** levanta la app **sin catálogo y sin ajustes**,
 que es exactamente como le llega a alguien que la baja por primera vez. Cubre
@@ -73,9 +89,12 @@ vaya cuando ya no hace falta.
 ## La carta de ejemplo
 
 `app/seed.py` viene **vacío** a propósito, así que las pruebas traen su propia
-carta inventada: `catalogo_ejemplo.py` (el catálogo) y `carta_ejemplo.json` (lo
-que devuelve `/api/carta` en modo simulado). Los dos van de la mano: si tocás
-uno, tocá el otro.
+carta inventada: `catalogo_ejemplo.py` (el catálogo) y `carta_ejemplo.json`
+(lo que "leen" los portales en modo simulado). Los dos van de la mano: si
+tocás uno, tocá el otro. **Ojo con `carta_ejemplo.json`**: los números que
+afirma `probar_pantalla_carta.py` ("A confirmar — 2", "Solo en Rappi — 7")
+salen de correr el emparejador sobre esas listas, así que cambiar un nombre
+los cambia.
 
 No es una lista cualquiera. Reproduce las trampas que ya costaron caro, porque
 un ejemplo fácil deja de cubrirlas:
@@ -86,7 +105,10 @@ un ejemplo fácil deja de cubrirlas:
   "Manantial sin gas 500 ml";
 - **variantes que NO son el mismo plato** — "chica", "individual" y "porción"
   puntúan altísimo entre sí;
-- **productos que existen en un solo portal**, en los dos sentidos.
+- **productos que existen en un solo portal**, en los dos sentidos;
+- **las dos tiendas de Rappi con cartas distintas** — platos que están en una
+  y no en la otra, y una "Empanada de carne chica" que es prefijo de la
+  "Empanada de carne" de las otras dos y NO es el mismo plato.
 
 Los ids de sucursal de `catalogo_ejemplo.SUCURSAL` también son de mentira: lo
 único que importa es que existan, para que las pruebas no se queden en la

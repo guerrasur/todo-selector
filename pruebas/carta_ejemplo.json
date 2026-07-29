@@ -1,50 +1,67 @@
 {
-  "_leeme": "Carta INVENTADA de un local que no existe. Es lo que devuelve /api/carta en modo simulado, para poder probar la pantalla Carta sin navegador y sin depender de estar en un local de verdad. Los nombres estan elegidos para reproducir las trampas reales del proyecto: prefijos ('Tarta de verdura' vs 'Tarta de verdura chica'), tildes, variantes que NO son el mismo plato, y productos cuyo nombre no se parece en nada de un portal al otro. Va de la mano de pruebas/catalogo_ejemplo.py.",
-  "total": 20,
-  "emparejados": 11,
-  "a_confirmar": [
-    {
-      "pedidosya": "Tarta de verdura chica",
-      "rappi": "Tarta de verdura individual",
-      "confianza": 0.714,
-      "alternativas": ["Tarta de verdura porción"]
-    },
-    {
-      "pedidosya": "Agua chica",
-      "rappi": "Manantial sin gas 500 ml",
-      "confianza": 0.421
-    },
-    {
-      "pedidosya": "Agua chica con gas",
-      "rappi": "Manantial con gas 500 ml",
-      "confianza": 0.444
-    }
-  ],
-  "solo_pedidosya": [
+  "_leeme": "Carta INVENTADA de un local que no existe: lo que 'leen' los portales en modo simulado, para poder probar la pantalla Carta sin navegador y sin depender de estar en un local de verdad. Son las listas crudas, tal como las devolveria listar_productos() de cada plataforma; el cruce lo hace el emparejador de verdad (app/carta.py, emparejar_n) cuando la app corre simulada. Antes aca vivia el RESULTADO del cruce escrito a mano, y se habia despegado de lo que el codigo produce: proponia pares que el emparejador ni siquiera propone (0.42, cuando el minimo es 0.55) y marcaba a confirmar cosas que en realidad se emparejaban solas. Una prueba que afirma algo que el codigo no hace es peor que no tenerla. Los nombres estan elegidos para reproducir las trampas reales del proyecto: ver el _trampas de abajo. Va de la mano de pruebas/catalogo_ejemplo.py.",
+
+  "_trampas": {
+    "prefijos": "'Tarta de verdura' es prefijo de 'Tarta de verdura chica'. Y en la tienda Rappi Comun esta 'Empanada de carne chica', que es prefijo de la 'Empanada de carne' que hay en los otros dos: puntua 0.91 y NO es el mismo plato.",
+    "tildes": "'Budin de pan' (PedidosYa) contra 'Budín de pan' (las dos de Rappi), y 'Milanesa con pure' (PedidosYa y Comun) contra 'Milanesa con puré' (Turbo).",
+    "no_se_parecen_en_nada": "'Agua chica' en PedidosYa es 'Manantial sin gas 500 ml' en Rappi. Ninguna heuristica los junta: los vincula el usuario a mano.",
+    "dos_tamanos": "'Gaseosa cola 500 ml' y 'Gaseosa cola 1 L' puntuan igual contra la 'Gaseosa cola' de PedidosYa. Con dos candidatos empatados la decision es del usuario: apagar el tamaño que no era es una venta perdida.",
+    "variantes_que_no_son_el_mismo_plato": "'Tarta de verdura chica', '... individual' y '... porción' se parecen muchisimo y son tres cosas distintas.",
+    "falta_en_una_tienda_de_rappi": "'Flan casero', 'Pollo al horno' y las gaseosas existen en PedidosYa y en Turbo pero NO en la tienda Comun: el producto tiene dos botones, no tres.",
+    "existe_solo_en_una_tienda_de_rappi": "'Guiso de garbanzos' y 'Ñoquis del 29' estan en las dos tiendas de Rappi y no en PedidosYa; 'Tostado de queso' esta en PedidosYa y en Comun, pero NO en Turbo. Las cartas de las dos tiendas de Rappi NO son iguales, que es todo el motivo de esto."
+  },
+
+  "pedidosya": [
+    "Tarta de verdura",
+    "Tarta de choclo",
+    "Tarta de jamon y queso",
+    "Empanada de carne",
+    "Flan casero",
+    "Budin de pan",
+    "Sopa del dia",
+    "Ensalada mixta",
+    "Milanesa con pure",
+    "Pollo al horno",
+    "Gaseosa cola",
+    "Tarta de verdura chica",
+    "Agua chica",
+    "Agua chica con gas",
     "Tostado de queso"
   ],
-  "solo_rappi": [
+
+  "rappi": [
+    "Tarta de verdura",
+    "Tarta de choclo y queso",
+    "Tarta de jamón y queso",
+    "Empanada de carne",
+    "Flan casero",
+    "Budín de pan",
+    "Sopa del día",
+    "Ensalada mixta de hojas",
+    "Milanesa con puré",
+    "Pollo al horno",
+    "Gaseosa cola 500 ml",
+    "Gaseosa cola 1 L",
+    "Tarta de verdura individual",
+    "Manantial sin gas 500 ml",
+    "Manantial con gas 500 ml",
     "Tarta de verdura porción",
     "Locro del sábado",
     "Ñoquis del 29",
     "Guiso de garbanzos",
     "Wok de vegetales"
   ],
-  "pares": [
-    { "pedidosya": "Tarta de verdura", "rappi": "Tarta de verdura", "confianza": 1.0 },
-    { "pedidosya": "Tarta de choclo", "rappi": "Tarta de choclo y queso", "confianza": 0.85 },
-    { "pedidosya": "Tarta de jamon y queso", "rappi": "Tarta de jamón y queso", "confianza": 0.98 },
-    { "pedidosya": "Empanada de carne", "rappi": "Empanada de carne", "confianza": 1.0 },
-    { "pedidosya": "Flan casero", "rappi": "Flan casero", "confianza": 1.0 },
-    { "pedidosya": "Budin de pan", "rappi": "Budín de pan", "confianza": 0.98 },
-    { "pedidosya": "Sopa del dia", "rappi": "Sopa del día", "confianza": 0.97 },
-    { "pedidosya": "Ensalada mixta", "rappi": "Ensalada mixta de hojas", "confianza": 0.82 },
-    { "pedidosya": "Milanesa con pure", "rappi": "Milanesa con puré", "confianza": 0.98 },
-    { "pedidosya": "Pollo al horno", "rappi": "Pollo al horno", "confianza": 1.0 },
-    { "pedidosya": "Gaseosa cola", "rappi": "Gaseosa cola 500 ml", "confianza": 0.8 }
-  ],
-  "leidos": {
-    "pedidosya": 15,
-    "rappi": 19
-  }
+
+  "rappi_comun": [
+    "Tarta de verdura",
+    "Tarta de choclo y queso",
+    "Budín de pan",
+    "Manantial sin gas 500 ml",
+    "Empanada de carne chica",
+    "Milanesa con pure",
+    "Ñoquis del 29",
+    "Guiso de garbanzos",
+    "Sopa del día",
+    "Tostado de queso"
+  ]
 }

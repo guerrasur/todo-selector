@@ -24,6 +24,10 @@ cartas, y dos `prender` seguidos que terminaron en OK.
 | **PedidosYa** | ✅ la carta entera, recorriendo categorías | ✅ | ✅ (op#17, op#63) |
 | **Rappi** | ✅ la carta entera | ✅ | ✅ (op#18, op#64) |
 
+La tienda **Rappi Común** (opcional, `rappi_comun_store_id` en Ajustes) usa la
+misma clase con otro `storeId` y otra pestaña. **En vivo todavía no se probó**:
+el código es el mismo que el de Turbo, pero nadie la corrió contra el portal.
+
 Queda un `TODO-SELECTOR` en `plataformas/rappi.py`: el HTML completo de la
 tarjeta y el selector de la pantalla de sesión expirada.
 
@@ -162,6 +166,7 @@ py pruebas/probar_estados.py          cómo se guarda el estado leído del porta
 py pruebas/probar_cierre.py           apagar todo por plataforma + ajustes
 py pruebas/probar_pantalla_carta.py   la app entera en modo simulado
 py pruebas/probar_primer_arranque.py  sin catálogo y sin ajustes, como llega nueva
+py pruebas/probar_rappi_sync.py       las dos tiendas de Rappi (Turbo y común)
 ```
 
 `pruebas/portal_pedidosya.html` replica el DOM real. Acepta
@@ -325,7 +330,16 @@ filtrar por visible antes del `.first`.
   alias, y además ya viene vacío.
 - Los productos que existen en un solo portal no se cargan a mano: se agregan
   desde la pantalla Carta cuando hacen falta.
-- La app opera sobre **una** tienda de Rappi, la de Ajustes.
+- La app opera sobre **las dos** tiendas de Rappi (2026-07-29). Turbo y común
+  son independientes y con cartas distintas; la segunda es opcional y se
+  prende con `rappi_comun_store_id` en Ajustes.
+- **Nada de espejos automáticos entre plataformas.** Lo que se apaga es lo que
+  el usuario eligió con los chips y los botones, ni más ni menos. Que apagar
+  en Turbo apague en común sale de que sean el MISMO producto del catálogo
+  (los dos chips vienen puestos), no de una regla que propague por atrás.
+- **Lo dudoso lo decide el usuario, una vez, en la pantalla Carta**, y queda
+  guardado. La app no empareja sola entre las dos tiendas de Rappi si no es
+  prácticamente el mismo nombre.
 
 ## Próximos pasos
 
@@ -339,8 +353,12 @@ filtrar por visible antes del `.first`.
    sin tener la ventana del `.bat` abierta. Ver la sección del bug más caro.
 4. Terminar el `TODO-SELECTOR` de Rappi: HTML de la tarjeta y pantalla de
    sesión expirada.
-5. **Apagar en varias tiendas de Rappi a la vez**, si algún usuario las tiene
-   independientes. Hoy hay que iterar cambiando `storeId` en la URL.
+5. ~~Apagar en varias tiendas de Rappi a la vez.~~ **HECHO (2026-07-29).** El
+   usuario confirmó que en su local Turbo y común son tiendas independientes y
+   **no comparten la carta**. La app opera sobre las dos: dos pestañas con dos
+   `storeId` (no se itera la URL), la pantalla Carta lee y vincula las tres, y
+   «Apagar todo» tiene los cinco destinos que pidió (cada una sola, ambos
+   Rappi, las tres). Ver «Las dos tiendas de Rappi» en el README.
 
 ## Diagnóstico disponible (todo GET, no modifican nada)
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from . import config
-from .carta import emparejar, resumen
+from .carta import emparejar_n, resumen
 from .database import SessionLocal, PERFIL_CHROME
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion
 
@@ -42,15 +42,30 @@ def _carta_de_muestra() -> dict:
     que mas conviene poder probar sin depender de estar en un local. Antes
     aca vivia la lectura real de un local de verdad; ahora es un ejemplo
     armado para reproducir las mismas trampas (ver pruebas/carta_ejemplo.json).
+
+    El archivo guarda las CARTAS CRUDAS de cada plataforma y el cruce lo
+    hace el emparejador de verdad, igual que contra los portales. Antes
+    guardaba el resultado ya cruzado, escrito a mano, y se habia despegado
+    de lo que el codigo produce: la pantalla simulada mostraba pares que el
+    emparejador ni siquiera propone.
     """
     try:
         with open(MUESTRA_CARTA, encoding="utf-8") as f:
-            carta = json.load(f)
+            leidas = json.load(f)
     except Exception as e:
         return {"error": f"modo simulado y no pude leer la muestra: {e}"}
 
-    carta["simulado"] = True
-    return carta
+    # Solo las plataformas que esta instalacion usa: si no tiene la tienda
+    # Rappi Común configurada, la pantalla simulada tampoco tiene por que
+    # mostrarle una columna de mas.
+    activas = config.plataformas_activas()
+    cartas = {plat: leidas[plat] for plat in activas
+              if isinstance(leidas.get(plat), list)}
+
+    salida = resumen(emparejar_n(cartas), list(cartas))
+    salida["leidos"] = {plat: len(nombres) for plat, nombres in cartas.items()}
+    salida["simulado"] = True
+    return salida
 
 
 INTERVALO_COLA = 2               # segundos entre chequeos de la cola
@@ -671,8 +686,13 @@ class Worker:
             self.ultima_carta = _carta_de_muestra()
             return self.ultima_carta
 
+        # Todas las que esta instalacion usa, no las dos de siempre: con las
+        # dos tiendas de Rappi son tres cartas, y la de la tienda Común es
+        # justamente la que no se podia vincular desde la pantalla.
+        objetivo = config.plataformas_activas()
+
         cartas, errores = {}, {}
-        for nombre in ("pedidosya", "rappi"):
+        for nombre in objetivo:
             plat = self.plataformas.get(nombre)
             if plat is None:
                 errores[nombre] = "no hay pestaña"
@@ -692,15 +712,16 @@ class Worker:
         if errores:
             log.warning("Carta incompleta: %s", errores)
 
-        pares = emparejar(cartas.get("pedidosya", []), cartas.get("rappi", []))
-        salida = resumen(pares)
+        # `objetivo` y no `cartas`: una plataforma cuya lectura fallo tiene
+        # que seguir teniendo su columna en la pantalla, con el error a la
+        # vista. Si desapareciera, la carta parecería completa.
+        salida = resumen(emparejar_n(cartas), objetivo)
         salida["leidos"] = {k: len(v) for k, v in cartas.items()}
         if errores:
             salida["errores"] = errores
 
-        log.info("Carta: %s en PedidosYa, %s en Rappi, %s emparejados solos, "
-                 "%s a confirmar",
-                 len(cartas.get("pedidosya", [])), len(cartas.get("rappi", [])),
+        log.info("Carta: %s, %s emparejados solos, %s a confirmar",
+                 ", ".join(f"{len(v)} en {k}" for k, v in cartas.items()),
                  salida["emparejados"], len(salida["a_confirmar"]))
 
         salida["leida_en"] = datetime.now().isoformat(timespec="seconds")

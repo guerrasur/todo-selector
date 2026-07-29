@@ -710,6 +710,68 @@ async def guardar_config(pagina, cambios: dict):
            }).then(r => r.json())""", cambios)
 
 
+async def probar_carta_con_tres_columnas(pagina):
+    """La pantalla Carta con las DOS tiendas de Rappi.
+
+    Era lo que le faltaba a Rappi Común para estar terminada: la pantalla
+    leia dos portales, asi que enganchar el catalogo a la tercera tienda no
+    se podia hacer desde ningun lado.
+
+    Lo que importa que se vea aca: que la tienda Común tenga su columna y su
+    grupo, y que el emparejamiento dudoso ENTRE LAS DOS TIENDAS DE RAPPI
+    venga destildado. Ese es el caso caro: "Empanada de carne chica" puntua
+    0.91 contra "Empanada de carne" y es otro plato, asi que vincularlas de
+    un click apagaria algo que se sigue vendiendo.
+    """
+    print("\n== La pantalla Carta con las dos tiendas de Rappi ==")
+
+    await pagina.click("#btn-cierre")          # cerrar el panel de cierre
+    await pagina.click("#btn-carta")
+    await pagina.wait_for_selector("#panel-carta:visible", timeout=5000)
+    await pagina.click("#btn-leer-carta")
+    await pagina.wait_for_selector(".grupo", timeout=15000)
+
+    cuerpo = pagina.locator("#carta-cuerpo")
+    revisar(await pagina.locator("h3", has_text="Solo en Rappi Común").count() == 1,
+            "la tienda Común tiene su propio grupo de sueltos")
+    revisar("en Rappi Común" in await cuerpo.inner_text(),
+            "y el pie dice cuantos leyo de esa tienda")
+
+    # La fila de "Vincular a mano" tiene que ofrecer los tres portales, que
+    # es lo unico que resuelve un nombre que no se parece en nada.
+    manual = pagina.locator(".par.manual").first
+    revisar(await manual.locator("select[data-plat='rappi_comun']").count() == 1,
+            "«Vincular a mano» tiene un selector para la tienda Común")
+
+    fila = fila_de(pagina, "Empanada de carne", "Empanada de carne chica")
+    revisar(await esperar(fila), "la 'Empanada de carne chica' aparece propuesta")
+
+    casilla = fila.locator("input[type=checkbox][data-plat='rappi_comun']")
+    revisar(await casilla.count() == 1,
+            "con una casilla para decidir si entra en el vinculo")
+    revisar(not await casilla.is_checked(),
+            "que viene DESTILDADA: 0.91 entre dos tiendas del mismo portal "
+            "no alcanza para darlo por hecho")
+    turbo = fila.locator("input[type=checkbox][data-plat='rappi']")
+    revisar(await turbo.is_checked(),
+            "y la de Rappi Turbo si, que esa se emparejo clavada")
+
+    # Vincular sin tildarla: quedan las dos seguras y la dudosa afuera.
+    await fila.locator("button", has_text="Vincular").click()
+    await pagina.wait_for_timeout(1500)
+    productos = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    empanada = [p for p in productos["productos"]
+                if p["plataformas"]["pedidosya"] == "Empanada de carne"]
+    revisar(len(empanada) == 1 and
+            empanada[0]["plataformas"]["rappi_comun"] is None,
+            "vincular deja afuera la que no tildaste: la tienda Común no entra")
+    revisar(len(empanada) == 1 and
+            empanada[0]["plataformas"]["rappi"] == "Empanada de carne",
+            "y si vincula las dos que estaban tildadas")
+
+    await pagina.click("#btn-carta")           # cerrar el panel
+
+
 async def probar_plataforma_opcional(pagina):
     """Rappi Común: existe en el codigo, pero solo si la configuras.
 
@@ -756,11 +818,22 @@ async def probar_plataforma_opcional(pagina):
     await pagina.click("#btn-cierre")
     await pagina.wait_for_selector("#panel-cierre:visible", timeout=5000)
     await pagina.wait_for_selector(".fila-cierre", timeout=5000)
-    revisar(await pagina.locator(".fila-cierre").count() == 4,
-            "«Apagar todo» tiene las tres plataformas y una fila para todas")
+    # Tres plataformas + «Ambos Rappi» + «Todas». Lo pidio asi el usuario
+    # (2026-07-29): poder apagar solo Turbo, solo Comun, solo PedidosYa, las
+    # dos de Rappi juntas, o las tres.
+    revisar(await pagina.locator(".fila-cierre").count() == 5,
+            "«Apagar todo» tiene las tres, el combo de Rappi y una para todas")
+    ambos = pagina.locator(".fila-cierre[data-destino='rappi_todas']")
+    revisar(await ambos.count() == 1,
+            "hay una fila para apagar las dos tiendas de Rappi juntas")
     todas = pagina.locator(".fila-cierre[data-destino='ambas']")
     revisar("Todas" in await todas.inner_text(),
             "la fila de todas ya no dice «los dos», que dejaria una afuera")
+    # Con las dos tiendas configuradas, «Rappi» a secas es ambiguo.
+    revisar("Rappi Turbo" in await pagina.locator("#panel-cierre").inner_text(),
+            "y la tienda principal pasa a llamarse «Rappi Turbo»")
+
+    await probar_carta_con_tres_columnas(pagina)
 
     print("\n== Y se puede volver a apagar sin reiniciar la app ==")
     await guardar_config(pagina, {"rappi_comun_store_id": ""})
@@ -838,23 +911,31 @@ async def main():
         await pagina.click("#btn-leer-carta")
         await pagina.wait_for_selector(".grupo", timeout=15000)
 
-        revisar(await pagina.locator("h3", has_text="A confirmar — 3").count() == 1,
-                "muestra los 3 pares a confirmar")
-        revisar(await pagina.locator("h3", has_text="Solo en Rappi — 5").count() == 1,
-                "muestra los 5 que estan solo en Rappi")
+        # Los numeros salen del emparejador de verdad corriendo sobre las
+        # cartas de pruebas/carta_ejemplo.json. Si cambia una lista, cambian.
+        revisar(await pagina.locator("h3", has_text="A confirmar — 2").count() == 1,
+                "muestra los pares a confirmar")
+        revisar(await pagina.locator("h3", has_text="Solo en Rappi — 7").count() == 1,
+                "muestra los que estan solo en Rappi")
         revisar("15 en PedidosYa" in await pagina.locator("#carta-cuerpo").inner_text(),
                 "muestra cuantos leyo de cada portal")
 
+        print("\n== Avisa cuando hay mas de un candidato ==")
+        # Las dos gaseosas: la de 500 y la de 1 litro puntuan igual contra
+        # la "Gaseosa cola" de PedidosYa. Apagar el tamaño que no era es una
+        # venta perdida, asi que la decision tiene que ser del usuario.
+        gaseosa = fila_de(pagina, "Gaseosa cola", "Gaseosa cola 500 ml")
+        revisar("Gaseosa cola 1 L" in await gaseosa.inner_text(),
+                "avisa que en Rappi tambien existe el otro tamaño")
+
         print("\n== Las dos tartas de verdura arrancan separadas ==")
-        fila = fila_de(pagina, "Tarta de verdura chica", "Tarta de verdura individual")
+        fila = fila_de(pagina, "Tarta de verdura chica", "Tarta de verdura porción")
         revisar(await fila.locator("button", has_text="Vincular").count() == 1,
-                "el par que el usuario dijo que NO es el mismo ofrece Vincular")
-        revisar("Tarta de verdura porción" in await fila.inner_text(),
-                "avisa que en Rappi tambien existe la version en porcion")
+                "el par que el usuario todavia no confirmo ofrece Vincular")
 
         print("\n== Vincular y separar ==")
         await fila.locator("button", has_text="Vincular").click()
-        fila = fila_de(pagina, "Tarta de verdura chica", "Tarta de verdura individual")
+        fila = fila_de(pagina, "Tarta de verdura chica", "Tarta de verdura porción")
         revisar(await esperar_boton(fila, "Separar"),
                 "despues de vincular, la fila ofrece Separar")
         revisar("un solo botón" in await fila.inner_text(),
@@ -865,11 +946,11 @@ async def main():
         vinculado = [p for p in productos["productos"]
                      if p["plataformas"]["pedidosya"] == "Tarta de verdura chica"]
         revisar(len(vinculado) == 1 and
-                vinculado[0]["plataformas"]["rappi"] == "Tarta de verdura individual",
+                vinculado[0]["plataformas"]["rappi"] == "Tarta de verdura porción",
                 "quedo un solo producto con los dos nombres")
 
         await fila.locator("button", has_text="Separar").click()
-        fila = fila_de(pagina, "Tarta de verdura chica", "Tarta de verdura individual")
+        fila = fila_de(pagina, "Tarta de verdura chica", "Tarta de verdura porción")
         revisar(await esperar_boton(fila, "Vincular"),
                 "Separar los vuelve a dejar con un boton cada uno")
 

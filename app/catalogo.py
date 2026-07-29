@@ -301,66 +301,100 @@ def vincular(db, remoto_py: str, remoto_rappi: str,
              nombre: str = None, categoria: str = "") -> Producto:
     """Deja los dos nombres apuntando al MISMO producto: un solo boton.
 
-    Sirve para los tres casos que aparecen en la carta: los dos ya estaban
-    cargados por separado (se fusionan), uno solo estaba cargado (se le
-    agrega la otra plataforma), o ninguno (se crea).
+    Es el par principal (PedidosYa + Rappi Turbo). Para vincular tres de una
+    —hoy sumando Rappi Común— esta `vincular_varios()`, que es lo mismo con
+    un diccionario.
     """
-    a = buscar_por_remoto(db, "pedidosya", remoto_py)
-    b = buscar_por_remoto(db, "rappi", remoto_rappi)
+    return vincular_varios(db, {"pedidosya": remoto_py, "rappi": remoto_rappi},
+                           nombre=nombre, categoria=categoria)
 
-    if a is not None and b is not None and a.id == b.id:
-        return a                                     # ya estaban vinculados
 
-    guardar_paso(db, f"vincular '{remoto_py}' (PedidosYa) con "
-                     f"'{remoto_rappi}' (Rappi)")
+def vincular_varios(db, nombres: dict, nombre: str = None,
+                    categoria: str = "") -> Producto:
+    """Deja todos esos nombres apuntando al MISMO producto: un solo boton.
 
-    # Antes de juntar, hay que soltar lo que estos dos ya tenian tomado del
-    # otro lado, o se perderia sin aviso. Pasa al vincular a mano dos que ya
-    # estaban emparejados con otra cosa: si "Tarta de verdura chica" (PY) se
-    # vincula con "Tarta de verdura" (Rappi), y ese ya estaba con la "Tarta
-    # de verdura"
-    # (PY), ese ultimo se quedaba sin plataforma y desaparecia del catalogo.
-    # Ahora sobrevive como producto propio.
-    if a is not None:
-        actual = nombre_remoto(a, "rappi")
-        if actual is not None and actual != remoto_rappi:
-            log.info("'%s' se suelta de '%s' (Rappi) para vincularse con '%s'",
-                     a.nombre, actual, remoto_rappi)
-            separar(db, a.id, "rappi", registrar=False)
+    `nombres` es {plataforma: nombre_en_ese_portal}, con las plataformas que
+    quieras: dos (el par de siempre) o tres (sumando la tienda Rappi Común).
+    Una plataforma que no este en el diccionario NO se toca — es la unica
+    forma de vincular PedidosYa con Turbo sin decir nada de Común, que es
+    justo lo que hace falta cuando la tercera todavia esta en duda.
 
-    if b is not None:
-        actual = nombre_remoto(b, "pedidosya")
-        if actual is not None and actual != remoto_py:
-            log.info("'%s' se suelta de '%s' (PedidosYa) para vincularse con '%s'",
-                     b.nombre, actual, remoto_py)
-            separar(db, b.id, "pedidosya", registrar=False)
+    Sirve para los mismos casos de siempre: ya estaban cargados por separado
+    (se fusionan), alguno estaba cargado (se le agregan las demas), o ninguno
+    (se crea).
+    """
+    nombres = {plat: remoto for plat, remoto in nombres.items() if remoto}
+    desconocidas = [p for p in nombres if p not in PLATAFORMAS]
+    if desconocidas:
+        raise ValueError(f"plataforma desconocida: {desconocidas[0]}")
+    if len(nombres) < 2:
+        raise ValueError("hay que vincular al menos dos plataformas")
 
-    if a is None and b is None:
-        producto = Producto(nombre=_nombre_libre(db, nombre or remoto_py),
+    # En el orden de PLATAFORMAS: el nombre canonico sale del primero que
+    # haya (PedidosYa si esta), como venia siendo.
+    orden = [p for p in PLATAFORMAS if p in nombres]
+
+    existentes = {plat: buscar_por_remoto(db, plat, nombres[plat])
+                  for plat in orden}
+    encontrados = [p for p in existentes.values() if p is not None]
+
+    if encontrados and all(p.id == encontrados[0].id for p in encontrados) \
+            and len(encontrados) == len(orden):
+        return encontrados[0]                        # ya estaban vinculados
+
+    guardar_paso(db, "vincular " + " con ".join(
+        f"'{nombres[p]}' ({NOMBRE_PLATAFORMA.get(p, p)})" for p in orden))
+
+    # Antes de juntar, hay que soltar lo que estos ya tenian tomado en las
+    # plataformas que se estan reasignando, o se perderia sin aviso. Pasa al
+    # vincular a mano dos que ya estaban emparejados con otra cosa: si "Tarta
+    # de verdura chica" (PY) se vincula con "Tarta de verdura" (Rappi), y ese
+    # ya estaba con la "Tarta de verdura" (PY), ese ultimo se quedaba sin
+    # plataforma y desaparecia del catalogo. Ahora sobrevive como producto
+    # propio.
+    for producto in encontrados:
+        for plat in orden:
+            actual = nombre_remoto(producto, plat)
+            if actual is not None and actual != nombres[plat]:
+                log.info("'%s' se suelta de '%s' (%s) para vincularse con '%s'",
+                         producto.nombre, actual,
+                         NOMBRE_PLATAFORMA.get(plat, plat), nombres[plat])
+                separar(db, producto.id, plat, registrar=False)
+
+    # separar() borra alias y estados, pero la sesion es autoflush=False y
+    # las colecciones en memoria siguen mostrando lo que ya no esta. Sin
+    # esto, el absorber de abajo se llevaba a `destino` un alias que acababa
+    # de mudarse a otro producto, y el mismo nombre de portal quedaba en dos.
+    db.flush()
+    db.expire_all()
+    existentes = {plat: buscar_por_remoto(db, plat, nombres[plat])
+                  for plat in orden}
+    encontrados = [p for p in existentes.values() if p is not None]
+
+    if not encontrados:
+        producto = Producto(nombre=_nombre_libre(db, nombre or nombres[orden[0]]),
                             categoria=categoria, orden=500)
         db.add(producto)
         db.flush()
-    elif a is not None and b is None:
-        producto = a
-    elif a is None and b is not None:
-        producto = b
     else:
-        # Los dos existian por separado: se queda el de PedidosYa, que es el
-        # que tiene el nombre canonico, y el de Rappi se absorbe.
-        producto = a
-        _absorber(db, destino=a, origen=b)
+        # Se queda el del portal que va primero (PedidosYa si esta, que es el
+        # que tiene el nombre canonico) y los demas se absorben.
+        producto = next(existentes[p] for p in orden if existentes[p] is not None)
+        for otro in encontrados:
+            if otro.id != producto.id:
+                _absorber(db, destino=producto, origen=otro)
 
     if nombre:
         producto.nombre = _nombre_libre(db, nombre, excluir_id=producto.id)
 
-    _poner_alias(db, producto, "pedidosya", remoto_py)
-    _poner_alias(db, producto, "rappi", remoto_rappi)
-    _poner_estado(db, producto, "pedidosya")
-    _poner_estado(db, producto, "rappi")
+    for plat in orden:
+        _poner_alias(db, producto, plat, nombres[plat])
+        _poner_estado(db, producto, plat)
 
     marcar_manual(db)
-    log.info("Vinculados '%s' (PedidosYa) y '%s' (Rappi) como '%s'",
-             remoto_py, remoto_rappi, producto.nombre)
+    log.info("Vinculados %s como '%s'",
+             ", ".join(f"'{nombres[p]}' ({NOMBRE_PLATAFORMA.get(p, p)})"
+                       for p in orden), producto.nombre)
     return producto
 
 
@@ -369,8 +403,43 @@ def _absorber(db, destino: Producto, origen: Producto):
 
     Las operaciones en cola del producto que desaparece se remapean: si no,
     quedan apuntando a una fila borrada y el worker revienta al tomarlas.
+
+    Las plataformas que `origen` tenia y `destino` no, se mudan con todo y
+    estado. Con dos plataformas esto no podia pasar (las dos se reescribian
+    despues igual), pero con tres si: absorber un producto que ya estaba
+    vinculado a la tienda Común mientras vinculas PedidosYa con Turbo le
+    borraba esa tercera sin decir nada. Si `destino` YA tiene esa
+    plataforma, la de `origen` no se puede mudar: se separa antes, y
+    sobrevive como producto suelto en vez de desaparecer.
     """
     from .models import Operacion
+
+    for plat in list(PLATAFORMAS):
+        suyo = nombre_remoto(origen, plat)
+        if suyo is None:
+            continue
+        if nombre_remoto(destino, plat) is not None:
+            # Los dos lo tienen y no son el mismo nombre: el de origen no
+            # cabe. Se va como producto propio antes de que lo borremos.
+            if len([p for p in PLATAFORMAS
+                    if nombre_remoto(origen, p) is not None]) > 1:
+                log.info("'%s' (%s) no cabe en '%s': queda como producto suelto",
+                         suyo, NOMBRE_PLATAFORMA.get(plat, plat), destino.nombre)
+                separar(db, origen.id, plat, registrar=False)
+            continue
+
+        estado_viejo = next((e for e in origen.estados
+                             if e.plataforma == plat), None)
+        _poner_alias(db, destino, plat, suyo)
+        est = _poner_estado(db, destino, plat)
+        if estado_viejo is not None:
+            est.estado = estado_viejo.estado
+            est.detalle = estado_viejo.detalle
+            est.verificado_en = estado_viejo.verificado_en
+        log.info("'%s' se lleva %s ('%s') de '%s'", destino.nombre,
+                 NOMBRE_PLATAFORMA.get(plat, plat), suyo, origen.nombre)
+
+    db.flush()
 
     (db.query(Operacion)
        .filter(Operacion.producto_id == origen.id)
@@ -468,6 +537,72 @@ def detectar_novedades(db, plataforma: str, leidos) -> list:
                  "tenia como inexistentes ahi: %s", plataforma, len(novedades),
                  ", ".join(n["nombre_en_el_portal"] for n in novedades))
     return novedades
+
+
+# ---------- Dos tiendas del mismo portal que quedaron distintas ----------
+
+def desparejos(db, activas) -> list:
+    """Lo que quedo APAGADO en una tienda y PRENDIDO en la tienda hermana.
+
+    Rappi Turbo y Rappi Común son dos tiendas del mismo local con dos
+    toggles independientes. Un producto vinculado en las dos que quedo
+    apagado en una sola se sigue vendiendo en la otra, y en la pantalla eso
+    no se ve: son dos chips distintos, uno rojo y otro verde, en una fila
+    que a simple vista parece atendida.
+
+    Lo que NO entra aca, a proposito: el producto que directamente no esta
+    vinculado en la otra tienda. Puede que ahi no se venda, y no hay forma
+    de distinguirlo desde la base — eso se resuelve una vez en la pantalla
+    de asociacion (y el aviso de novedad ya lo empuja). Un cartel fijo
+    diciendo "esto podria estar en la otra tienda" para media carta se
+    vuelve ruido, y el ruido termina en que no se lee ninguno.
+    """
+    from .carta import TIENDAS_DEL_MISMO_PORTAL
+
+    familias = [sorted(f & set(activas)) for f in TIENDAS_DEL_MISMO_PORTAL]
+    familias = [f for f in familias if len(f) > 1]
+    if not familias:
+        return []
+
+    salida = []
+    productos = (db.query(Producto)
+                 .filter(Producto.activo == True)  # noqa: E712
+                 .order_by(Producto.orden).all())
+
+    for p in productos:
+        if p.pausado:
+            continue                 # el usuario ya dijo que no le importa
+        for familia in familias:
+            estados = {e.plataforma: e for e in p.estados
+                       if e.plataforma in familia}
+            # Con una operacion en vuelo lo que diga el estado es
+            # transitorio: avisar ahi seria avisar de algo que se esta
+            # arreglando solo en este momento.
+            if any(e.estado in EstadoItem.EN_CURSO for e in estados.values()):
+                continue
+
+            apagadas = [plat for plat, e in estados.items()
+                        if e.estado in EstadoItem.APAGADOS_PROPIOS
+                        or e.estado == EstadoItem.APAGADO_AJENO]
+            prendidas = [plat for plat, e in estados.items()
+                         if e.estado == EstadoItem.PRENDIDO]
+            if not apagadas or not prendidas:
+                continue
+
+            salida.append({
+                "producto_id": p.id,
+                "producto": p.nombre,
+                "apagada_en": apagadas[0],
+                "prendida_en": prendidas[0],
+                "nombre_remoto": nombre_remoto(p, prendidas[0]),
+                "estado": estados[apagadas[0]].estado,
+            })
+
+    if salida:
+        log.info("%s producto(s) apagados en una tienda y prendidos en la "
+                 "hermana: %s", len(salida),
+                 ", ".join(s["producto"] for s in salida))
+    return salida
 
 
 def separar(db, producto_id: int, plataforma: str,

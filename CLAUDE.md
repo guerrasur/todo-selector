@@ -21,16 +21,32 @@ arranque (decir qué local sos → leer tu carta). Los ids de sucursal tampoco
 tienen default. Las pruebas traen su propia carta inventada, en
 `pruebas/catalogo_ejemplo.py` y `pruebas/carta_ejemplo.json`.
 
-**Apagar todo** (`app/cierre.py`) apaga o prende la carta entera de **una
-plataforma o de las dos**, con un botón por portal: a veces PedidosYa tiene
-que apagarse antes que Rappi. Nunca encola lo que ya está como quiere
-quedar, lo pausado, ni lo que ya está en la cola.
+**Apagar todo** (`app/cierre.py`) apaga o prende la carta entera de **las
+plataformas que elijas**, con un botón por destino: a veces PedidosYa tiene
+que apagarse antes que Rappi. Con las dos tiendas de Rappi los destinos son
+cinco (cada una sola, «Ambos Rappi» y «Todas»). Nunca encola lo que ya está
+como quiere quedar, lo pausado, ni lo que ya está en la cola.
 
-**Rappi Común está a medio hacer y viene APAGADA** (2026-07-29). Es una
-tercera plataforma opcional (tienda de Rappi independiente de Turbo) que solo
-existe si le cargás `rappi_comun_store_id` en Ajustes. Le falta la pantalla
-Carta, que sigue siendo de dos columnas: ver el README, "Pendientes de
-producto". Con el ajuste vacío no tiene que notarse en ningún lado.
+**Lo que se apaga es lo que elegiste, y nada más.** No hay espejos ni
+propagación automática entre plataformas: si el producto está vinculado en
+las dos tiendas de Rappi, sus dos chips vienen seleccionados y un botón apaga
+las dos; si sacaste un chip, ese portal no se toca. Una acción que apaga algo
+que el usuario no eligió es indistinguible de un bug.
+
+**Rappi Común** (2026-07-29) es una tercera plataforma **opcional**: la
+segunda tienda de Rappi, independiente de Turbo, que solo existe si le cargás
+`rappi_comun_store_id` en Ajustes. Con el ajuste vacío no se nota en ningún
+lado. Ya está completa: pestaña propia, chip propio, columna propia en la
+pantalla Carta, fila propia en «Apagar todo» (más los combos «Ambos Rappi» y
+«Todas»), cola y reverificación.
+
+**Las dos tiendas de Rappi NO comparten la carta.** Apagar en una no apaga en
+la otra, y un plato puede estar en una y no en la otra. Que producto de una es
+cuál de la otra lo dice el catálogo (un `Producto` con alias en las dos), y lo
+confirma el usuario una vez en la pantalla Carta. La app **no** empareja sola
+lo dudoso: entre dos tiendas del mismo portal el umbral es 0.95 y no 0.82
+(`carta.TIENDAS_DEL_MISMO_PORTAL`), porque ahí los nombres se parecen
+muchísimo y emparejar de más es apagar un plato que se sigue vendiendo.
 
 **Los ajustes** (`app/config.py`) viven en la tabla `preferencias`, con el
 prefijo `cfg_`. Ahí salen el ritmo del worker y **qué sucursal es** (el id de
