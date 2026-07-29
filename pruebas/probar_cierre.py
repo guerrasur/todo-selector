@@ -392,6 +392,102 @@ async def sesion_caida(db):
             "y cuando vuelve la sesion sale sola, sin volver a pedirla")
 
 
+async def plataforma_opcional(db):
+    """Rappi Común se prende y se apaga desde Ajustes, sin reiniciar.
+
+    EL BUG (2026-07-29): borrar el storeId no la apagaba. La pestaña seguia
+    abierta operando sobre la tienda vieja, entraba en las lecturas y en la
+    revalidacion de sesion, y con el aviso nuevo podia ponerse a sonar por
+    una tienda que el usuario acababa de sacar. Y las operaciones que
+    quedaban para una plataforma sin pestaña gastaban los 3 intentos con el
+    mismo error antes de morir.
+    """
+    print("\n== La plataforma opcional se prende y se apaga desde Ajustes ==")
+    from app.worker import Worker, NO_ACTIVA
+
+    todo_prendido(db)
+    config.guardar(db, {"rappi_comun_store_id": ""})
+    db.commit()
+    config.recargar()
+
+    revisar(config.plataformas_activas() == ["pedidosya", "rappi"],
+            "sin storeId, Rappi Común no esta activa")
+
+    # Apagar toda la carta de una plataforma apagada no puede encolar nada.
+    try:
+        await cierre.ejecutar(WorkerFalso(), "apagar_hoy", ["rappi_comun"],
+                              releer=False)
+        revisar(False, "«Apagar todo» rechaza una plataforma que no esta activa")
+    except ValueError:
+        revisar(True, "«Apagar todo» rechaza una plataforma que no esta activa")
+    revisar(cola(db, "rappi_comun") == set(), "y no quedo nada encolado")
+
+    config.guardar(db, {"rappi_comun_store_id": "9988"})
+    db.commit()
+    config.recargar()
+    revisar("rappi_comun" in config.plataformas_activas(),
+            "con el storeId puesto, pasa a estar activa")
+
+    # El ciclo de vida de la pestaña, sin Chrome de por medio.
+    class PaginaFalsa:
+        def __init__(self):
+            self.cerrada = False
+            self.url = ""
+
+        async def close(self):
+            self.cerrada = True
+
+    class NavegadorFalso:
+        def __init__(self):
+            self.paginas = []
+
+        async def new_page(self):
+            self.paginas.append(PaginaFalsa())
+            return self.paginas[-1]
+
+    w = Worker()
+    w.modo_simulado = False
+    w.browser = NavegadorFalso()
+    await w.aplicar_config()
+    revisar("rappi_comun" in w.plataformas,
+            "aplicar_config() le abre la pestaña sin reiniciar la app")
+
+    pagina = w.plataformas["rappi_comun"].page
+    config.guardar(db, {"rappi_comun_store_id": ""})
+    db.commit()
+    config.recargar()
+    await w.aplicar_config()
+
+    revisar("rappi_comun" not in w.plataformas,
+            "y borrar el storeId la saca")
+    revisar(pagina.cerrada, "cerrandole la pestaña, que si no queda fantasma")
+    revisar("rappi_comun" not in w.sesion_ok,
+            "y sin dejar una sesion que alerte por una tienda desactivada")
+
+    # Lo que haya quedado encolado para esa plataforma tiene que morir en el
+    # primer intento, no en el tercero.
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    db.add(Operacion(producto_id=p.id, plataforma="rappi_comun",
+                     accion="apagar_hoy"))
+    db.commit()
+
+    w.corriendo = True
+    await w._procesar_pendientes()
+    db.expire_all()
+    op = (db.query(Operacion)
+          .filter_by(producto_id=p.id, plataforma="rappi_comun").first())
+    revisar(op.estado == Operacion.ERROR and op.intentos == 1,
+            f"una operacion sin plataforma muere en el primer intento "
+            f"(quedo {op.estado} con {op.intentos})")
+
+    exito, detalle, motivo = await w._ejecutar("rappi_comun", "apagar_hoy", "X")
+    revisar(motivo == NO_ACTIVA and not exito,
+            f"y el motivo dice que no esta activa ({detalle})")
+
+    db.query(Operacion).delete()
+    db.commit()
+
+
 async def main():
     init_db()
     seed.sembrar()
@@ -410,6 +506,7 @@ async def main():
         ajustes(db)
         ruido_del_log()
         sucursal_configurable(db)
+        await plataforma_opcional(db)
     finally:
         db.close()
 

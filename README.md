@@ -614,13 +614,23 @@ carta entera hay que recorrerlas (ver el punto 0).
       PedidosYa y el `brandId`/`storeId` de Rappi salen de Ajustes (cambiarlos
       no pide reiniciar la app), y `app/seed.py` quedó vacío — una instalación
       nueva arranca sin catálogo y lee el suyo. Ver «Primera vez».
-- [x] **Rappi Común, además de Rappi Turbo.** Son tiendas independientes
-      (apagar en una no apaga en la otra): `rappi_comun_store_id` en
-      Ajustes (grupo «Rappi Común», opcional — vacío = la app no la toca)
-      abre una tercera pestaña con el mismo `brandId` y otro `storeId`.
-      Aparece como una plataforma más (chip, «Apagar todo», etc.) en cuanto
-      se configura. Enganchar el catálogo existente a esta plataforma nueva
-      usa el mismo aviso de "novedad" que ya existía para PedidosYa/Rappi.
+- [ ] **Rappi Común, además de Rappi Turbo. A MEDIO HACER: viene APAGADA.**
+      Son tiendas independientes (apagar en una no apaga en la otra). El
+      andamiaje está: `rappi_comun_store_id` en Ajustes (grupo «Rappi
+      Común») le abre una tercera pestaña con el mismo `brandId` y otro
+      `storeId`, y de ahí para adelante es una plataforma como las otras
+      (chip propio, fila propia en «Apagar todo», cola, reverificación).
+      **Vacío —el default— es como si no existiera:** no se le abre
+      pestaña, no aparece en la pantalla, no se le encola nada y la API la
+      rechaza. Prenderla y apagarla no pide reiniciar.
+
+      Lo que le falta para darla por hecha: **la pantalla «Carta» sigue
+      leyendo solo PedidosYa y Rappi**, que es donde se vinculan los
+      nombres. Enganchar tu catálogo a esta tercera depende del aviso de
+      «novedad», que solo salta si el nombre es casi idéntico (0.95) al que
+      ya tenés cargado; si en Rappi Común el plato se llama distinto, hoy
+      no hay forma de vincularlo desde la pantalla. Por eso queda
+      destildado: el que la prenda tiene que saber esto.
 
 ## Nota sobre términos de servicio
 

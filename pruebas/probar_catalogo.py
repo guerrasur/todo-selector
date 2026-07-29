@@ -425,6 +425,65 @@ def nombres_de_los_sueltos(db):
             f"se llama '{nuevo.nombre}' y no 'Tarta de verdura (2)'")
 
 
+def enlazar_una_plataforma_de_mas(db):
+    """Sumarle una plataforma a un producto que YA existe.
+
+    `vincular()` fusiona PedidosYa + Rappi, que es el par principal.
+    `enlazar()` es el otro caso: un plato que ya esta cargado y que ahora
+    tambien hay que apagar en una tercera plataforma (hoy, Rappi Común).
+    Sin el EstadoItem la operacion no se encola, asi que eso es lo que
+    tiene que quedar.
+    """
+    print("\n== Enlazar una plataforma de mas ==")
+    limpiar(db)
+    seed.sembrar()
+    db.expire_all()
+
+    p = db.query(Producto).filter_by(nombre="Milanesa con pure").first()
+    cuantos = db.query(Producto).count()
+
+    catalogo.enlazar(db, p.id, "rappi_comun", "Milanesa con pure (Común)")
+    db.commit()
+    db.expire_all()
+
+    revisar(db.query(Producto).count() == cuantos,
+            "no crea un producto nuevo: se lo cuelga al que ya estaba")
+    revisar(catalogo.nombre_remoto(p, "rappi_comun") == "Milanesa con pure (Común)",
+            "el producto ahora se llama asi en la plataforma nueva")
+    revisar(db.query(EstadoItem).filter_by(producto_id=p.id,
+                                           plataforma="rappi_comun").count() == 1,
+            "y le queda el EstadoItem, que es lo que habilita el boton")
+    revisar(catalogo.nombre_remoto(p, "pedidosya") is not None and
+            catalogo.nombre_remoto(p, "rappi") is not None,
+            "sin tocar los nombres que ya tenia en los otros dos portales")
+
+    # Repetir el mismo enlace no puede romper nada: el aviso de novedad
+    # puede llegar dos veces (dos lecturas seguidas).
+    catalogo.enlazar(db, p.id, "rappi_comun", "Milanesa con pure (Común)")
+    db.commit()
+    db.expire_all()
+    revisar(db.query(EstadoItem).filter_by(producto_id=p.id,
+                                           plataforma="rappi_comun").count() == 1,
+            "enlazar dos veces lo mismo no duplica nada")
+
+    # Un nombre del portal no puede tener dos dueños: si ya es de otro
+    # producto, hay que decirlo en vez de dejar dos botones peleandose.
+    otro = db.query(Producto).filter(Producto.id != p.id).first()
+    try:
+        catalogo.enlazar(db, otro.id, "rappi_comun", "Milanesa con pure (Común)")
+        revisar(False, "enlazar() rechaza un nombre que ya es de otro producto")
+    except ValueError:
+        db.rollback()
+        revisar(True, "enlazar() rechaza un nombre que ya es de otro producto")
+
+    try:
+        catalogo.enlazar(db, p.id, "pedidoya", "Milanesa")
+        revisar(False, "enlazar() rechaza una plataforma que no existe")
+    except ValueError:
+        db.rollback()
+        revisar(True, "enlazar() rechaza una plataforma que no existe")
+
+
 def main():
     init_db()
     db = SessionLocal()
@@ -441,6 +500,7 @@ def main():
         deshacer_vuelve_atras(db)
         deshacer_varios_pasos(db)
         nombres_de_los_sueltos(db)
+        enlazar_una_plataforma_de_mas(db)
     finally:
         db.close()
         shutil.rmtree(TEMPORAL, ignore_errors=True)
