@@ -214,6 +214,14 @@
     padding-top: 14px; border-top: 1px solid var(--borde);
   }
   #estado-ajustes { font-size: 13px; color: var(--tenue); }
+
+  /* ---- Primer arranque ---- */
+  #panel-inicio { border-left: 3px solid var(--curso); }
+  #panel-inicio .grupo > h3 { color: var(--texto); }
+  #panel-inicio .pie-paso {
+    display: flex; align-items: center; gap: 10px; margin-top: 12px;
+  }
+  #panel-inicio .nota { font-size: 13px; color: var(--tenue); }
 </style>
 </head>
 <body>
@@ -252,6 +260,7 @@
     de la acción: el botón queda actuando sobre el otro portal solo. Sirve
     cuando hay que apagar en un portal antes que en el otro.
   </div>
+  <div id="panel-inicio" class="carta" style="display:none"></div>
   <div id="panel-alertas" style="display:none"></div>
   <div id="panel-novedades" style="display:none"></div>
   <div id="panel-cierre" class="carta" style="display:none"></div>
@@ -281,9 +290,184 @@ async function cargar() {
     .map(a => [a.producto_id + '|' + a.plataforma, a]));
 
   pintarSistema(sistema);
+  await pintarInicio(sistema);
   pintarAlertas(alertas);
   pintarNovedades(novedades.novedades || []);
   pintarProductos(productos);
+}
+
+// ------------------------------------------------------- Primer arranque
+//
+// La app no viene con ninguna carta cargada. Antes traía la del local para
+// el que se escribió, así que quien la instalaba se encontraba con la carta
+// de otro y tenía que borrarla a mano. Ahora arranca vacía y la lee de TUS
+// portales — pero para eso primero tiene que saber qué local sos.
+//
+// Son dos pasos y en ese orden: sin los ids de la sucursal no hay a dónde
+// entrar a leer.
+
+let inicioPintado = '';    // firma de lo último que se dibujó acá
+
+async function pintarInicio(s) {
+  const panel = document.getElementById('panel-inicio');
+  const falta = s.falta_sucursal || [];
+  const vacio = !!s.catalogo_vacio;
+
+  if (!falta.length && !vacio) {
+    panel.style.display = 'none';
+    inicioPintado = '';
+    return;
+  }
+
+  panel.style.display = 'block';
+
+  // Este panel tiene campos de texto y la pantalla se repinta sola cada
+  // pocos segundos: redibujarlo mientras escribís el id de tu sucursal te
+  // lo borra a mitad de palabra. Por eso solo se redibuja si CAMBIÓ algo.
+  const firma = falta.join(',') + '|' + vacio;
+  if (firma === inicioPintado) return;
+  inicioPintado = firma;
+
+  // Tres situaciones distintas, y hablarle de "primera vez" a alguien que
+  // ya tiene su carta cargada es mentirle: lo único que le falta son los
+  // datos de la sucursal, que antes estaban clavados en el código.
+  const primeraVez = falta.length && vacio;
+
+  panel.innerHTML = `
+    <h2>${primeraVez ? 'Primera vez'
+                     : falta.length ? 'Faltan los datos de tu sucursal'
+                                    : 'Todavía no hay ninguna carta cargada'}</h2>
+    <div class="ayuda">${
+      primeraVez
+        ? 'Esta app no trae ninguna carta cargada: la lee de tus portales y ' +
+          'arma el catálogo sola. Son dos pasos, una sola vez.'
+        : falta.length
+          ? 'Tu catálogo está intacto. Lo que falta es a qué menú entrar: ' +
+            'antes estaba clavado en el código y ahora sale de acá, para que ' +
+            'la app sirva en cualquier local. Se completa una sola vez.'
+          : 'La app no trae ninguna carta cargada: la lee de tus portales y ' +
+            'arma el catálogo sola.'
+    }</div>
+    ${falta.length ? `
+    <div class="grupo">
+      <h3>${vacio ? '1 · Qué local sos' : 'Qué local sos'}</h3>
+      <div id="paso-sucursal"></div>
+    </div>` : ''}
+    ${vacio ? `
+    <div class="grupo">
+      <h3>${falta.length ? '2 · Leer tu carta' : 'Leer tu carta'}</h3>
+      <div id="paso-carta"></div>
+    </div>` : ''}`;
+
+  if (falta.length) {
+    await pasoSucursal(panel.querySelector('#paso-sucursal'), falta);
+  }
+  if (vacio) pasoCarta(panel.querySelector('#paso-carta'), falta);
+}
+
+// Los campos salen de /api/config (grupo "Sucursal"), no escritos acá: así
+// el texto de ayuda vive en un solo lugar (app/config.py) y agregar un dato
+// de sucursal no obliga a acordarse de esta pantalla.
+async function pasoSucursal(cont, falta) {
+  cont.innerHTML = '<div class="ayuda">Estos datos están en la URL del menú ' +
+                   'de cada portal. Quedan guardados en tu base: la app no ' +
+                   'los manda a ningún lado.</div>';
+
+  let opciones;
+  try {
+    opciones = (await fetch('/api/config').then(r => r.json())).opciones
+                 .filter(o => o.grupo === 'Sucursal');
+  } catch (e) {
+    cont.innerHTML = `<div class="ayuda">No pude leer los ajustes: ${e}</div>`;
+    return;
+  }
+
+  const campos = document.createElement('div');
+  for (const o of opciones) campos.appendChild(filaAjuste(o));
+  cont.appendChild(campos);
+
+  const pie = document.createElement('div');
+  pie.className = 'pie-paso';
+  const boton = document.createElement('button');
+  boton.className = 'on';
+  boton.id = 'btn-guardar-sucursal';
+  boton.textContent = 'Guardar y conectar';
+  const estado = document.createElement('span');
+  estado.className = 'nota';
+  estado.id = 'estado-sucursal';
+  pie.append(boton, estado);
+  cont.appendChild(pie);
+
+  boton.onclick = async () => {
+    const cambios = leerAjustes(campos);
+    // Guardar uno vacío deja la app igual de rota pero con cara de
+    // configurada: el panel se iría y el error saldría recién al leer.
+    const vacios = Object.entries(cambios)
+      .filter(([, v]) => !String(v).trim()).map(([k]) => k);
+    if (vacios.length) {
+      estado.textContent = 'Faltan completar ' + vacios.length + '.';
+      return;
+    }
+
+    boton.disabled = true;
+    estado.textContent = 'Guardando…';
+    try {
+      const r = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cambios }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        estado.textContent = 'No se pudo: ' + (err.detail || r.status);
+        boton.disabled = false;
+        return;
+      }
+      await cargar();
+    } catch (e) {
+      estado.textContent = 'No se pudo: ' + e;
+      boton.disabled = false;
+    }
+  };
+}
+
+function pasoCarta(cont, falta) {
+  const ayuda = document.createElement('div');
+  ayuda.className = 'ayuda';
+  ayuda.textContent = falta.length
+    ? 'Cuando termines el paso 1, la app entra a los dos portales, lee lo ' +
+      'que tenés publicado y te propone qué producto de uno es cuál del otro.'
+    : 'La app entra a los dos portales, lee lo que tenés publicado y te ' +
+      'propone qué producto de uno es cuál del otro. Tarda como un minuto. ' +
+      'Vos confirmás los que no son obvios: nada se vincula a tus espaldas.';
+  cont.appendChild(ayuda);
+
+  const pie = document.createElement('div');
+  pie.className = 'pie-paso';
+
+  const boton = document.createElement('button');
+  boton.className = 'on grande';
+  boton.textContent = 'Leer mi carta';
+  boton.disabled = !!falta.length;
+  boton.title = falta.length
+    ? 'Primero decime qué local sos: sin eso no sé a qué menú entrar'
+    : 'Lee los dos portales y arma el catálogo';
+  boton.onclick = async () => {
+    // Se abre el panel a mano y no con abrirCarta(): esa trae la última
+    // lectura guardada y la pinta, y acá vamos a releer igual. Se veía la
+    // carta vieja un segundo y desaparecía, que parece un error.
+    cerrarPaneles('panel-carta');
+    document.getElementById('panel-carta').style.display = 'block';
+    await leerCarta();
+  };
+
+  const nota = document.createElement('span');
+  nota.className = 'nota';
+  nota.textContent = falta.length ? '' :
+    'Acordate de estar logueado en las dos pestañas del navegador que abrió la app.';
+
+  pie.append(boton, nota);
+  cont.appendChild(pie);
 }
 
 // Lo único que puede salir caro de verdad: que la pantalla diga "apagado"
@@ -485,7 +669,7 @@ function plano(texto) {
 function coincide(item) {
   if (!filtro) return true;
   // También por el nombre de cada portal: difieren tanto que buscar
-  // "Manantial" tiene que llegar igual a "Agua chica con gas".
+  // el nombre que usa el otro portal tiene que llegar igual al producto.
   const donde = [item.nombre, ...Object.values(item.alias || {})];
   return donde.some(t => plano(t).includes(filtro));
 }
@@ -1162,9 +1346,12 @@ function filaAjuste(o) {
   return div;
 }
 
-function leerAjustes() {
+// `raiz` porque el mismo formulario se dibuja en dos lados: el panel de
+// Ajustes entero y los tres campos de sucursal del primer arranque.
+function leerAjustes(raiz) {
+  raiz = raiz || document.getElementById('cuerpo-ajustes');
   const cambios = {};
-  for (const campo of document.querySelectorAll('#cuerpo-ajustes [data-clave]')) {
+  for (const campo of raiz.querySelectorAll('[data-clave]')) {
     cambios[campo.dataset.clave] =
       campo.dataset.tipo === 'bool' ? campo.checked :
       campo.dataset.tipo === 'entero' ? Number(campo.value) : campo.value;

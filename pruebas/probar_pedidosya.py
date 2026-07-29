@@ -76,8 +76,8 @@ async def escenario(navegador, query: str, titulo: str):
 
     plat = PedidosYaLocal(pagina)
     await pagina.goto(plat.url_menu)
-    # Arrancamos con Budín de pan apagado, como estaba en el log.
-    await pagina.evaluate("localStorage.setItem('apagados', '[\"Budín de pan\"]')")
+    # Arrancamos con Budin de pan apagado, como estaba en el log.
+    await pagina.evaluate("localStorage.setItem('apagados', '[\"Budin de pan\"]')")
     await pagina.reload()
 
     revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja la pagina lista")
@@ -85,16 +85,16 @@ async def escenario(navegador, query: str, titulo: str):
     revisar(await plat.categorias() == ["Bebidas", "Platos", "Tartas"],
             "categorias() lee las 3 del menu")
 
-    # La pagina arranca en Bebidas y Budín de pan esta en Platos: obliga a
+    # La pagina arranca en Bebidas y Budin de pan esta en Platos: obliga a
     # cambiar de categoria para encontrarlo.
-    estado = await plat.leer_estado("Budín de pan")
+    estado = await plat.leer_estado("Budin de pan")
     revisar(estado is not None and not estado.disponible,
-            "leer_estado('Budín de pan') lo encuentra cambiando de categoria")
+            "leer_estado('Budin de pan') lo encuentra cambiando de categoria")
 
-    revisar(await plat.prender("Budín de pan"), "prender('Budín de pan') confirma el cambio")
-    estado = await plat.leer_estado("Budín de pan")
+    revisar(await plat.prender("Budin de pan"), "prender('Budin de pan') confirma el cambio")
+    estado = await plat.leer_estado("Budin de pan")
     revisar(estado is not None and estado.disponible,
-            "'Budín de pan' quedo prendido de verdad")
+            "'Budin de pan' quedo prendido de verdad")
 
     revisar(await plat.apagar("Tarta de verdura", por_hoy=True),
             "apagar('Tarta de verdura') confirma el cambio")
@@ -116,7 +116,7 @@ async def escenario(navegador, query: str, titulo: str):
     todos = await plat.leer_todos()
     revisar(len(todos) == 12,
             f"leer_todos() trae los 12 productos de las 3 categorias (trajo {len(todos)})")
-    revisar(todos.get("Budín de pan") is True and todos.get("Tarta de verdura") is False,
+    revisar(todos.get("Budin de pan") is True and todos.get("Tarta de verdura") is False,
             "leer_todos() devuelve bien prendidos y apagados")
     revisar(todos.get("Gaseosa cola") is True,
             "leer_todos() llega tambien a la categoria que estaba abierta")

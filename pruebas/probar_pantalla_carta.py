@@ -3,9 +3,10 @@
     py pruebas/probar_pantalla_carta.py
 
 Levanta la app de verdad con STOCKSWITCH_SIMULADO=1 (no abre navegador ni
-toca los portales: /api/carta devuelve la lectura real guardada del
-2026-07-27) y la maneja con Playwright como lo haria el usuario: leer la
-carta, vincular un par dudoso, separarlo y agregar uno suelto.
+toca los portales: /api/carta devuelve la carta inventada de
+pruebas/carta_ejemplo.json) y la maneja con Playwright como lo haria el
+usuario: leer la carta, vincular un par dudoso, separarlo y agregar uno
+suelto.
 """
 
 import asyncio
@@ -18,6 +19,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 TEMPORAL = tempfile.mkdtemp(prefix="todoselector-pantalla-")
 os.environ["HOME"] = TEMPORAL
@@ -27,7 +29,14 @@ os.environ["STOCKSWITCH_SIMULADO"] = "1"
 import uvicorn                                                # noqa: E402
 from playwright.async_api import async_playwright             # noqa: E402
 
+import catalogo_ejemplo                                       # noqa: E402
 from app.main import app                                      # noqa: E402
+
+# app/seed.py viene VACIO a proposito: una instalacion nueva no arranca con
+# la carta de otro local. Estas pruebas siembran una carta inventada y una
+# sucursal de mentira, para no quedarse en la pantalla de primer arranque
+# (que tiene su propia prueba, mas abajo).
+catalogo_ejemplo.preparar()
 
 PUERTO = 8788
 BASE = f"http://127.0.0.1:{PUERTO}/"
@@ -93,7 +102,7 @@ async def esperar_boton(fila, texto, timeout=10000):
 
 
 async def probar_aviso_de_novedad(pagina):
-    """El caso del 2026-07-28: agregaron la Locro a la carta de PedidosYa.
+    """El caso del 2026-07-28: agregaron el locro a la carta de PedidosYa.
 
     El catalogo la tenia como exclusiva de Rappi, asi que la app la mostraba
     en gris con el chip "no existe ahi" y no habia forma de enterarse.
@@ -194,7 +203,7 @@ async def probar_pausa(pagina):
 
     productos = await pagina.evaluate("fetch('/api/productos').then(r => r.json())")
     pausado = [p for p in productos if p["pausado"]]
-    revisar(len(pausado) == 1 and pausado[0]["nombre"].startswith("Guiso"),
+    revisar(len(pausado) == 1 and pausado[0]["nombre"].startswith("Pollo"),
             "la API lo devuelve marcado como pausado")
 
     # Y se puede volver atras.
@@ -246,9 +255,9 @@ async def probar_renombrar_y_deshacer(pagina):
     # Y el vinculo que se hizo a mano tiene que seguir donde estaba: deshacer
     # va de a un paso, no borra todo.
     datos = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
-    de verdura = [p for p in datos["productos"]
+    tarta = [p for p in datos["productos"]
               if p["plataformas"]["pedidosya"] == "Tarta de verdura chica"]
-    revisar(len(de verdura) == 1 and de verdura[0]["plataformas"]["rappi"] == "Tarta de verdura",
+    revisar(len(tarta) == 1 and tarta[0]["plataformas"]["rappi"] == "Tarta de verdura",
             "y no toca los cambios anteriores")
 
 
@@ -262,7 +271,7 @@ async def probar_buscador(pagina):
     todos = await pagina.locator("#lista .item").count()
     revisar(todos > 5, f"la lista arranca completa ({todos} productos)")
 
-    await buscador.fill("producto")
+    await buscador.fill("tarta")
     await pagina.wait_for_timeout(800)
     visibles = await pagina.locator("#lista .item").count()
     revisar(0 < visibles < todos, f"filtra por nombre ({visibles} de {todos})")
@@ -270,18 +279,18 @@ async def probar_buscador(pagina):
             "dice cuantos quedaron")
 
     # Sin tildes: los nombres de los portales las tienen y nadie las escribe.
-    await buscador.fill("milanesa")
+    await buscador.fill("budin")
     await pagina.wait_for_timeout(800)
     texto = await pagina.locator("#lista").inner_text()
-    revisar("Milanesa con pure" in texto or "milanesa" in texto.lower(),
-            "encuentra 'Milanesa con puré' buscando 'milanesa'")
+    revisar("Budín de pan" in texto,
+            "encuentra 'Budín de pan' buscando 'budin', sin la tilde")
 
     # Por el nombre del OTRO portal: es donde mas se pierde uno.
     await buscador.fill("manantial")
     await pagina.wait_for_timeout(800)
     texto = await pagina.locator("#lista").inner_text()
-    revisar("Agua" in texto,
-            "encuentra 'Agua chica con gas' buscando como se llama en Rappi")
+    revisar("Agua chica" in texto,
+            "encuentra 'Agua chica' buscando como se llama en Rappi")
 
     await buscador.fill("zzzzz")
     await pagina.wait_for_timeout(800)
@@ -295,7 +304,7 @@ async def probar_buscador(pagina):
     revisar(await buscador.input_value() == "", "y deja el campo vacio")
 
     # El repintado cada 3 segundos no puede robarle el foco al input.
-    await buscador.fill("producto")
+    await buscador.fill("tarta")
     await pagina.wait_for_timeout(3500)
     revisar(await pagina.evaluate("document.activeElement.id") == "buscador",
             "sigue escribiendo aunque la lista se refresque sola")
@@ -333,7 +342,7 @@ async def probar_vista_de_prendidos(pagina):
 
         # "Ensalada mixta" y no "Pollo al horno": el nombre del apagado no puede
         # ser prefijo de otro producto, o buscarlo en la pantalla encuentra
-        # al otro ("Pollo al horno sin sal") y la prueba miente.
+        # al otro ("Pollo al horno vegetariano") y la prueba miente.
         poner("Empanada de carne", EstadoItem.PRENDIDO, confirmado=True)
         poner("Ensalada mixta", EstadoItem.APAGADO_HOY, confirmado=True)
         dudoso = poner("Tarta de jamon y queso", EstadoItem.APAGADO_HOY, confirmado=True)
@@ -603,6 +612,52 @@ async def probar_ajustes(pagina):
             "restablecer los devuelve a los valores por defecto")
 
     await pagina.click("#btn-ajustes")      # cerrar
+    await probar_falta_solo_la_sucursal(pagina)
+
+
+async def probar_falta_solo_la_sucursal(pagina):
+    """Catalogo cargado pero sin los datos del local.
+
+    Es el caso de una instalacion que venia andando cuando los ids de la
+    sucursal dejaron de estar clavados en el codigo: el catalogo esta
+    intacto y lo unico que falta es a que menu entrar. Aca se llega solo,
+    porque «restablecer» acaba de vaciar los ajustes.
+
+    Hablarle de "primera vez" a alguien que ya tiene su carta es mentirle,
+    y ofrecerle "leer mi carta" es peor: parece que hay que empezar de cero.
+    """
+    print("\n== Falta la sucursal, pero la carta esta ==")
+
+    sistema = await pagina.evaluate(
+        "fetch('/api/estado-sistema').then(r => r.json())")
+    revisar(sorted(sistema["falta_sucursal"]) == ["pedidosya", "rappi"] and
+            sistema["catalogo_vacio"] is False,
+            "se llega al estado: sin sucursal y con catalogo")
+
+    panel = pagina.locator("#panel-inicio")
+    await panel.wait_for(timeout=10000)
+    texto = await panel.inner_text()
+
+    revisar("Faltan los datos de tu sucursal" in texto,
+            "el panel dice lo que falta y no habla de primera vez")
+    revisar("catálogo está intacto" in texto,
+            "y aclara que el catalogo no se toco")
+    revisar(await panel.locator("button", has_text="Leer mi carta").count() == 0,
+            "no ofrece leer la carta: ya la tiene")
+    revisar(await panel.locator("[data-clave='rappi_store_id']").count() == 1,
+            "pero si pide los datos de la sucursal")
+
+    # Se dejan puestos de nuevo para las pruebas que siguen.
+    await panel.locator("[data-clave='pedidosya_menu_id']").fill(
+        catalogo_ejemplo.SUCURSAL["pedidosya_menu_id"])
+    await panel.locator("[data-clave='rappi_brand_id']").fill(
+        catalogo_ejemplo.SUCURSAL["rappi_brand_id"])
+    await panel.locator("[data-clave='rappi_store_id']").fill(
+        catalogo_ejemplo.SUCURSAL["rappi_store_id"])
+    await panel.locator("#btn-guardar-sucursal").click()
+
+    await pagina.locator("#panel-inicio").wait_for(state="hidden", timeout=10000)
+    revisar(True, "y al completarlos el panel se va")
 
 
 async def probar_apagar_todo(pagina):
@@ -704,14 +759,14 @@ async def main():
         await pagina.click("#btn-leer-carta")
         await pagina.wait_for_selector(".grupo", timeout=15000)
 
-        revisar(await pagina.locator("h3", has_text="A confirmar — 7").count() == 1,
-                "muestra los 7 pares a confirmar")
-        revisar(await pagina.locator("h3", has_text="Solo en Rappi — 18").count() == 1,
-                "muestra los 18 que estan solo en Rappi")
-        revisar("29 en PedidosYa" in await pagina.locator("#carta-cuerpo").inner_text(),
+        revisar(await pagina.locator("h3", has_text="A confirmar — 3").count() == 1,
+                "muestra los 3 pares a confirmar")
+        revisar(await pagina.locator("h3", has_text="Solo en Rappi — 5").count() == 1,
+                "muestra los 5 que estan solo en Rappi")
+        revisar("15 en PedidosYa" in await pagina.locator("#carta-cuerpo").inner_text(),
                 "muestra cuantos leyo de cada portal")
 
-        print("\n== Los dos tartas de verdura arrancan separados ==")
+        print("\n== Las dos tartas de verdura arrancan separadas ==")
         fila = fila_de(pagina, "Tarta de verdura chica", "Tarta de verdura individual")
         revisar(await fila.locator("button", has_text="Vincular").count() == 1,
                 "el par que el usuario dijo que NO es el mismo ofrece Vincular")
@@ -740,11 +795,11 @@ async def main():
                 "Separar los vuelve a dejar con un boton cada uno")
 
         print("\n== Agregar uno que solo esta en Rappi ==")
-        fila_bowl = pagina.locator(".par:not(.manual)").filter(has_text="Guiso de garbanzos").first
-        await fila_bowl.locator("button", has_text="Agregar").click()
-        fila_bowl = pagina.locator(".par:not(.manual)").filter(has_text="Guiso de garbanzos").first
-        await fila_bowl.locator(".hecho").wait_for(timeout=10000)
-        revisar("cargado" in await fila_bowl.inner_text(),
+        fila_suelta = pagina.locator(".par:not(.manual)").filter(has_text="Guiso de garbanzos").first
+        await fila_suelta.locator("button", has_text="Agregar").click()
+        fila_suelta = pagina.locator(".par:not(.manual)").filter(has_text="Guiso de garbanzos").first
+        await fila_suelta.locator(".hecho").wait_for(timeout=10000)
+        revisar("cargado" in await fila_suelta.inner_text(),
                 "queda marcado como cargado")
 
         # La lista se repinta despues de que la fila de la carta se marca

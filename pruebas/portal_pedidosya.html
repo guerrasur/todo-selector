@@ -44,7 +44,7 @@
 // Igual que el portal: el menu esta en castellano y el chrome en ingles.
 const CATEGORIAS = [
   ["Bebidas",   ["Agua chica", "Agua chica con gas", "Gaseosa cola", "Gaseosa cola cero"]],
-  ["Platos", ["Tarta de choclo", "Flan casero", "Budín de pan", "Milanesa napolitana", "Pollo al horno"]],
+  ["Platos", ["Empanada de carne", "Flan casero", "Budin de pan", "Milanesa con pure", "Pollo al horno"]],
   ["Tartas",     ["Tarta de verdura", "Tarta de verdura chica", "Tarta de choclo"]],
 ];
 
@@ -57,7 +57,7 @@ const params = new URLSearchParams(location.search);
 const POPUP = params.get("popup") || "cerrable";
 const HANDLER = params.get("handler") || "hijo";
 
-const apagados = new Set(JSON.parse(localStorage.getItem("apagados") || '["Budín de pan"]'));
+const apagados = new Set(JSON.parse(localStorage.getItem("apagados") || '["Budin de pan"]'));
 let categoriaActual = 0;   // el portal siempre arranca en la primera
 
 function guardar() {

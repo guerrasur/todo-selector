@@ -14,6 +14,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # OJO: tiene que estar ANTES de importar app.database, que resuelve la ruta
 # de la base al importarse.
@@ -22,9 +23,14 @@ os.environ["HOME"] = TEMPORAL
 os.environ["LOCALAPPDATA"] = TEMPORAL
 
 from app import catalogo, seed                                    # noqa: E402
+import catalogo_ejemplo                                   # noqa: E402
 from app.database import SessionLocal, init_db                    # noqa: E402
 from app.models import (Producto, AliasPlataforma, EstadoItem,    # noqa: E402
                         Operacion, HistorialCatalogo)
+
+# app/seed.py viene VACIO a proposito: una instalacion nueva no arranca
+# con la carta de otro local. Las pruebas siembran una carta inventada.
+catalogo_ejemplo.usar_catalogo()
 
 fallos = []
 
@@ -111,16 +117,19 @@ def base_recien_creada(db):
             {"pedidosya": None, "rappi": "Tarta de verdura individual"},
             "'Tarta de verdura individual' queda solo en Rappi")
 
+    # El canonico lleva tilde y en PedidosYa se llama sin ella: el alias
+    # tiene que quedar guardado tal cual lo escribe el portal, o el
+    # exact=True de la busqueda no lo encuentra nunca.
     revisar(remotos(db, "Budín de pan") ==
-            {"pedidosya": "Budín de pan", "rappi": "Budín de pan"},
-            "'Budín de pan' sigue vinculado a 'Budín de pan'")
+            {"pedidosya": "Budin de pan", "rappi": "Budín de pan"},
+            "'Budín de pan' guarda el nombre sin tilde que usa PedidosYa")
 
 
 def base_vieja_se_corrige(db):
     print("\n== Base ya sembrada con el mapeo viejo: el arranque lo corrige ==")
     limpiar(db)
 
-    # Asi estaba la base del usuario hasta hoy: los dos tartas vinculados.
+    # Una base ya sembrada con el mapeo viejo: las dos tartas vinculadas.
     p = Producto(nombre="Tarta de verdura chica", categoria="Tartas")
     db.add(p)
     db.flush()
@@ -157,8 +166,8 @@ def vincular_y_separar(db):
             {"pedidosya": None, "rappi": "Guiso de garbanzos"},
             "agregar() carga un producto de una sola plataforma")
 
-    # Vincular los dos tartas de verdura que el usuario dijo que NO van juntos,
-    # para despues separarlos: es el ida y vuelta que tiene que aguantar.
+    # Vincular dos que NO son el mismo plato para despues separarlos: es
+    # el ida y vuelta que tiene que aguantar.
     producto = catalogo.vincular(db, "Tarta de verdura chica",
                                  "Tarta de verdura individual")
     db.commit()
@@ -264,7 +273,7 @@ def no_se_puede_separar_lo_que_no_esta(db):
     seed.sembrar()
     db.expire_all()
 
-    solo_rappi = db.query(Producto).filter_by(nombre="Tarta de zapallo").first()
+    solo_rappi = db.query(Producto).filter_by(nombre="Ñoquis del 29").first()
     try:
         catalogo.separar(db, solo_rappi.id, "rappi")
         revisar(False, "separar() rechaza separar un producto de una sola plataforma")

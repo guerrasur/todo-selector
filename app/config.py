@@ -150,30 +150,41 @@ OPCIONES = (
     ),
 
     # ---------------- Que local es ----------------
+    #
+    # Vienen VACIOS: son los datos de TU local y la app no tiene forma de
+    # adivinarlos. Se completan una sola vez, la primera que abrís la app
+    # (la pantalla te lo pide sola). Antes venían con los del local para el
+    # que se escribió esto, que además de no servirle a nadie más era
+    # publicar en un repo público a qué sucursal pertenecen.
     Opcion(
         clave="pedidosya_menu_id",
         titulo="Id de menú de PedidosYa",
-        defecto="MENU_ID",
+        defecto="",
         tipo="texto",
         grupo="Sucursal",
-        ayuda="Es el número que aparece al final de la URL del menú en el "
-              "portal: /menus/PY_AR/MENU_ID",
+        ayuda="Entrá al menú en el portal de PedidosYa y miralo al final de "
+              "la URL: /menus/PY_AR/<esto>. Son números.",
     ),
     Opcion(
         clave="rappi_brand_id",
         titulo="brandId de Rappi",
-        defecto="BRAND_ID",
+        defecto="",
         tipo="texto",
         grupo="Sucursal",
+        ayuda="Está en la URL del menú de Rappi Partners: "
+              "/menu?brandId=<esto>&storeIds=… Suele empezar con las dos "
+              "letras del país.",
     ),
     Opcion(
         clave="rappi_store_id",
         titulo="storeId de Rappi",
-        defecto="STORE_ID",
+        defecto="",
         tipo="texto",
         grupo="Sucursal",
-        ayuda="STORE_ID es la tienda Turbo. Apagando ahí también se apaga "
-              "en Rappi normal.",
+        ayuda="La tienda sobre la que opera la app, de la misma URL "
+              "(storeId=<esto>). Si tenés varias y una es la «Turbo», "
+              "normalmente alcanza con esa: apagando ahí se apaga también "
+              "en la normal. Conviene confirmarlo en tu caso.",
     ),
 )
 
