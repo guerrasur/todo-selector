@@ -18,14 +18,20 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 TEMPORAL = tempfile.mkdtemp(prefix="todoselector-cierre-")
 os.environ["HOME"] = TEMPORAL
 os.environ["LOCALAPPDATA"] = TEMPORAL
 
 from app import cierre, config, seed                            # noqa: E402
+import catalogo_ejemplo                                   # noqa: E402
 from app.database import SessionLocal, init_db                  # noqa: E402
 from app.models import Producto, EstadoItem, Operacion          # noqa: E402
+
+# app/seed.py viene VACIO a proposito: una instalacion nueva no arranca
+# con la carta de otro local. Las pruebas siembran una carta inventada.
+catalogo_ejemplo.usar_catalogo()
 
 fallos = []
 
@@ -296,10 +302,13 @@ def sucursal_configurable(db):
             "brandId=AR000002" in rappi.url_menu,
             "Rappi arma la URL con la tienda y la marca que le pasan")
 
-    # Los defaults tienen que seguir siendo los del local de siempre.
-    revisar(PedidosYa(None).url_menu.endswith("/MENU_ID") and
-            "storeId=STORE_ID" in Rappi(None).url_menu,
-            "sin configurar nada, siguen siendo los del local de siempre")
+    # Y sin configurar nada NO hay default: el de otro local mandaria la app
+    # a un menu ajeno, que es peor que no arrancar. Por eso `configurado`
+    # dice que no y el worker ni abre la pestaña.
+    revisar(not PedidosYa(None).configurado and not Rappi(None).configurado,
+            "sin configurar la sucursal, las dos plataformas avisan que faltan datos")
+    revisar(py.configurado and rappi.configurado,
+            "y con los datos puestos, quedan listas")
 
     py.configurar(menu_id="222333")
     revisar(py.url_menu.endswith("/222333"),

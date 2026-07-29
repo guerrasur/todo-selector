@@ -1,22 +1,27 @@
-"""Carga inicial de productos con sus nombres en cada plataforma.
+"""Carga inicial del catalogo. Viene VACIA a proposito.
 
-IMPORTANTE: los nombres difieren mucho entre PedidosYa y Rappi.
-Formato: (nombre_canonico, categoria, nombre_en_pedidosya, nombre_en_rappi)
-Si un nombre es None, ese producto NO existe en esa plataforma.
+Una instalacion nueva no tiene por que arrancar con la carta de otro local.
+Antes este archivo traia los 31 productos del local para el que se escribio
+la app, con sus nombres en cada portal: quien clonara el repo se encontraba
+con una carta ajena y tenia que borrarla a mano.
 
-REVISAR LAS MARCAS "DUDA" ANTES DE USAR EN PRODUCCION.
+Ahora el primer arranque no carga nada y la pantalla ofrece **leer tu
+carta**: la app entra a los dos portales, lee lo que hay y arma el catalogo
+sola (ver app/carta.py y app/catalogo.py). Es el mismo camino que ya se usa
+para agregar un producto nuevo, asi que no hay codigo que mantener aparte.
 
-Las tildes de los nombres de Rappi salen del portal mismo, via /api/nombres
-(2026-07-27). Sin tilde no se encuentran: se buscan con exact=True.
+Esto NO le borra el catalogo a nadie: `sembrar()` solo crea productos si la
+base esta vacia, y ademas en cuanto el usuario vincula o separa algo desde
+la app la base pasa a mandar (`es_manual`). Una instalacion que ya venia
+funcionando sigue con su catalogo intacto.
 
-OJO: esta lista esta INCOMPLETA a proposito. El portal de Rappi muestra 45
-productos y aca hay 31. El usuario decidio (2026-07-27) NO cargar los ~18
-que estan solo en Rappi ni la Mixta: prefiere que la app lea las cartas
-y que el vinculo lo decida el desde la pantalla Carta. Ver app/catalogo.py.
+La maquinaria de abajo se deja porque sigue sirviendo: si alguien quiere
+arrancar con una lista escrita a mano, llena PRODUCTOS y listo. Formato:
 
-Esto es la carga INICIAL, no el catalogo definitivo. En cuanto el usuario
-vincula o separa algo desde la app, la base pasa a mandar y este archivo
-deja de tocar los alias (ver sembrar()).
+    (nombre_canonico, categoria, nombre_en_pedidosya, nombre_en_rappi)
+
+Un nombre en None quiere decir que el producto NO existe en esa plataforma.
+Ojo con las tildes: los nombres se buscan en el portal con exact=True.
 """
 
 import logging
@@ -27,81 +32,8 @@ from .models import Producto, AliasPlataforma, EstadoItem
 
 log = logging.getLogger("seed")
 
-# (canonico, categoria, pedidosya, rappi)
-PRODUCTOS = [
-    # ---------------- Platos ----------------
-    ("Tarta de choclo", "Platos", "Tarta de choclo", "Tarta de choclo y queso"),
-    ("Flan casero", "Platos", "Flan casero", "Flan casero"),
-    ("Milanesa con pure", "Platos", "Milanesa con pure", "Milanesa con puré"),
-    ("Budín de pan", "Platos", "Budín de pan", "Budín de pan"),
-    ("Milanesa napolitana", "Platos", "Milanesa napolitana", "Milanesa napolitana"),
-    ("Pollo al horno", "Platos", "Pollo al horno", "Pollo al horno"),
-    ("Sopa del dia", "Platos", "Sopa del dia", "Sopa del día"),
-    ("Pollo al verdeo", "Platos", "Pollo al verdeo", "Pollo al verdeo"),
-
-    # Mixta: descontinuada, no se usa mas. Se deja comentada por si vuelve.
-    # ("Mixta", "Platos", "Mixta", None),
-
-    # CONFIRMADO: "Ñoquis del 29" no existe en PedidosYa.
-    ("Ñoquis del 29", "Platos", None, "Ñoquis del 29"),
-
-    # ---------------- Tartas ----------------
-    ("Tarta de choclo", "Tartas", "Tarta de choclo", "Tarta de choclo"),
-    ("Tarta de verdura", "Tartas", "Tarta de verdura", "Tarta de verdura"),
-    ("Tarta de cebolla", "Tartas", "Tarta de cebolla", "Tarta de cebolla"),
-    ("Tarta de espinaca", "Tartas",
-     "Tarta de espinaca", "Tarta de espinaca"),
-
-    # RESUELTO POR EL USUARIO (2026-07-27): el "Tarta de verdura chica" de
-    # PedidosYa NO es ninguno de los dos tartas de verdura con guarnicion de
-    # Rappi ("en porcion" y "individual"): son platos distintos. Antes
-    # estaban vinculados, asi que apagar uno apagaba el que no era.
-    ("Tarta de verdura chica", "Tartas", "Tarta de verdura chica", None),
-    ("Tarta de verdura individual", "Tartas", None, "Tarta de verdura individual"),
-
-    # Los otros tres tartas con guarnicion siguen vinculados: el usuario dijo
-    # que le es indiferente y que prefiere decidirlo desde la app. Si no son
-    # el mismo plato, el boton "Separar" de la pantalla Carta los desarma.
-    ("Tarta de zapallo chica", "Tartas",
-     "Tarta de zapallo chica", "Tarta de zapallo individual"),
-    ("Tarta de cebolla chica", "Tartas",
-     "Tarta de cebolla chica", "Tarta de cebolla individual"),
-    ("Tarta de espinaca chica", "Tartas",
-     "Tarta de espinaca chica", "Tarta de espinaca individual"),
-
-    # CONFIRMADO: "Tarta de zapallo" (sin guarnicion) no existe en PedidosYa.
-    ("Tarta de zapallo", "Tartas", None, "Tarta de zapallo"),
-    # CONFIRMADO: "Tarta de choclo individual" no existe en PedidosYa.
-    ("Tarta de choclo individual", "Tartas", None, "Tarta de choclo individual"),
-
-    # ---------------- Platos ----------------
-    # En PedidosYa estos figuran bajo "Platos"; en Rappi bajo "Plato del Dia".
-    # Los dejo como categoria propia para que se vean juntos en la UI.
-    ("Empanada de carne", "Platos", "Empanada de carne", "Empanada de carne"),
-    ("Ensalada mixta", "Platos", "Ensalada mixta", "Ensalada mixta de hojas"),
-    ("Tarta de jamon y queso", "Platos", "Tarta de jamon y queso", "Tarta de jamón y queso"),
-    ("fideos con salsa", "Platos",
-     "fideos con salsa", "fideos con salsa"),
-    ("Pollo al horno", "Platos", "Pollo al horno", "Pollo al horno"),
-    ("Pollo al horno sin sal", "Platos",
-     "Pollo al horno sin sal", "Pollo al horno sin sal"),
-
-    # CONFIRMADO: la Locro no existe en PedidosYa.
-    ("Locro del sabado", "Platos",
-     None, "Locro del sábado"),
-
-    # ---------------- Bebidas ----------------
-    ("Agua chica", "Bebidas", "Agua chica", "Manantial sin gas 500 ml"),
-    ("Agua chica con gas", "Bebidas", "Agua chica con gas", "Manantial con gas 500 ml"),
-    ("Gaseosa cola", "Bebidas", "Gaseosa cola", "Gaseosa cola 500 ml"),
-
-    # CONFIRMADO: en PedidosYa se cargo mal y quedo "Gaseosa cola cero".
-    # El nombre esta asi en el portal, no es un typo de esta lista.
-    # CONFIRMADO POR /api/buscar-texto (2026-07-27): en Rappi lleva tilde,
-    # "almibar". Los nombres se buscan con exact=True, asi que sin la tilde
-    # no lo encontraba.
-    ("Gaseosa cola cero", "Bebidas", "Gaseosa cola cero", "Gaseosa cola cero 500 ml"),
-]
+# (canonico, categoria, pedidosya, rappi). Vacia: ver el docstring.
+PRODUCTOS = []
 
 PLATAFORMAS = ["pedidosya", "rappi"]
 
@@ -138,9 +70,9 @@ def _sincronizar(db):
       - lo SACA cuando el catalogo dice None, que es como se escribe "este
         producto no existe en esa plataforma"
 
-    Lo segundo hacia falta para poder desvincular: al marcar el "Tarta de verdura
-    chica" como exclusivo de PedidosYa, sin esto la base se quedaba
-    con el alias de Rappi y lo seguia apagando alla.
+    Lo segundo hace falta para poder desvincular: al marcar un producto como
+    exclusivo de PedidosYa, sin esto la base se quedaba con el alias de
+    Rappi y lo seguia apagando alla.
     """
     for canonico, categoria, n_py, n_rappi in PRODUCTOS:
         p = db.query(Producto).filter_by(nombre=canonico).first()

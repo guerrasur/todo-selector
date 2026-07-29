@@ -6,8 +6,9 @@ FLUJO OBSERVADO (captura del usuario):
   - El badge de estado da una segunda fuente para leer disponibilidad.
 
 OJO CON LAS TIENDAS:
-  La URL trae varios storeIds. Si hay que apagar en TODAS, este modulo
-  tiene que iterar cambiando storeId en la URL. Ver STORE_IDS abajo.
+  La URL trae varios storeIds. La app opera sobre UNO, el de Ajustes. Si
+  en tu local hay que apagar en TODAS, este modulo tiene que iterar
+  cambiando storeId en la URL.
 
 CONFIRMADO POR HTML (DevTools, 2026-07-27): el toggle de disponibilidad es
 
@@ -49,16 +50,17 @@ log = logging.getLogger("rappi")
 class Rappi(PlataformaBase):
     nombre = "rappi"
 
-    # Defaults del local para el que se escribio esto. Se cambian desde
-    # Ajustes sin tocar codigo (era lo que faltaba para que sirva en otro
-    # local); estos valores son solo el punto de partida.
-    BRAND_ID = "BRAND_ID"
-    # CONFIRMADO: STORE_ID es la tienda Turbo.
-    # Al apagar en Turbo tambien se apaga en Rappi normal, asi que
-    # con esta sola tienda alcanza.
-    STORE_ID_TURBO = "STORE_ID"
-    STORE_IDS = [STORE_ID_TURBO]
-    TODAS_LAS_TIENDAS = ["STORE_ID_2", "STORE_ID_3", "STORE_ID", "STORE_ID_4", "STORE_ID_5"]
+    # La marca y la tienda son las TUYAS: salen de Ajustes y no tienen
+    # default. Cualquier valor puesto aca seria el de otro local, y apagar
+    # productos en la tienda de otro es el peor error posible de esta app.
+    BRAND_ID = ""
+    STORE_ID = ""
+
+    # OJO SI TENES VARIAS TIENDAS: la app opera sobre UNA (la de Ajustes).
+    # En el local para el que se escribio esto alcanzaba, porque apagar en
+    # la tienda "Turbo" apagaba tambien en la normal. Eso no tiene por que
+    # valer en todos lados: si en el tuyo son independientes, hay que
+    # iterar cambiando storeId en la URL. Ver el TODO del README.
 
     BADGE_APAGADO = "Apagados"
 
@@ -71,8 +73,12 @@ class Rappi(PlataformaBase):
 
     def __init__(self, page, store_id: str = None, brand_id: str = None):
         super().__init__(page)
-        self.store_id = store_id or self.STORE_IDS[0]
+        self.store_id = store_id or self.STORE_ID
         self.brand_id = brand_id or self.BRAND_ID
+
+    @property
+    def configurado(self) -> bool:
+        return bool(self.store_id and self.brand_id)
 
     def configurar(self, store_id: str = None, brand_id: str = None):
         """Cambia de tienda/marca sin reiniciar la app (viene de Ajustes)."""
@@ -153,7 +159,7 @@ class Rappi(PlataformaBase):
         """Los nombres salen del alt de la foto del producto.
 
         CONFIRMADO POR HTML (2026-07-27): cada tarjeta arranca con
-        <img data-testid="catalog-item-image" alt="Gaseosa cola sabor original
+        <img data-testid="catalog-item-image" alt="Nombre del producto
         500 ml">. Es mas simple y mas estable que subir desde el nombre.
         OJO: un producto sin foto no va a aparecer aca.
         """
@@ -243,7 +249,7 @@ class Rappi(PlataformaBase):
             log.info("'%s' ya estaba prendido, no toco nada", nombre_remoto)
             return True
 
-        # CONFIRMADO EN VIVO (2026-07-27, op#18 'Budín de pan'): prender no
+        # CONFIRMADO EN VIVO (2026-07-27, op#18): prender no
         # abre ningun dialogo. El click sobre el toggle apagado lo prende y
         # la relectura despues de recargar lo confirmo. Los dos modales
         # ("Sólo por hoy" y "¿Desactivar producto?") son solo de apagar.

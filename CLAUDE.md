@@ -14,6 +14,13 @@ El catálogo ya no se mantiene a mano: la pantalla **Carta** lee los dos
 portales y el usuario vincula o separa desde ahí (`app/catalogo.py`). En
 cuanto toca algo, `seed.py` deja de pisar los alias.
 
+**`app/seed.py` viene VACÍO a propósito** (2026-07-29). El repo es público y
+una instalación nueva no puede arrancar con la carta ni con la sucursal de
+otro local: arranca sin nada y la pantalla ofrece los dos pasos de primer
+arranque (decir qué local sos → leer tu carta). Los ids de sucursal tampoco
+tienen default. Las pruebas traen su propia carta inventada, en
+`pruebas/catalogo_ejemplo.py` y `pruebas/carta_ejemplo.json`.
+
 **Apagar todo** (`app/cierre.py`) apaga o prende la carta entera de **una
 plataforma o de las dos**, con un botón por portal: a veces PedidosYa tiene
 que apagarse antes que Rappi. Nunca encola lo que ya está como quiere
@@ -77,6 +84,13 @@ columna sigue sin estar cubierto.
    volvían a quedar los dos seleccionados y mandaban la acción a los dos
    portales. Si el usuario lo eligió, va afuera del repintado (ver
    `excluidas` en `static/index.html`).
+
+## Datos del local
+
+No metas en el repo la carta ni los ids de un local de verdad — ni en el
+código, ni en los comentarios, ni en las pruebas. Para los ejemplos está la
+carta inventada de `pruebas/catalogo_ejemplo.py`, que además reproduce las
+trampas reales (prefijos, tildes, variantes que no son el mismo plato).
 
 ## Cómo probar
 

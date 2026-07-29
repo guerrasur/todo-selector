@@ -15,15 +15,21 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 TEMPORAL = tempfile.mkdtemp(prefix="todoselector-estados-")
 os.environ["HOME"] = TEMPORAL
 os.environ["LOCALAPPDATA"] = TEMPORAL
 
 from app import catalogo, seed                                          # noqa: E402
+import catalogo_ejemplo                                   # noqa: E402
 from app.database import SessionLocal, init_db                # noqa: E402
 from app.models import Producto, EstadoItem                   # noqa: E402
 from app.worker import Worker                                 # noqa: E402
+
+# app/seed.py viene VACIO a proposito: una instalacion nueva no arranca
+# con la carta de otro local. Las pruebas siembran una carta inventada.
+catalogo_ejemplo.usar_catalogo()
 
 fallos = []
 

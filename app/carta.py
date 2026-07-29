@@ -1,18 +1,19 @@
 """Emparejar la carta de PedidosYa con la de Rappi.
 
-La idea es dejar de mantener los nombres a mano en seed.py. Cada portal dice
-como se llaman SUS productos; acá se decide cuales son el mismo.
+La idea es no mantener los nombres a mano. Cada portal dice como se llaman
+SUS productos; acá se decide cuales son el mismo.
 
-Por que hace falta emparejar y no alcanza con comparar strings:
+Por que hace falta emparejar y no alcanza con comparar strings (los
+ejemplos salen de pruebas/carta_ejemplo.json):
 
-    PedidosYa            Rappi
-    Tarta de choclo               Tarta de choclo y queso
-    Milanesa con pure              Milanesa con puré
-    Gaseosa cola            Gaseosa cola 500 ml
-    Agua chica         Manantial sin gas 500 ml
+    PedidosYa                Rappi
+    Tarta de choclo          Tarta de choclo y queso
+    Budin de pan             Budín de pan
+    Gaseosa cola             Gaseosa cola 500 ml
+    Agua chica               Manantial sin gas 500 ml
 
 Los tres primeros se resuelven solos normalizando y mirando si uno contiene
-al otro. El cuarto NO: "Agua" y "Manantial" no se parecen en nada, y
+al otro. El cuarto NO: "Agua chica" y "Manantial" no se parecen en nada, y
 ninguna heuristica lo va a sacar. Por eso la salida separa lo seguro de lo
 dudoso: la app propone, el usuario confirma una vez, y queda guardado.
 """
@@ -28,10 +29,10 @@ UMBRAL_SEGURO = 0.82
 UMBRAL_PROPUESTA = 0.55
 
 # Palabras que no distinguen un producto de otro y solo ensucian la
-# comparacion. "Tarta de choclo y queso" vs "Tarta de choclo" es el mismo plato.
+# comparacion: un portal escribe "Ensalada mixta" y el otro "Mixta".
 # OJO: "con" y "sin" NO van aca. Son lo unico que distingue "Agua chica con gas"
-# de "Agua chica", y sacarlas hacia que "Gaseosa cola" emparejara con
-# "Gaseosa cola sin azucar" en vez de con "sabor original".
+# de "Agua chica", y sacarlas hacia que una gaseosa comun emparejara con
+# la version sin azucar.
 RUIDO = {
     "ensalada", "el", "la", "los", "las", "de", "del", "y",
     "ml", "cc", "gr", "g", "kg", "l", "lt",
@@ -60,7 +61,7 @@ def parecido(a: str, b: str) -> float:
     Combina dos señales, y se queda con la mejor:
       - similitud de texto sobre los nombres normalizados
       - si las palabras utiles de uno estan todas adentro del otro
-        ("Tarta de choclo" adentro de "Tarta de choclo y queso")
+        ("Mixta" adentro de "Ensalada mixta")
     """
     na, nb = normalizar(a), normalizar(b)
     if not na or not nb:
@@ -77,8 +78,8 @@ def parecido(a: str, b: str) -> float:
     chico, grande = (pa, pb) if len(pa) <= len(pb) else (pb, pa)
     if chico <= grande:
         # Contenido entero. Cuanto mas sobra en el grande, menos seguro:
-        # "Tarta de verdura" adentro de "Tarta de verdura individual" tiene que
-        # puntuar mas bajo que adentro de "Tarta de verdura" a secas.
+        # "Tarta de verdura" adentro de "Tarta de verdura individual"
+        # tiene que puntuar mas bajo que adentro de "Tarta de verdura".
         sobra = len(grande) - len(chico)
         por_contencion = 0.97 - min(sobra, 4) * 0.06
     else:
@@ -104,7 +105,7 @@ class Emparejamiento:
         if self.pedidosya is None or self.rappi is None:
             return False
         # Un nombre identico no lo discute una alternativa peor:
-        # "Tarta de verdura" = "Tarta de verdura" aunque exista "Tarta de verdura porción".
+        # "Tarta de verdura" = "Tarta de verdura" aunque exista la "chica".
         if self.confianza >= 1.0:
             return True
         return self.confianza >= UMBRAL_SEGURO and not self.alternativas
@@ -126,7 +127,7 @@ def emparejar(items_py: list[str], items_rappi: list[str]) -> list[Emparejamient
     resultado = []
 
     # Se procesan de mayor a menor parecido para que un nombre corto no le
-    # robe el candidato a uno largo ("Tarta de verdura" vs "Tarta de verdura con...").
+    # robe el candidato a uno largo ("Tarta de verdura" vs "... chica").
     candidatos = []
     for py in items_py:
         for rp in items_rappi:
