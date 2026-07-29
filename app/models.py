@@ -15,7 +15,7 @@ class Producto(Base):
 
     id = Column(Integer, primary_key=True)
     nombre = Column(String(120), nullable=False, unique=True)
-    categoria = Column(String(60), default="")   # Ensaladas, Wraps, Bebidas...
+    categoria = Column(String(60), default="")   # como las agrupes vos
     orden = Column(Integer, default=0)
     activo = Column(Boolean, default=True)       # False = no lo mostramos en la UI
 
@@ -39,7 +39,8 @@ class Producto(Base):
 class AliasPlataforma(Base):
     """Como se llama ese producto en cada plataforma.
 
-    En Rappi algunos nombres difieren (ej: 'Risotto de Hongos' vs 'Risotto').
+    En Rappi algunos nombres difieren (ej: 'Ensalada mixta de hojas' vs
+    'Ensalada mixta').
     Si no hay alias cargado, se usa el nombre canonico.
     """
     __tablename__ = "alias_plataforma"

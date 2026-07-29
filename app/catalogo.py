@@ -33,12 +33,12 @@ log = logging.getLogger("catalogo")
 PLATAFORMAS = ("pedidosya", "rappi")
 
 # Para avisar "esto aparecio en el otro portal" el parecido tiene que ser
-# casi identico, no solo alto. Con 0.82 (el umbral del emparejador) el
-# "Wrap caesar con batatas" de PedidosYa da 0.91 contra el "Wrap caesar con
-# ensalada" de Rappi, y son platos distintos: justamente lo que el usuario
-# nos corrigio. Un aviso que sugiere vincular lo que no va es peor que no
-# avisar, asi que aca solo entran los que son el mismo nombre salvo tildes
-# o mayusculas. Lo dudoso se decide en la pantalla Carta, con todo a la vista.
+# casi identico, no solo alto. Con 0.82 (el umbral del emparejador) una
+# "Tarta de verdura chica" da 0.83 contra una "Tarta de verdura porción",
+# y son platos distintos. Un aviso que sugiere vincular lo que no va es
+# peor que no avisar, asi que aca solo entran los que son el mismo nombre
+# salvo tildes o mayusculas. Lo dudoso se decide en la pantalla Carta,
+# con todo a la vista.
 UMBRAL_NOVEDAD = 0.95
 
 
@@ -180,8 +180,8 @@ def _nombre_libre(db, base: str, excluir_id: int = None,
     """Producto.nombre es unico: le agregamos algo si hace falta.
 
     Primero se prueba el nombre de la plataforma y recien despues un
-    numero. Al separar dos que se llamaban igual quedaba "Wrap caesar (2)",
-    que no le dice nada a nadie; "Wrap caesar (PedidosYa)" se entiende.
+    numero. Al separar dos que se llamaban igual quedaba "Tarta (2)", que
+    no le dice nada a nadie; "Tarta (PedidosYa)" se entiende.
     """
     def libre(nombre):
         choque = db.query(Producto).filter_by(nombre=nombre).first()
@@ -279,8 +279,9 @@ def vincular(db, remoto_py: str, remoto_rappi: str,
 
     # Antes de juntar, hay que soltar lo que estos dos ya tenian tomado del
     # otro lado, o se perderia sin aviso. Pasa al vincular a mano dos que ya
-    # estaban emparejados con otra cosa: si "Wrap caesar con batatas" (PY) se
-    # vincula con "Wrap caesar" (Rappi), y ese ya estaba con "Wrap caesar"
+    # estaban emparejados con otra cosa: si "Tarta de verdura chica" (PY) se
+    # vincula con "Tarta de verdura" (Rappi), y ese ya estaba con la "Tarta
+    # de verdura"
     # (PY), ese ultimo se quedaba sin plataforma y desaparecia del catalogo.
     # Ahora sobrevive como producto propio.
     if a is not None:
@@ -368,8 +369,8 @@ def ignorar_novedad(db, plataforma: str, remoto: str):
 def detectar_novedades(db, plataforma: str, leidos) -> list:
     """Productos del catalogo que APARECIERON en un portal donde no estaban.
 
-    El caso que lo motivo: la Suprema figuraba como exclusiva de Rappi
-    (confirmado en su momento), el usuario la agrego a la carta de PedidosYa,
+    El caso que lo motivo: un plato figuraba como exclusivo de Rappi
+    (confirmado en su momento), el usuario lo agrego a la carta de PedidosYa,
     y la app la seguia mostrando en gris con el chip "no existe ahi". Sin
     este aviso, la unica forma de enterarse era acordarse de abrir la carta.
 
@@ -437,8 +438,8 @@ def separar(db, producto_id: int, plataforma: str,
     """Saca una plataforma del producto y la deja como producto aparte.
 
     Es lo contrario de vincular: para cuando la app dio por iguales dos
-    platos que no lo son. El caso que lo motivo: "Wrap caesar con batatas"
-    de PedidosYa NO es "Wrap caesar con ensalada" de Rappi (confirmado por
+    platos que no lo son. El caso que lo motivo: una "Tarta de verdura
+    chica" de PedidosYa NO era la "Tarta de verdura porción" de Rappi (dicho por
     el usuario, 2026-07-27).
     """
     if plataforma not in PLATAFORMAS:

@@ -2,18 +2,18 @@
 
 ESTRUCTURA DE LA PANTALLA (captura del usuario, 2026-07-27):
   Columna izquierda: navegacion del portal (Menues, Ajustes, ...).
-  Columna del medio:  las categorias del menu -> Bebidas, Ensaladas, Wraps.
+  Columna del medio:  las categorias del menu, como las tenga tu carta.
   Columna derecha:    los productos de la categoria elegida, con su toggle.
 
-  El portal carga UNA categoria por vez y arranca en Bebidas: por eso el
-  DOM tiene 4 productos de los 26 del catalogo. Ver CATEGORIAS.
+  El portal carga UNA categoria por vez: por eso el DOM tiene solo los
+  productos de la categoria abierta, no la carta entera. Ver CATEGORIAS.
 
   El puntito a la derecha de cada fila distingue el tipo de apagado:
   amarillo = "no disponible por hoy", gris = "indefinidamente". Todavia no
   se usa; leer_estado() solo devuelve si esta disponible o no.
 
 FLUJO OBSERVADO (capturas del usuario):
-  1. Lista de productos agrupados por categoria (Ensaladas, Wraps, ...)
+  1. Lista de productos agrupados por categoria
   2. Cada producto tiene un toggle a la izquierda del nombre
   3. Al clickear el toggle de un producto PRENDIDO, se abre un popup con:
        - titulo = nombre del producto
@@ -22,7 +22,7 @@ FLUJO OBSERVADO (capturas del usuario):
      OJO: el portal esta EN INGLES, aunque las capturas iniciales se
      hubieran leido en castellano. Ver TXT_POR_HOY.
   4. Al clickear el toggle de un producto APAGADO lo prende directo, sin
-     popup. CONFIRMADO EN VIVO (op#17 'Brie', 2026-07-27).
+     popup. CONFIRMADO EN VIVO (op#17, 2026-07-27).
 
 CONFIRMADO POR HTML (DevTools, 2026-07-27): los toggles son
 <mat-slide-toggle> de Angular Material:
@@ -35,7 +35,7 @@ CONFIRMADO POR HTML (DevTools, 2026-07-27): los toggles son
         ...
       </span>
       <span class="mat-slide-toggle-content">
-        <p class="... item-name">Guiso de lentejas</p>
+        <p class="... item-name">Nombre del producto</p>
       </span>
     </label>
 
@@ -46,7 +46,7 @@ aria-checked ("true"/"false") sobre el <input>.
 =========================================================================
  ESTADO: los cuatro metodos del contrato corrieron en vivo contra el
  portal. apagar() y prender() estan confirmados; el recorrido de
- categorias tambien (op#17 encontro 'Brie' en 'Ensaladas'), con la
+ categorias tambien (op#17 encontro el producto en otra categoria), con la
  salvedad de _abrir_categoria: cuando el click tiene que ir por el
  fallback JS hay que clickear adentro del custom element, no el custom
  element. Ver ahi.
@@ -65,19 +65,24 @@ log = logging.getLogger("pedidosya")
 class PedidosYa(PlataformaBase):
     nombre = "pedidosya"
 
-    # El id del menu es el de la sucursal: si te logueas en otra, la app
-    # navega de vuelta a esta. Se puede cambiar desde Ajustes (es lo que
-    # hacia falta para que la app sirva en otro local); esto es el default.
-    MENU_ID = "460348"
+    # El id del menu es el de TU sucursal: si te logueas en otra, la app
+    # navega de vuelta a esta. Sale de Ajustes y no tiene default, porque
+    # no hay ninguno razonable: el de otro local manda la app a un menu
+    # ajeno, que es peor que no arrancar.
+    MENU_ID = ""
     BASE_MENU = "https://web-ar.us.restaurant-partners.com/menus/PY_AR"
 
     @property
     def url_menu(self) -> str:
         return f"{self.BASE_MENU}/{self.menu_id}"
 
+    @property
+    def configurado(self) -> bool:
+        return bool(self.menu_id)
+
     # --- Opciones del popup de disponibilidad ---
     # CONFIRMADO POR LOG (2026-07-27): el portal esta EN INGLES. El popup
-    # dice "Coca Cola | Unavailable for today | Unavailable indefinitely".
+    # dice "<producto> | Unavailable for today | Unavailable indefinitely".
     # Buscabamos el texto en castellano, no lo encontrabamos, y por eso
     # fallaba el apagado aunque el click estuviera entrando bien.
     # Se aceptan los dos idiomas por si el portal cambia de locale.
@@ -94,9 +99,8 @@ class PedidosYa(PlataformaBase):
     #
     #   wk-menu-list
     #     div.menus-list-item
-    #       wk-menu-list-category-item.menu-category   -> "Bebidas"
-    #       wk-menu-list-category-item.menu-category   -> "Ensaladas"
-    #       wk-menu-list-category-item.menu-category   -> "Wraps"
+    #       wk-menu-list-category-item.menu-category   -> "<categoria 1>"
+    #       wk-menu-list-category-item.menu-category   -> "<categoria 2>"
     #
     # Se toma por estructura y no por nombre a proposito: asi funciona en
     # cualquier local, con las categorias que sea y en el idioma que sea.
@@ -310,7 +314,7 @@ class PedidosYa(PlataformaBase):
         CONFIRMADO: cada fila es el <label class="mat-slide-toggle-label">
         de Angular Material, que envuelve nombre + toggle. Buscamos el
         texto exacto (exact=True, cuidado con nombres que son prefijo de
-        otros: 'Wrap caesar' vs 'Wrap caesar con batatas') y subimos al
+        otros: 'Tarta de verdura' vs 'Tarta de verdura chica') y subimos al
         label ancestro.
         """
         texto = self.page.get_by_text(nombre_remoto, exact=True).first
@@ -454,7 +458,7 @@ class PedidosYa(PlataformaBase):
         await self._click_toggle(fila)
         await self.page.wait_for_timeout(2000)
 
-        # CONFIRMADO EN VIVO (2026-07-27, op#17 'Brie'): prender NO abre
+        # CONFIRMADO EN VIVO (2026-07-27, op#17): prender NO abre
         # ningun popup. El click sobre el toggle apagado lo prende directo y
         # queda guardado; la relectura despues de recargar lo encontro
         # prendido. El popup de dos opciones es solo del lado de apagar,

@@ -76,36 +76,36 @@ async def escenario(navegador, query: str, titulo: str):
 
     plat = PedidosYaLocal(pagina)
     await pagina.goto(plat.url_menu)
-    # Arrancamos con Brie apagado, como estaba en el log.
-    await pagina.evaluate("localStorage.setItem('apagados', '[\"Brie\"]')")
+    # Arrancamos con Budin de pan apagado, como estaba en el log.
+    await pagina.evaluate("localStorage.setItem('apagados', '[\"Budin de pan\"]')")
     await pagina.reload()
 
     revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja la pagina lista")
 
-    revisar(await plat.categorias() == ["Bebidas", "Ensaladas", "Wraps"],
+    revisar(await plat.categorias() == ["Bebidas", "Platos", "Tartas"],
             "categorias() lee las 3 del menu")
 
-    # La pagina arranca en Bebidas y Brie esta en Ensaladas: obliga a
+    # La pagina arranca en Bebidas y Budin de pan esta en Platos: obliga a
     # cambiar de categoria para encontrarlo.
-    estado = await plat.leer_estado("Brie")
+    estado = await plat.leer_estado("Budin de pan")
     revisar(estado is not None and not estado.disponible,
-            "leer_estado('Brie') lo encuentra cambiando de categoria")
+            "leer_estado('Budin de pan') lo encuentra cambiando de categoria")
 
-    revisar(await plat.prender("Brie"), "prender('Brie') confirma el cambio")
-    estado = await plat.leer_estado("Brie")
+    revisar(await plat.prender("Budin de pan"), "prender('Budin de pan') confirma el cambio")
+    estado = await plat.leer_estado("Budin de pan")
     revisar(estado is not None and estado.disponible,
-            "'Brie' quedo prendido de verdad")
+            "'Budin de pan' quedo prendido de verdad")
 
-    revisar(await plat.apagar("Wrap caesar", por_hoy=True),
-            "apagar('Wrap caesar') confirma el cambio")
-    estado = await plat.leer_estado("Wrap caesar")
+    revisar(await plat.apagar("Tarta de verdura", por_hoy=True),
+            "apagar('Tarta de verdura') confirma el cambio")
+    estado = await plat.leer_estado("Tarta de verdura")
     revisar(estado is not None and not estado.disponible,
-            "'Wrap caesar' quedo apagado de verdad")
+            "'Tarta de verdura' quedo apagado de verdad")
 
     # El nombre que es prefijo de otro no se tiene que haber tocado.
-    estado = await plat.leer_estado("Wrap caesar con batatas")
+    estado = await plat.leer_estado("Tarta de verdura chica")
     revisar(estado is not None and estado.disponible,
-            "'Wrap caesar con batatas' sigue prendido (exact=True)")
+            "'Tarta de verdura chica' sigue prendido (exact=True)")
 
     # Un producto que no existe se tiene que poder distinguir de un error.
     revisar(await plat.leer_estado("Producto que no existe") is None,
@@ -116,9 +116,9 @@ async def escenario(navegador, query: str, titulo: str):
     todos = await plat.leer_todos()
     revisar(len(todos) == 12,
             f"leer_todos() trae los 12 productos de las 3 categorias (trajo {len(todos)})")
-    revisar(todos.get("Brie") is True and todos.get("Wrap caesar") is False,
+    revisar(todos.get("Budin de pan") is True and todos.get("Tarta de verdura") is False,
             "leer_todos() devuelve bien prendidos y apagados")
-    revisar(todos.get("Coca Cola") is True,
+    revisar(todos.get("Gaseosa cola") is True,
             "leer_todos() llega tambien a la categoria que estaba abierta")
 
     await pagina.close()

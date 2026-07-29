@@ -1,22 +1,27 @@
-"""Carga inicial de productos con sus nombres en cada plataforma.
+"""Carga inicial del catalogo. Viene VACIA a proposito.
 
-IMPORTANTE: los nombres difieren mucho entre PedidosYa y Rappi.
-Formato: (nombre_canonico, categoria, nombre_en_pedidosya, nombre_en_rappi)
-Si un nombre es None, ese producto NO existe en esa plataforma.
+Una instalacion nueva no tiene por que arrancar con la carta de otro local.
+Antes este archivo traia los 31 productos del local para el que se escribio
+la app, con sus nombres en cada portal: quien clonara el repo se encontraba
+con una carta ajena y tenia que borrarla a mano.
 
-REVISAR LAS MARCAS "DUDA" ANTES DE USAR EN PRODUCCION.
+Ahora el primer arranque no carga nada y la pantalla ofrece **leer tu
+carta**: la app entra a los dos portales, lee lo que hay y arma el catalogo
+sola (ver app/carta.py y app/catalogo.py). Es el mismo camino que ya se usa
+para agregar un producto nuevo, asi que no hay codigo que mantener aparte.
 
-Las tildes de los nombres de Rappi salen del portal mismo, via /api/nombres
-(2026-07-27). Sin tilde no se encuentran: se buscan con exact=True.
+Esto NO le borra el catalogo a nadie: `sembrar()` solo crea productos si la
+base esta vacia, y ademas en cuanto el usuario vincula o separa algo desde
+la app la base pasa a mandar (`es_manual`). Una instalacion que ya venia
+funcionando sigue con su catalogo intacto.
 
-OJO: esta lista esta INCOMPLETA a proposito. El portal de Rappi muestra 45
-productos y aca hay 31. El usuario decidio (2026-07-27) NO cargar los ~18
-que estan solo en Rappi ni la Mexicana: prefiere que la app lea las cartas
-y que el vinculo lo decida el desde la pantalla Carta. Ver app/catalogo.py.
+La maquinaria de abajo se deja porque sigue sirviendo: si alguien quiere
+arrancar con una lista escrita a mano, llena PRODUCTOS y listo. Formato:
 
-Esto es la carga INICIAL, no el catalogo definitivo. En cuanto el usuario
-vincula o separa algo desde la app, la base pasa a mandar y este archivo
-deja de tocar los alias (ver sembrar()).
+    (nombre_canonico, categoria, nombre_en_pedidosya, nombre_en_rappi)
+
+Un nombre en None quiere decir que el producto NO existe en esa plataforma.
+Ojo con las tildes: los nombres se buscan en el portal con exact=True.
 """
 
 import logging
@@ -27,81 +32,8 @@ from .models import Producto, AliasPlataforma, EstadoItem
 
 log = logging.getLogger("seed")
 
-# (canonico, categoria, pedidosya, rappi)
-PRODUCTOS = [
-    # ---------------- Ensaladas ----------------
-    ("Caesar", "Ensaladas", "Caesar", "Ensalada caesar"),
-    ("Cobb", "Ensaladas", "Cobb", "Cobb"),
-    ("Clasica", "Ensaladas", "Clasica", "Ensalada clásica"),
-    ("Brie", "Ensaladas", "Brie", "Ensalada Brie"),
-    ("Atun", "Ensaladas", "Atun", "Ensalada con atún"),
-    ("Falafel", "Ensaladas", "Falafel", "Ensalada de falafel"),
-    ("Cala", "Ensaladas", "Cala", "Ensalada cala"),
-    ("Porto", "Ensaladas", "Porto", "Ensalada porto"),
-
-    # Mexicana: descontinuada, no se usa mas. Se deja comentada por si vuelve.
-    # ("Mexicana", "Ensaladas", "Mexicana", None),
-
-    # CONFIRMADO: "Ensalada con Peras" no existe en PedidosYa.
-    ("Ensalada con Peras", "Ensaladas", None, "Ensalada con Peras"),
-
-    # ---------------- Wraps ----------------
-    ("Wrap brie", "Wraps", "Wrap brie", "Wrap Brie"),
-    ("Wrap caesar", "Wraps", "Wrap caesar", "Wrap caesar"),
-    ("Wrap Hummus", "Wraps", "Wrap Hummus", "Wrap Hummus"),
-    ("Wrap de pollo a la Toscana", "Wraps",
-     "Wrap de pollo a la Toscana", "Wrap de pollo a la toscana"),
-
-    # RESUELTO POR EL USUARIO (2026-07-27): el "Wrap caesar con batatas" de
-    # PedidosYa NO es ninguno de los dos wraps caesar con guarnicion de
-    # Rappi ("con papas" y "con ensalada"): son platos distintos. Antes
-    # estaban vinculados, asi que apagar uno apagaba el que no era.
-    ("Wrap caesar con batatas", "Wraps", "Wrap caesar con batatas", None),
-    ("Wrap caesar con ensalada", "Wraps", None, "Wrap caesar con ensalada"),
-
-    # Los otros tres wraps con guarnicion siguen vinculados: el usuario dijo
-    # que le es indiferente y que prefiere decidirlo desde la app. Si no son
-    # el mismo plato, el boton "Separar" de la pantalla Carta los desarma.
-    ("Wrap de Atun con batatas", "Wraps",
-     "Wrap de Atun con batatas", "Wrap de atun con ensalada"),
-    ("Wrap hummus con batatas", "Wraps",
-     "Wrap hummus con batatas", "Wrap Hummus con ensalada"),
-    ("Wrap toscano con batatas", "Wraps",
-     "Wrap toscano con batatas", "Wrap Toscano con ensalada"),
-
-    # CONFIRMADO: "Wrap de atun" (sin guarnicion) no existe en PedidosYa.
-    ("Wrap de atun", "Wraps", None, "Wrap de atun"),
-    # CONFIRMADO: "Wrap Brie con ensalada" no existe en PedidosYa.
-    ("Wrap Brie con ensalada", "Wraps", None, "Wrap Brie con ensalada"),
-
-    # ---------------- Platos ----------------
-    # En PedidosYa estos figuran bajo "Ensaladas"; en Rappi bajo "Plato del Dia".
-    # Los dejo como categoria propia para que se vean juntos en la UI.
-    ("Arroz Chaufa", "Platos", "Arroz Chaufa", "Arroz Chaufa"),
-    ("Risotto", "Platos", "Risotto", "Risotto de Hongos"),
-    ("Pastel de papa", "Platos", "Pastel de papa", "Pastel de Papa"),
-    ("Ravioles con crema de hongos", "Platos",
-     "Ravioles con crema de hongos", "Ravioles con Crema de hongos"),
-    ("Guiso de lentejas", "Platos", "Guiso de lentejas", "Guiso de lentejas"),
-    ("Guiso de lentejas vegetariano", "Platos",
-     "Guiso de lentejas vegetariano", "Guiso de lentejas vegetariano"),
-
-    # CONFIRMADO: la Suprema no existe en PedidosYa.
-    ("Suprema a la Crema de Limon con Pure", "Platos",
-     None, "Suprema a la Crema de Limón con Puré"),
-
-    # ---------------- Bebidas ----------------
-    ("Agua sin gas", "Bebidas", "Agua sin gas", "Villavicencio sin gas 500 ml"),
-    ("Agua con gas", "Bebidas", "Agua con gas", "Villavicencio con gas 500 ml"),
-    ("Coca Cola", "Bebidas", "Coca Cola", "Coca-cola sabor original 500 ml"),
-
-    # CONFIRMADO: en PedidosYa se cargo mal y quedo "Coca Coca Zero".
-    # El nombre esta asi en el portal, no es un typo de esta lista.
-    # CONFIRMADO POR /api/buscar-texto (2026-07-27): en Rappi lleva tilde,
-    # "azúcar". Los nombres se buscan con exact=True, asi que sin la tilde
-    # no lo encontraba.
-    ("Coca Zero", "Bebidas", "Coca Coca Zero", "Coca-cola sin azúcar 500 ml"),
-]
+# (canonico, categoria, pedidosya, rappi). Vacia: ver el docstring.
+PRODUCTOS = []
 
 PLATAFORMAS = ["pedidosya", "rappi"]
 
@@ -138,9 +70,9 @@ def _sincronizar(db):
       - lo SACA cuando el catalogo dice None, que es como se escribe "este
         producto no existe en esa plataforma"
 
-    Lo segundo hacia falta para poder desvincular: al marcar el "Wrap caesar
-    con batatas" como exclusivo de PedidosYa, sin esto la base se quedaba
-    con el alias de Rappi y lo seguia apagando alla.
+    Lo segundo hace falta para poder desvincular: al marcar un producto como
+    exclusivo de PedidosYa, sin esto la base se quedaba con el alias de
+    Rappi y lo seguia apagando alla.
     """
     for canonico, categoria, n_py, n_rappi in PRODUCTOS:
         p = db.query(Producto).filter_by(nombre=canonico).first()

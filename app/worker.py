@@ -32,14 +32,16 @@ def _resumen(e: Exception, largo: int = 300) -> str:
     return texto[:largo] + ("…" if len(texto) > largo else "")
 
 MUESTRA_CARTA = (Path(__file__).resolve().parent.parent
-                 / "pruebas" / "carta_2026-07-27.json")
+                 / "pruebas" / "carta_ejemplo.json")
 
 
 def _carta_de_muestra() -> dict:
-    """La lectura real del 2026-07-27, para probar la pantalla sin navegador.
+    """Una carta inventada, para probar la pantalla sin navegador.
 
-    En modo simulado no hay portales que leer, pero la pantalla Carta es lo
-    que mas conviene poder probar sin depender de estar en el local.
+    En modo simulado no hay portales que leer, y la pantalla Carta es la
+    que mas conviene poder probar sin depender de estar en un local. Antes
+    aca vivia la lectura real de un local de verdad; ahora es un ejemplo
+    armado para reproducir las mismas trampas (ver pruebas/carta_ejemplo.json).
     """
     try:
         with open(MUESTRA_CARTA, encoding="utf-8") as f:
@@ -158,6 +160,14 @@ class Worker:
             brand_id=config.texto("rappi_brand_id"))
 
         for nombre, plat in self.plataformas.items():
+            # Primer arranque: todavia no dijo que sucursal es. Navegar con
+            # el id vacio carga cualquier cosa y el error que sale despues
+            # ("sesion caida") lo manda a loguearse, que no es el problema.
+            if not plat.configurado:
+                self.sesion_ok[nombre] = False
+                log.warning("Falta configurar la sucursal de %s: la pantalla "
+                            "lo va a pedir antes de poder leer nada", nombre)
+                continue
             try:
                 ok = await plat.asegurar_sesion()
                 self.sesion_ok[nombre] = ok
