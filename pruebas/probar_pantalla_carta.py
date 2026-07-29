@@ -771,7 +771,7 @@ async def main():
         revisar(await fila.locator("button", has_text="Vincular").count() == 1,
                 "el par que el usuario dijo que NO es el mismo ofrece Vincular")
         revisar("Tarta de verdura porción" in await fila.inner_text(),
-                "avisa que en Rappi tambien existe 'en porcion'")
+                "avisa que en Rappi tambien existe la version en porcion")
 
         print("\n== Vincular y separar ==")
         await fila.locator("button", has_text="Vincular").click()
