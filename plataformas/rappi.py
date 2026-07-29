@@ -6,9 +6,13 @@ FLUJO OBSERVADO (captura del usuario):
   - El badge de estado da una segunda fuente para leer disponibilidad.
 
 OJO CON LAS TIENDAS:
-  La URL trae varios storeIds. La app opera sobre UNO, el de Ajustes. Si
-  en tu local hay que apagar en TODAS, este modulo tiene que iterar
-  cambiando storeId en la URL.
+  La URL trae varios storeIds y cada tienda es INDEPENDIENTE: apagar en
+  una no apaga en la otra, y ni siquiera tienen la misma carta
+  (confirmado 2026-07-29). Una instancia de esta clase = UNA tienda. Para
+  operar sobre dos (Turbo y Común) el worker crea DOS instancias con dos
+  pestañas y dos store_id, no una que va cambiando la URL: asi cada
+  tienda tiene su lock, su sesion y su estado, y una lectura no pisa a la
+  otra. Ver worker._abrir_rappi_comun().
 
 CONFIRMADO POR HTML (DevTools, 2026-07-27): el toggle de disponibilidad es
 
@@ -56,11 +60,10 @@ class Rappi(PlataformaBase):
     BRAND_ID = ""
     STORE_ID = ""
 
-    # OJO SI TENES VARIAS TIENDAS: la app opera sobre UNA (la de Ajustes).
-    # En el local para el que se escribio esto alcanzaba, porque apagar en
-    # la tienda "Turbo" apagaba tambien en la normal. Eso no tiene por que
-    # valer en todos lados: si en el tuyo son independientes, hay que
-    # iterar cambiando storeId en la URL. Ver el TODO del README.
+    # SI TENES VARIAS TIENDAS: cada una es una instancia de esta clase, con
+    # su store_id y su pestaña. Las tiendas son independientes y su carta no
+    # es la misma, asi que que producto de una es cual de la otra lo decide
+    # el usuario en la pantalla Carta y queda guardado en el catalogo.
 
     BADGE_APAGADO = "Apagados"
 

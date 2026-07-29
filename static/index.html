@@ -166,9 +166,16 @@
   .grupo { margin-top: 18px; }
   .grupo > h3 { font-size: 12px; letter-spacing: 1.1px; text-transform: uppercase;
                 color: var(--tenue); margin: 0 0 8px; font-weight: 600; }
+  /* Una columna por portal + la de los botones. El default son los dos de
+     siempre; con las dos tiendas de Rappi la fila tiene TRES portales y el
+     grid se arma desde JS (ver columnasDeLaFila), porque cuántos hay lo
+     sabe recién ahí. */
   .par { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px;
          align-items: center; padding: 8px 10px; border-radius: 8px;
          background: var(--panel-2); margin-bottom: 6px; font-size: 14px; }
+  .par .quien input[type=checkbox] { vertical-align: middle; margin: 0 2px 0 0; }
+  .par .acciones { display: flex; gap: 6px; align-items: center;
+                   flex-wrap: wrap; justify-content: flex-end; }
   .par .lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .par .quien { font-size: 11px; color: var(--tenue); }
   .par .qué { overflow-wrap: anywhere; }
@@ -280,6 +287,21 @@
 let PLATS = ['pedidosya', 'rappi'];
 const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi', rappi_comun: 'Rappi Común' };
 
+// Tiendas del MISMO portal, para poder apagarlas juntas con un botón. Es
+// el espejo de carta.TIENDAS_DEL_MISMO_PORTAL del backend.
+const GRUPOS_DE_TIENDAS = [
+  ['rappi_todas', 'Ambos Rappi', ['rappi', 'rappi_comun']],
+];
+
+// Con las dos tiendas de Rappi configuradas, «Rappi» a secas es ambiguo:
+// son dos tiendas distintas con dos toggles distintos y cartas distintas.
+// Apretar un botón que dice «Rappi» creyendo que apaga las dos, cuando
+// apaga una, es la clase de error que termina en un pedido de algo que se
+// dio por apagado.
+function nombrarPlataformas() {
+  NOMBRE_PLAT.rappi = PLATS.includes('rappi_comun') ? 'Rappi Turbo' : 'Rappi';
+}
+
 // ------------------------------------------------ Avisos de sesión caída
 //
 // El login sigue siendo 100% manual a propósito (Rappi suele pedir 2FA, y
@@ -369,7 +391,7 @@ async function cargar() {
     fetch('/api/estado-sistema').then(r => r.json()),
     fetch('/api/novedades').then(r => r.json()).catch(() => ({ novedades: [] })),
     fetch('/api/alertas').then(r => r.json())
-      .catch(() => ({ sin_confirmar: [], sesiones_caidas: [] })),
+      .catch(() => ({ sin_confirmar: [], sesiones_caidas: [], sin_espejo: [] })),
   ]);
 
   dudosos = new Map((alertas.sin_confirmar || [])
@@ -566,8 +588,9 @@ function pintarAlertas(alertas) {
   const panel = document.getElementById('panel-alertas');
   const caidas = alertas.sesiones_caidas || [];
   const dudas = alertas.sin_confirmar || [];
+  const desparejos = alertas.sin_espejo || [];
 
-  if (!caidas.length && !dudas.length) {
+  if (!caidas.length && !dudas.length && !desparejos.length) {
     panel.style.display = 'none';
     return;
   }
@@ -581,7 +604,7 @@ function pintarAlertas(alertas) {
 
   if (caidas.length) {
     const t = document.createElement('div');
-    t.style.marginBottom = dudas.length ? '10px' : '0';
+    t.style.marginBottom = (dudas.length || desparejos.length) ? '10px' : '0';
     const b = document.createElement('b');
     b.textContent = 'Hay que loguearse en ' +
       caidas.map(p => NOMBRE_PLAT[p] || p).join(' y ') + '.';
@@ -589,6 +612,35 @@ function pintarAlertas(alertas) {
                 'logueate en esa pestaña y apretá «Revalidar sesión». ' +
                 'Lo que hayas pedido queda encolado y sale solo: no se pierde.');
     cont.appendChild(t);
+  }
+
+  // Apagado en una tienda y prendido en la tienda hermana. Es el mismo
+  // problema de fondo que el de abajo —algo que se sigue vendiendo cuando
+  // lo dabas por apagado— pero acá la app SÍ lo está viendo, así que lo
+  // dice con nombre y apellido y con el botón para arreglarlo.
+  if (desparejos.length) {
+    const t = document.createElement('div');
+    t.style.marginBottom = dudas.length ? '10px' : '0';
+    const b = document.createElement('b');
+    b.textContent = desparejos.length === 1
+      ? 'Hay 1 producto apagado en una tienda y prendido en la otra.'
+      : `Hay ${desparejos.length} productos apagados en una tienda y ` +
+        `prendidos en la otra.`;
+    t.append(b, ' Se siguen vendiendo donde quedaron prendidos.');
+    cont.appendChild(t);
+
+    for (const d of desparejos) {
+      const fila = document.createElement('div');
+      fila.style.cssText = 'margin-top:6px;font-size:13px;color:var(--tenue)';
+      const nombre = document.createElement('b');
+      nombre.style.color = 'var(--texto)';
+      nombre.textContent = d.producto;
+      fila.append(nombre,
+                  `: apagado en ${NOMBRE_PLAT[d.apagada_en] || d.apagada_en}` +
+                  ` y PRENDIDO en ${NOMBRE_PLAT[d.prendida_en] || d.prendida_en}` +
+                  ` como «${d.nombre_remoto}».`);
+      cont.appendChild(fila);
+    }
   }
 
   if (!dudas.length) return;
@@ -705,6 +757,7 @@ function pintarSistema(s) {
   // todo lo que se pinta abajo (chips, avisos, «Apagar todo») se arma con
   // esta lista.
   if (Array.isArray(s.plataformas) && s.plataformas.length) PLATS = s.plataformas;
+  nombrarPlataformas();
 
   const el = document.getElementById('estado-sistema');
   if (s.simulado) {
@@ -1227,11 +1280,24 @@ async function pintarCierre(mensaje = '') {
     contarCierre('apagar_hoy'), contarCierre('prender'),
   ]);
 
-  // Una fila por plataforma activa, más una última con TODAS. Se arma con
-  // PLATS y no a mano: con una plataforma opcional configurada, «los dos»
-  // dejaba afuera justamente a la tercera, así que apagar todo al cierre no
-  // apagaba todo.
+  // Una fila por plataforma activa, una por cada grupo de tiendas del
+  // mismo portal, y una última con TODAS. Se arma con PLATS y no a mano:
+  // con una plataforma opcional configurada, «los dos» dejaba afuera
+  // justamente a la tercera, así que apagar todo al cierre no apagaba todo.
+  //
+  // Lo pidió el usuario tal cual (2026-07-29): poder apagar solo Turbo,
+  // solo Común, solo PedidosYa, las dos de Rappi juntas, o las tres. Las
+  // dos tiendas de Rappi cierran a la misma hora y PedidosYa no, así que
+  // «ambos Rappi» es el botón de todos los días.
   const destinos = PLATS.map(p => [p, NOMBRE_PLAT[p] || p, [p]]);
+
+  for (const [clave, titulo, familia] of GRUPOS_DE_TIENDAS) {
+    const suyas = PLATS.filter(p => familia.includes(p));
+    // Con una sola tienda del grupo activa, el combo sería el botón de
+    // arriba repetido.
+    if (suyas.length > 1) destinos.push([clave, titulo, suyas]);
+  }
+
   if (PLATS.length > 1) {
     destinos.push(['ambas', PLATS.length === 2 ? 'Los dos' : 'Todas', [...PLATS]]);
   }
@@ -1608,23 +1674,26 @@ function pintarCarta() {
     `Emparejados solos — ${(carta.pares || []).length}`,
     (carta.pares || []).map(filaPar)));
 
-  cuerpo.appendChild(grupo(
-    `Solo en PedidosYa — ${(carta.solo_pedidosya || []).length}`,
-    (carta.solo_pedidosya || []).map(n => filaSuelto('pedidosya', n))));
-
-  cuerpo.appendChild(grupo(
-    `Solo en Rappi — ${(carta.solo_rappi || []).length}`,
-    (carta.solo_rappi || []).map(n => filaSuelto('rappi', n))));
+  // Un grupo por portal, armado de la lectura: con las dos tiendas de
+  // Rappi son tres, y el de la tienda Común es el que faltaba para poder
+  // vincularle el catálogo.
+  for (const plat of platsCarta()) {
+    const sueltos = nombresSueltos(plat);
+    cuerpo.appendChild(grupo(
+      `Solo en ${NOMBRE_PLAT[plat] || plat} — ${sueltos.length}`,
+      sueltos.map(n => filaSuelto(plat, n))));
+  }
 
   if (carta.leidos) {
     const pie = document.createElement('div');
     pie.className = 'ayuda';
     pie.style.marginTop = '16px';
-    pie.textContent = `Leídos: ${carta.leidos.pedidosya || 0} en PedidosYa, ` +
-                      `${carta.leidos.rappi || 0} en Rappi` +
-                      (carta.leida_en ? `, el ${carta.leida_en.replace('T', ' a las ')}.` : '.') +
-                      (catalogo && catalogo.manual
-                        ? ' El catálogo lo manejás vos desde acá.' : '');
+    pie.textContent = 'Leídos: ' +
+      platsCarta().map(p => `${carta.leidos[p] || 0} en ${NOMBRE_PLAT[p] || p}`)
+                  .join(', ') +
+      (carta.leida_en ? `, el ${carta.leida_en.replace('T', ' a las ')}.` : '.') +
+      (catalogo && catalogo.manual
+        ? ' El catálogo lo manejás vos desde acá.' : '');
     cuerpo.appendChild(pie);
   }
 }
@@ -1634,14 +1703,24 @@ function pintarCarta() {
 // nada, o dos que la app emparejó con otra cosa.
 function todosLosNombres(plataforma) {
   const nombres = new Set();
-  const clave = plataforma === 'rappi' ? 'rappi' : 'pedidosya';
   for (const grupo of ['pares', 'a_confirmar']) {
     for (const par of (carta[grupo] || [])) {
-      if (par[clave]) nombres.add(par[clave]);
+      const suyo = (par.nombres || par)[plataforma];
+      if (suyo) nombres.add(suyo);
     }
   }
-  for (const n of (carta['solo_' + clave] || [])) nombres.add(n);
+  for (const n of nombresSueltos(plataforma)) nombres.add(n);
   return [...nombres].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+// Los que la lectura vio en un solo portal. `solo` es por plataforma; las
+// claves viejas quedan como respaldo por si la pantalla habla con un
+// backend anterior (pasa entre el update y el reinicio del navegador).
+function nombresSueltos(plataforma) {
+  if (carta.solo && Array.isArray(carta.solo[plataforma])) {
+    return carta.solo[plataforma];
+  }
+  return carta['solo_' + plataforma] || [];
 }
 
 // Con qué está vinculado hoy ese nombre, si con algo. Vincularlo con otra
@@ -1649,8 +1728,10 @@ function todosLosNombres(plataforma) {
 function vinculoActual(plataforma, remoto) {
   const producto = productoDe(plataforma, remoto);
   if (!producto) return null;
-  const otra = plataforma === 'rappi' ? 'pedidosya' : 'rappi';
-  return producto.plataformas[otra];
+  const otros = platsCarta()
+    .filter(p => p !== plataforma && producto.plataformas[p])
+    .map(p => producto.plataformas[p]);
+  return otros.length ? otros.join(' + ') : null;
 }
 
 function vinculadorManual() {
@@ -1669,6 +1750,7 @@ function vinculadorManual() {
   // encontraria siempre a ella.
   const fila = document.createElement('div');
   fila.className = 'par manual';
+  columnasDeLaFila(fila);
 
   const armar = (plataforma) => {
     const lado = document.createElement('div');
@@ -1699,8 +1781,11 @@ function vinculadorManual() {
     return { lado, sel };
   };
 
-  const py = armar('pedidosya');
-  const rappi = armar('rappi');
+  // Uno por portal. Con las dos tiendas de Rappi son tres, y se puede
+  // elegir cualquier combinación de dos o tres: un plato que está en
+  // PedidosYa y en la tienda Común pero no en Turbo es un caso real.
+  const selectores = {};
+  for (const plat of platsCarta()) selectores[plat] = armar(plat);
 
   const acc = document.createElement('div');
   acc.className = 'acciones';
@@ -1708,12 +1793,15 @@ function vinculadorManual() {
   boton.className = 'on';
   boton.textContent = 'Vincular';
   boton.onclick = () => {
-    if (!py.sel.value || !rappi.sel.value) {
-      alert('Elegí uno de cada portal.');
+    const nombres = {};
+    for (const [plat, s] of Object.entries(selectores)) {
+      if (s.sel.value) nombres[plat] = s.sel.value;
+    }
+    if (Object.keys(nombres).length < 2) {
+      alert('Elegí al menos dos portales.');
       return;
     }
-    accionCarta('/api/vincular',
-                { pedidosya: py.sel.value, rappi: rappi.sel.value }, boton);
+    accionCarta('/api/vincular', { nombres }, boton);
   };
   acc.appendChild(boton);
 
@@ -1723,21 +1811,28 @@ function vinculadorManual() {
   aviso.style.cssText = 'grid-column:1/-1;margin:0;color:var(--curso)';
 
   function avisarDeLoQueRompe() {
-    const sueltos = [];
-    for (const [plat, sel] of [['pedidosya', py.sel], ['rappi', rappi.sel]]) {
-      if (!sel.value) continue;
-      const con = vinculoActual(plat, sel.value);
-      const otra = plat === 'rappi' ? 'pedidosya' : 'rappi';
-      const elegido = otra === 'rappi' ? rappi.sel.value : py.sel.value;
-      if (con && con !== elegido) sueltos.push(`«${con}»`);
+    // Los nombres que hoy están vinculados a alguno de los elegidos y no
+    // van a estarlo después. Se muestran ANTES de apretar: al vincular a
+    // mano dos que ya estaban con otra cosa, esa otra queda suelta.
+    const elegidos = new Set(Object.values(selectores)
+                             .map(s => s.sel.value).filter(Boolean));
+    const sueltos = new Set();
+    for (const [plat, s] of Object.entries(selectores)) {
+      if (!s.sel.value) continue;
+      const producto = productoDe(plat, s.sel.value);
+      if (!producto) continue;
+      for (const otra of platsCarta()) {
+        const con = producto.plataformas[otra];
+        if (otra !== plat && con && !elegidos.has(con)) sueltos.add(`«${con}»`);
+      }
     }
-    aviso.textContent = sueltos.length
-      ? 'Ojo: al vincular estos dos, ' + sueltos.join(' y ') +
+    aviso.textContent = sueltos.size
+      ? 'Ojo: al vincular estos, ' + [...sueltos].join(' y ') +
         ' se queda solo, con su propio botón. Si no lo usás, pausalo.'
       : '';
   }
 
-  fila.append(py.lado, rappi.lado, acc, aviso);
+  fila.append(...platsCarta().map(p => selectores[p].lado), acc, aviso);
   div.appendChild(fila);
   return div;
 }
@@ -1758,12 +1853,26 @@ function grupo(titulo, filas) {
   return div;
 }
 
-function lado(plataforma, nombre, extra) {
+// Las plataformas que trae la lectura de la carta. Es lo que dice cuántas
+// columnas tiene la pantalla: con las dos tiendas de Rappi son tres.
+function platsCarta() {
+  return (carta && Array.isArray(carta.plataformas) && carta.plataformas.length)
+    ? carta.plataformas : PLATS;
+}
+
+// El grid de la fila tiene una columna por portal más la de los botones.
+// Cuántos portales hay lo sabe recién acá, así que va por JS y no por CSS.
+function columnasDeLaFila(div, cuantas = platsCarta().length) {
+  div.style.gridTemplateColumns = '1fr '.repeat(cuantas) + 'auto';
+}
+
+function lado(plataforma, nombre, extra, casilla) {
   const d = document.createElement('div');
   d.className = 'lado';
   const quien = document.createElement('div');
   quien.className = 'quien';
   quien.textContent = NOMBRE_PLAT[plataforma];
+  if (casilla) quien.prepend(casilla, ' ');
   const qué = document.createElement('div');
   qué.className = nombre ? 'qué' : 'qué nada';
   qué.textContent = nombre || 'no está';
@@ -1780,17 +1889,60 @@ function lado(plataforma, nombre, extra) {
 function filaPar(par) {
   const div = document.createElement('div');
   div.className = 'par';
+  columnasDeLaFila(div);
 
-  const pPy = productoDe('pedidosya', par.pedidosya);
-  const pRappi = productoDe('rappi', par.rappi);
-  const vinculado = pPy && pRappi && pPy.id === pRappi.id;
+  const nombres = par.nombres || { pedidosya: par.pedidosya, rappi: par.rappi };
+  const plats = platsCarta().filter(p => nombres[p]);
+
+  // Con qué producto del catálogo se corresponde cada columna. Si todas
+  // caen en el mismo, ya está vinculado.
+  const productos = plats.map(p => productoDe(p, nombres[p]));
+  const vinculado = plats.length > 1 && productos.every(
+    (x, i) => x && productos[0] && x.id === productos[0].id);
   if (vinculado) div.classList.add('ok');
 
-  const alternativas = (par.alternativas || []).length
-    ? 'ojo, también existe: ' + par.alternativas.join(' · ') : '';
+  // Qué columnas entran en el vínculo. Vienen tildadas las que se
+  // emparejaron con la confianza que su portal exige; la que no llegó viene
+  // DESTILDADA a propósito: es el caso "Empanada de carne" contra
+  // "Empanada de carne chica" de la otra tienda de Rappi, donde vincular
+  // las tres de un click apagaría un plato que se sigue vendiendo.
+  const elegidas = new Set();
+  const casillas = {};
 
-  div.append(lado('pedidosya', par.pedidosya),
-             lado('rappi', par.rappi, alternativas));
+  for (const plat of platsCarta()) {
+    const alternativas = (par.alternativas_por && par.alternativas_por[plat]
+                          || []).length
+      ? 'ojo, también existe: ' + par.alternativas_por[plat].join(' · ')
+      : (plat === plats[plats.length - 1] && !par.alternativas_por
+         && (par.alternativas || []).length
+           ? 'ojo, también existe: ' + par.alternativas.join(' · ') : '');
+
+    let casilla = null;
+    if (!vinculado && nombres[plat] && plats.length > 1) {
+      const punto = (par.confianzas || {})[plat];
+      const pide = (par.exigido || {})[plat];
+      // Sin confianza es la primera columna del grupo: no se emparejó con
+      // nadie, es contra la que se emparejaron las demás.
+      const segura = punto === undefined || pide === undefined || punto >= pide;
+      casilla = document.createElement('input');
+      casilla.type = 'checkbox';
+      casilla.checked = segura;
+      casilla.dataset.plat = plat;
+      casilla.title = segura
+        ? `Vincular también ${NOMBRE_PLAT[plat]}`
+        : `Se parece (${punto}), pero no lo suficiente para darlo por ` +
+          `hecho entre dos tiendas del mismo portal. Tildalo solo si sabés ` +
+          `que es el mismo plato.`;
+      if (segura) elegidas.add(plat);
+      casilla.onchange = () => {
+        casilla.checked ? elegidas.add(plat) : elegidas.delete(plat);
+        refrescar();
+      };
+      casillas[plat] = casilla;
+    }
+
+    div.append(lado(plat, nombres[plat], alternativas, casilla));
+  }
 
   const acc = document.createElement('div');
   acc.className = 'acciones';
@@ -1800,21 +1952,43 @@ function filaPar(par) {
   conf.textContent = par.confianza != null ? par.confianza.toFixed(2) : '';
   acc.appendChild(conf);
 
+  function refrescar() {
+    const b = acc.querySelector('button.on');
+    if (!b) return;
+    b.disabled = elegidas.size < 2;
+    b.title = elegidas.size < 2
+      ? 'Elegí al menos dos portales'
+      : 'Que se apaguen con el mismo botón: ' +
+        [...elegidas].map(p => NOMBRE_PLAT[p]).join(' y ');
+  }
+
   if (vinculado) {
-    const b = document.createElement('button');
-    b.textContent = 'Separar';
-    b.title = `Dejar "${par.pedidosya}" y "${par.rappi}" como dos productos`;
-    b.onclick = () => accionCarta('/api/separar',
-                                  { producto_id: pPy.id, plataforma: 'rappi' }, b);
-    acc.append(etiquetaHecho('un solo botón'), b);
+    acc.appendChild(etiquetaHecho('un solo botón'));
+    // Con dos portales alcanza un botón: separar cualquiera de los dos deja
+    // lo mismo. Con tres hay que decir CUÁL se va, y ahí "Separar" a secas
+    // no alcanza — además de que dos botones con el mismo texto no se
+    // pueden ni clickear sin ambigüedad.
+    const separables = plats.length > 2 ? plats : [plats[plats.length - 1]];
+    for (const plat of separables) {
+      const b = document.createElement('button');
+      b.textContent = plats.length > 2 ? `Separar ${NOMBRE_PLAT[plat]}` : 'Separar';
+      b.title = `Que "${nombres[plat]}" pase a tener su propio botón`;
+      b.onclick = () => accionCarta('/api/separar',
+                                    { producto_id: productos[0].id,
+                                      plataforma: plat }, b);
+      acc.appendChild(b);
+    }
   } else {
     const b = document.createElement('button');
     b.className = 'on';
     b.textContent = 'Vincular';
-    b.title = 'Que los dos se apaguen con el mismo botón';
-    b.onclick = () => accionCarta('/api/vincular',
-                                  { pedidosya: par.pedidosya, rappi: par.rappi }, b);
+    b.onclick = () => {
+      const elegido = {};
+      for (const plat of elegidas) elegido[plat] = nombres[plat];
+      accionCarta('/api/vincular', { nombres: elegido }, b);
+    };
     acc.appendChild(b);
+    refrescar();
   }
 
   div.appendChild(acc);
@@ -1824,9 +1998,12 @@ function filaPar(par) {
 function filaSuelto(plataforma, nombre) {
   const div = document.createElement('div');
   div.className = 'par';
-  const otra = plataforma === 'rappi' ? 'pedidosya' : 'rappi';
+  columnasDeLaFila(div);
 
-  div.append(lado(plataforma, nombre), lado(otra, null));
+  div.appendChild(lado(plataforma, nombre));
+  for (const otra of platsCarta()) {
+    if (otra !== plataforma) div.appendChild(lado(otra, null));
+  }
 
   const acc = document.createElement('div');
   acc.className = 'acciones';

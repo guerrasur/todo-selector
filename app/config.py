@@ -184,14 +184,15 @@ OPCIONES = (
     ),
     Opcion(
         clave="rappi_store_id",
-        titulo="storeId de Rappi",
+        titulo="storeId de Rappi (Turbo)",
         defecto="",
         tipo="texto",
         grupo="Sucursal",
-        ayuda="La tienda sobre la que opera la app, de la misma URL "
-              "(storeId=<esto>). Si tenés varias y una es la «Turbo», "
-              "normalmente alcanza con esa: apagando ahí se apaga también "
-              "en la normal. Conviene confirmarlo en tu caso.",
+        ayuda="La tienda principal de Rappi, de la misma URL "
+              "(storeId=<esto>). Si tenés más de una, esta es la que la app "
+              "usa siempre; la otra se carga abajo, en «Rappi Común». OJO: "
+              "son tiendas independientes y NO comparten la carta — apagar "
+              "en una no apaga en la otra.",
     ),
     # Grupo aparte y NO "Sucursal" a propósito: ese grupo es el que la
     # pantalla de primer arranque exige completar entero antes de dejar
@@ -205,16 +206,16 @@ OPCIONES = (
         tipo="texto",
         grupo="Rappi Común",
         opcional=True,
-        ayuda="INCOMPLETO, dejalo vacío salvo que sepas lo que estás "
-              "haciendo. Vacío = la app no la toca: no le abre pestaña, no "
-              "aparece en la pantalla y no le encola nada. Si lo llenás, "
-              "Rappi Común pasa a ser una tercera plataforma (tienda aparte "
-              "de Rappi Turbo: apagar en una no apaga en la otra; mismo "
-              "brandId, storeId distinto, sale de la URL del menú de esa "
-              "tienda). Lo que le falta: la pantalla «Carta» sigue leyendo "
-              "solo PedidosYa y Rappi, así que enganchar tu catálogo a esta "
-              "tercera depende del aviso de «novedad», que solo salta si el "
-              "nombre es casi idéntico al que ya tenés cargado.",
+        ayuda="Solo si tu local vende también por la tienda Rappi «común», "
+              "aparte de la Turbo. Vacío = la app no la toca: no le abre "
+              "pestaña, no aparece en la pantalla y no le encola nada. Si "
+              "lo llenás, pasa a ser una tercera plataforma con su propio "
+              "chip y su propio botón (mismo brandId, storeId distinto, "
+              "sale de la URL del menú de esa tienda). Son tiendas "
+              "INDEPENDIENTES y su carta no es la misma: apagar en una no "
+              "apaga en la otra, así que hay que decirle en la pantalla "
+              "Carta qué producto de una es cuál de la otra. Después, un "
+              "solo botón apaga las dos.",
     ),
 )
 

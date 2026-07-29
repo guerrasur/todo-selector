@@ -317,6 +317,11 @@ def alertas(db: Session = Depends(get_db)):
     return {
         "sesiones_caidas": [p for p, ok in worker.sesion_ok.items() if ok is False],
         "sin_confirmar": salida,
+        # Apagado en una tienda de Rappi y prendido en la hermana. Es el
+        # mismo tipo de problema que el de arriba —algo que se sigue
+        # vendiendo cuando creias que no— pero por otro camino: acá la app
+        # SÍ lo está viendo, y justamente por eso lo puede decir.
+        "sin_espejo": catalogo.desparejos(db, config.plataformas_activas()),
     }
 
 
@@ -467,10 +472,23 @@ def historial(limite: int = 50, db: Session = Depends(get_db)):
 
 
 class VincularIn(BaseModel):
-    pedidosya: str                   # nombre tal cual figura en ese portal
-    rappi: str
+    # El par de siempre. Se pueden mandar así, o en `nombres`, que acepta
+    # cualquier combinación de plataformas: la pantalla de asociación manda
+    # las tres cuando el local tiene las dos tiendas de Rappi.
+    pedidosya: str | None = None     # nombre tal cual figura en ese portal
+    rappi: str | None = None
+    nombres: dict[str, str] | None = None
     nombre: str | None = None        # canonico, si querés uno distinto
     categoria: str = ""
+
+    def todos(self) -> dict:
+        """Las plataformas a vincular, vengan como vengan."""
+        junto = dict(self.nombres or {})
+        if self.pedidosya:
+            junto.setdefault("pedidosya", self.pedidosya)
+        if self.rappi:
+            junto.setdefault("rappi", self.rappi)
+        return {plat: remoto for plat, remoto in junto.items() if remoto}
 
 
 class SepararIn(BaseModel):
@@ -496,23 +514,30 @@ def _ver_producto(p) -> dict:
 
 @app.post("/api/vincular")
 def vincular(data: VincularIn, db: Session = Depends(get_db)):
-    """Los dos nombres pasan a ser el mismo producto: un solo botón.
+    """Esos nombres pasan a ser el mismo producto: un solo botón.
 
     Es la respuesta a "dejame linkear opciones al mismo botón de apagado".
-    Fusiona si ya estaban cargados por separado.
+    Fusiona si ya estaban cargados por separado. Acepta dos plataformas o
+    las que sean: con las dos tiendas de Rappi son tres.
     """
+    nombres = data.todos()
+
+    desconocidas = [p for p in nombres if p not in config.plataformas_activas()]
+    if desconocidas:
+        raise HTTPException(400, f"{desconocidas[0]} no está activa en esta "
+                                 f"instalación")
     try:
-        producto = catalogo.vincular(db, data.pedidosya, data.rappi,
-                                     nombre=data.nombre, categoria=data.categoria)
+        producto = catalogo.vincular_varios(db, nombres, nombre=data.nombre,
+                                            categoria=data.categoria)
     except ValueError as e:
         raise HTTPException(400, str(e))
     db.commit()
 
     # Si esto venía de un aviso, ya está resuelto: que no siga apareciendo.
+    vinculados = set(nombres.values())
     for plataforma, lista in worker.novedades.items():
         worker.novedades[plataforma] = [
-            n for n in lista
-            if n["nombre_en_el_portal"] not in (data.pedidosya, data.rappi)
+            n for n in lista if n["nombre_en_el_portal"] not in vinculados
         ]
 
     return {"ok": True, "producto": _ver_producto(producto)}

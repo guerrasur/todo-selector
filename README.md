@@ -193,7 +193,7 @@ y el cartel rojo de arriba te dice en cuál hay que loguearse.
 ## Apagar todo (el botón de cierre)
 
 El botón **Apagar todo** de arriba abre un panel con **un juego de botones por
-portal**:
+destino**:
 
 | | |
 |---|---|
@@ -204,6 +204,21 @@ portal**:
 Que estén separados es el punto: a veces **PedidosYa tiene que apagarse antes
 que Rappi**. Apretás PedidosYa, y cuando quieras, Rappi. La cola respeta el
 orden en que apretaste.
+
+Con la **tienda Rappi Común** configurada (ver Ajustes) son cinco, porque son
+tres tiendas y no dos:
+
+| | |
+|---|---|
+| **PedidosYa** | Apagar todo · Prender todo |
+| **Rappi Turbo** | Apagar todo · Prender todo |
+| **Rappi Común** | Apagar todo · Prender todo |
+| **Ambos Rappi** | Apagar todo · Prender todo |
+| **Todas** | Apagar todo · Prender todo |
+
+«Ambos Rappi» es el de todos los días: las dos tiendas de Rappi cierran juntas
+y PedidosYa no siempre. Y «Rappi» pasa a llamarse **Rappi Turbo** en toda la
+pantalla: con dos tiendas, un botón que dice «Rappi» a secas no dice cuál.
 
 Antes de encolar nada dice cuántos productos va a tocar cada portal, y pide
 confirmación: apagar la carta entera es de las pocas cosas de esta app que no se
@@ -235,6 +250,7 @@ que sin tocar nada se comporta igual que siempre.
 | **Apagar todo** | Si el cierre apaga *por hoy* o *indefinido*; si relee el portal antes; si incluye los pausados; si "Prender todo" toca lo apagado desde afuera. |
 | **Ritmo** | Cada cuántos minutos se releen las cartas (0 = nunca); si se vuelve a apagar lo que el portal revive; a los cuántos segundos se confirma un apagado; cuándo se considera vieja la pestaña; reintentos por operación; cada cuánto se repinta la pantalla. |
 | **Sucursal** | El **id de menú de PedidosYa** y el **storeId / brandId de Rappi**. Estaban clavados en el código: hasta que fueran configurables, "sirve para otro local" estaba a medias. |
+| **Rappi Común** | El **storeId de la segunda tienda de Rappi**, si tu local tiene una. Vacío (el default) = la app ni la nombra. Ver «Las dos tiendas de Rappi». |
 
 Cambiar de sucursal **no pide reiniciar**: las pestañas se enteran y navegan
 solas al menú nuevo en la próxima operación.
@@ -329,6 +345,38 @@ no lo reencola nunca más. Los botones le siguen funcionando, y el estado se le
 sigue leyendo — eso sale gratis, porque la lectura trae la carta entera igual.
 
 Sirve para que lo que no se toca no estorbe arriba. **Reactivar** lo devuelve.
+
+## Las dos tiendas de Rappi (Turbo y Común)
+
+Un local puede vender por **dos tiendas de Rappi**: la «Turbo» y la común. Son
+tiendas **independientes** del mismo portal y del mismo login:
+
+- apagar un producto en una **no** lo apaga en la otra;
+- **no tienen la misma carta**: hay platos que están en una y no en la otra, y
+  el mismo plato puede estar escrito distinto en cada una.
+
+Por defecto la app usa una sola. Si cargás el **storeId de Rappi Común** en
+Ajustes, pasa a ser una tercera plataforma completa: su pestaña, su chip en
+cada producto, su columna en la pantalla Carta, su fila en «Apagar todo», su
+cola y su reverificación. Con el ajuste vacío no se nota en ningún lado.
+
+**Cómo se engancha tu carta.** Una vez, en la pantalla **Carta**: la app lee
+las tres cartas, propone qué producto de una tienda es cuál de la otra, y vos
+confirmás. Eso queda guardado. **Desde ese momento un solo botón apaga las dos
+tiendas**, porque son el mismo producto de la app.
+
+**Lo que la app no hace, a propósito:** apagar en la otra tienda algo que
+todavía no confirmaste. Entre dos tiendas del mismo portal los nombres se
+parecen muchísimo —"Empanada de carne" y "Empanada de carne chica" puntúan
+0.91— y emparejar de más significa **apagar un plato que se sigue vendiendo**.
+Por eso ahí el listón es más alto que entre PedidosYa y Rappi (0.95 contra
+0.82): lo que no llega queda propuesto, con la casilla destildada, para que lo
+decidas vos.
+
+**Si algo queda apagado en una tienda y prendido en la otra**, sale un cartel
+rojo arriba de todo con el nombre y en cuál quedó prendido. Es el único caso
+que la app puede afirmar sin adivinar: las dos están vinculadas, las dos se
+leyeron, y no coinciden.
 
 ## La pantalla Carta
 
@@ -450,9 +498,12 @@ pruebas/                  # corren sin tocar los portales, ver pruebas/LEEME.md
 Un producto tiene un **nombre canónico** (el que ves en la UI) y opcionalmente
 un **alias por plataforma**, porque en Rappi algunos difieren:
 
-| Canónico       | PedidosYa      | Rappi                    |
-|----------------|----------------|--------------------------|
-| Ensalada mixta | Ensalada mixta | Ensalada mixta de hojas  |
+| Canónico       | PedidosYa      | Rappi Turbo              | Rappi Común             |
+|----------------|----------------|--------------------------|-------------------------|
+| Ensalada mixta | Ensalada mixta | Ensalada mixta de hojas  | Ensalada mixta de hojas |
+
+Las plataformas son las que **esta instalación** usa (`config.plataformas_activas()`),
+no una lista fija: con la tienda Rappi Común sin configurar son dos columnas.
 
 Si no hay alias cargado, se usa el nombre canónico en ambas.
 
@@ -462,6 +513,7 @@ chip gris "—" en la otra). Eso se cambia desde la pantalla Carta, o por API:
 
 ```
 POST /api/vincular   {"pedidosya": "Agua sin gas 500 ml", "rappi": "Agua mineral 500 ml"}
+POST /api/vincular   {"nombres": {"pedidosya": "...", "rappi": "...", "rappi_comun": "..."}}
 POST /api/separar    {"producto_id": 12, "plataforma": "rappi"}
 POST /api/agregar    {"plataforma": "rappi", "nombre_remoto": "Wok de vegetales"}
 GET  /api/catalogo   qué nombre tiene cada producto en cada portal
@@ -475,7 +527,9 @@ GET  /api/masivo/previo?accion=apagar_hoy    cuántos tocaría cada portal
 GET  /api/config          los ajustes con su definición y su valor actual
 POST /api/config          {"cambios": {"minutos_ronda": 30}}
 POST /api/config/restablecer
-GET  /api/alertas         lo que la app da por apagado y no puede confirmar
+GET  /api/alertas         lo que la app da por apagado y no puede confirmar,
+                          y lo que quedó apagado en una tienda de Rappi y
+                          prendido en la otra (`sin_espejo`)
 ```
 
 `/api/masivo` acepta además `releer`, `incluir_pausados` y `solo_propios` para
@@ -538,11 +592,12 @@ reintento lo encontró prendido).
 URL: `https://partners.rappi.com/menu?brandId=<tu-brand>&storeIds=<tu-tienda>`
 (los dos salen de Ajustes; ver «Primera vez»)
 
-**La app opera sobre UNA tienda**, la que digas en Ajustes. En algunos casos
-alcanza con una sola porque apagar en la tienda «Turbo» apaga también en la
-normal — pero eso no tiene por qué valer en todos lados. Si en el tuyo las
-tiendas son independientes, hay que iterar cambiando `storeId` en la URL (ver
-el pendiente de abajo).
+**Una instancia de la clase = UNA tienda.** Si tu local tiene las dos tiendas
+de Rappi, el worker abre **dos pestañas** con dos `storeId` distintos (ver
+«Las dos tiendas de Rappi»), y no una sola que va cambiando el `storeId` en la
+URL: así cada tienda tiene su lock, su sesión y su estado, y la lectura de una
+no pisa la de la otra. Son tiendas independientes y su carta **no** es la
+misma.
 
 - [x] `_tarjeta()`: sin el HTML completo de la tarjeta, se resolvió subiendo
       desde el nombre hasta el primer ancestro que también contiene el
@@ -593,6 +648,15 @@ sigue vale igual, porque el problema es de los nombres, no de dónde salen.
 - **Un producto puede existir en un portal y en el otro no.** La UI lo muestra
   con un chip gris "—" en el que falta. Si un día aparece en el otro, la app
   avisa (ver «Cuando agregás un producto a la carta de un portal»).
+- **Entre las dos tiendas de Rappi el mismo parecido significa otra cosa.**
+  Las dos se cargan desde el mismo panel, así que el mismo plato suele estar
+  escrito **igual**: una diferencia de texto es más probable que sea otro
+  plato y no la misma cosa dicha distinto. Por eso ahí se exige 0.95 y no
+  0.82. La trampa concreta: "Empanada de carne" contra "Empanada de carne
+  chica" puntúa 0.91 — entre PedidosYa y Rappi eso se empareja solo y está
+  bien; entre las dos tiendas de Rappi sería apagar la grande creyendo que
+  apagás la chica, y con el agravante de que la carta de la segunda tienda se
+  mira mucho menos.
 
 ### Las categorías no coinciden
 
@@ -614,23 +678,13 @@ carta entera hay que recorrerlas (ver el punto 0).
       PedidosYa y el `brandId`/`storeId` de Rappi salen de Ajustes (cambiarlos
       no pide reiniciar la app), y `app/seed.py` quedó vacío — una instalación
       nueva arranca sin catálogo y lee el suyo. Ver «Primera vez».
-- [ ] **Rappi Común, además de Rappi Turbo. A MEDIO HACER: viene APAGADA.**
-      Son tiendas independientes (apagar en una no apaga en la otra). El
-      andamiaje está: `rappi_comun_store_id` en Ajustes (grupo «Rappi
-      Común») le abre una tercera pestaña con el mismo `brandId` y otro
-      `storeId`, y de ahí para adelante es una plataforma como las otras
-      (chip propio, fila propia en «Apagar todo», cola, reverificación).
-      **Vacío —el default— es como si no existiera:** no se le abre
-      pestaña, no aparece en la pantalla, no se le encola nada y la API la
-      rechaza. Prenderla y apagarla no pide reiniciar.
-
-      Lo que le falta para darla por hecha: **la pantalla «Carta» sigue
-      leyendo solo PedidosYa y Rappi**, que es donde se vinculan los
-      nombres. Enganchar tu catálogo a esta tercera depende del aviso de
-      «novedad», que solo salta si el nombre es casi idéntico (0.95) al que
-      ya tenés cargado; si en Rappi Común el plato se llama distinto, hoy
-      no hay forma de vincularlo desde la pantalla. Por eso queda
-      destildado: el que la prenda tiene que saber esto.
+- [x] **Rappi Común, además de Rappi Turbo.** Hecho (2026-07-29). Es una
+      tercera plataforma opcional: se prende cargando `rappi_comun_store_id`
+      en Ajustes y de ahí para adelante es una plataforma como las otras
+      (pestaña propia, chip propio, fila propia en «Apagar todo», cola y
+      reverificación). **Vacío —el default— es como si no existiera.**
+      La pantalla Carta lee las tres y deja vincular las tres, que era lo
+      que le faltaba. Ver «Las dos tiendas de Rappi».
 
 ## Nota sobre términos de servicio
 
