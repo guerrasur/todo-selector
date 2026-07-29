@@ -211,8 +211,8 @@ solas al menú nuevo en la próxima operación.
 
 Arriba de la lista hay un campo de búsqueda. Filtra a medida que escribís y
 busca **por el nombre de los dos portales**, no solo por el que ves: buscando
-`villavicencio` aparece "Agua con gas". Ignora tildes y mayúsculas, así que
-`clasica` encuentra "Clásica".
+`manantial` aparece "Agua chica". Ignora tildes y mayúsculas, así que
+`budin` encuentra "Budín de pan".
 
 La cruz (o la tecla `Esc`) borra la búsqueda y vuelve la lista completa.
 
@@ -460,7 +460,7 @@ Con Chrome abierto en los dos portales, hay que:
 Se recorren las categorías (`wk-menu-list wk-menu-list-category-item`) y se
 recuerda en cuál apareció cada producto. Confirmado en vivo el 2026-07-27:
 `/api/carta` leyó los 29 productos de las 3 categorías, y op#17 encontró
-"Brie" en "Ensaladas".
+un producto en la categoría que no estaba abierta.
 
 **Cuidado con una trampa que ya mordió:** el fallback JS de `clickear()` no
 sirve tal cual para las categorías. El listener no está en el custom element
@@ -555,8 +555,8 @@ sigue vale igual, porque el problema es de los nombres, no de dónde salen.
   lo dudoso queda **separado** en la pantalla Carta, con un botón cada uno, y
   lo vincula el usuario. Un emparejado automático de más significa apagar un
   plato que se sigue vendiendo.
-- **`con` y `sin` no son ruido.** Son lo único que distingue "Agua con gas" de
-  "Agua sin gas".
+- **`con` y `sin` no son ruido.** Son lo único que distingue "Agua chica con
+  gas" de "Agua chica".
 - **Un producto puede existir en un portal y en el otro no.** La UI lo muestra
   con un chip gris "—" en el que falta. Si un día aparece en el otro, la app
   avisa (ver «Cuando agregás un producto a la carta de un portal»).

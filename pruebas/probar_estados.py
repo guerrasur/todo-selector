@@ -76,7 +76,7 @@ def apagado_que_no_se_puede_confirmar(db):
         p = db.query(Producto).filter_by(nombre=nombre).first()
         return next(e for e in p.estados if e.plataforma == "rappi").verificado_en
 
-    antes_cobb, antes_brie = sellado("Flan casero"), sellado("Budín de pan")
+    antes_flan, antes_budin = sellado("Flan casero"), sellado("Budín de pan")
 
     # El portal devuelve a Budín de pan pero NO a Flan casero: es el caso del wrap.
     leido = {"Budín de pan": False}
@@ -92,9 +92,9 @@ def apagado_que_no_se_puede_confirmar(db):
 
     # Lo que lo delata es verificado_en: al que no se vio no se le toca, asi
     # que la hora se queda vieja y la pantalla puede decir "no lo confirmo".
-    revisar(sellado("Flan casero") == antes_cobb,
+    revisar(sellado("Flan casero") == antes_flan,
             "al que el portal no mostro NO se le actualiza la hora")
-    revisar(sellado("Budín de pan") != antes_brie and sellado("Budín de pan") is not None,
+    revisar(sellado("Budín de pan") != antes_budin and sellado("Budín de pan") is not None,
             "y al que si mostro se le sella la hora de ahora")
 
     # El dato que la pantalla necesita para poder avisar.
@@ -176,17 +176,16 @@ def novedades(db):
                 n["rappi"] == "Locro del sábado",
                 "arma bien los dos nombres para vincular")
 
-    # Lo que NO tiene que avisar: el tarta de verdura. "Tarta de verdura chica"
-    # esta solo en PedidosYa, y en Rappi hay "con ensalada" y "con papas",
-    # que el usuario confirmo que son platos distintos. Da 0.91: alto, pero
-    # no identico.
+    # Lo que NO tiene que avisar: la "Tarta de verdura chica" esta solo en
+    # PedidosYa, y en Rappi hay una "individual" y una "porción", que son
+    # platos distintos. Puntuan alto, pero no identico.
     leido_rappi = {
         "Tarta de verdura individual": True,
         "Tarta de verdura porción": True,
     }
     encontradas = catalogo.detectar_novedades(db, "rappi", leido_rappi)
     revisar(not any(n["producto"] == "Tarta de verdura chica" for n in encontradas),
-            "NO propone vincular el tarta de verdura con la version 'con ensalada'")
+            "NO propone vincular la tarta chica con la version individual")
 
     # Y los ~18 de Rappi que el usuario decidio no cargar tampoco son aviso.
     encontradas = catalogo.detectar_novedades(

@@ -30,9 +30,9 @@ UMBRAL_PROPUESTA = 0.55
 
 # Palabras que no distinguen un producto de otro y solo ensucian la
 # comparacion: un portal escribe "Ensalada mixta" y el otro "Mixta".
-# OJO: "con" y "sin" NO van aca. Son lo unico que distingue "Agua con gas"
-# de "Agua sin gas", y sacarlas hacia que una gaseosa comun emparejara con
-# la version sin azucar.
+# OJO: "con" y "sin" NO van aca. Son lo unico que distingue "Agua chica
+# con gas" de "Agua chica", y sacarlas hacia que una gaseosa comun
+# emparejara con la version sin azucar.
 RUIDO = {
     "ensalada", "el", "la", "los", "las", "de", "del", "y",
     "ml", "cc", "gr", "g", "kg", "l", "lt",
@@ -97,7 +97,7 @@ class Emparejamiento:
     confianza: float = 0.0
     # Otros candidatos de Rappi que puntuaron parecido. Si hay mas de uno,
     # la decision es del usuario: pasa "Tarta de verdura chica", que en
-    # Rappi tiene "con papas" y "con ensalada".
+    # Rappi tiene una "individual" y una "porción".
     alternativas: list[str] = field(default_factory=list)
 
     @property
