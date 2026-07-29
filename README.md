@@ -41,12 +41,13 @@ funcionar en cualquier momento si Rappi o PedidosYa cambian su sitio.
 
 ## Estado: EN USO
 
-Las cuatro operaciones corrieron en vivo contra los dos portales.
+Las cuatro operaciones (leer, apagar, prender en cada portal) fueron
+confirmadas en vivo contra los dos portales.
 
 | | leer la carta | apagar | prender |
 |---|---|---|---|
-| **PedidosYa** | ✅ la carta entera, recorriendo las categorías | ✅ | ✅ (op#17, 2026-07-27) |
-| **Rappi** | ✅ la carta entera | ✅ | ✅ (op#18, 2026-07-27) |
+| **PedidosYa** | ✅ la carta entera, recorriendo las categorías | ✅ | ✅ |
+| **Rappi** | ✅ la carta entera | ✅ | ✅ |
 
 Queda un `TODO-SELECTOR` en `plataformas/rappi.py`: falta el HTML completo de
 la tarjeta y el selector de la pantalla de sesión expirada.
@@ -158,18 +159,15 @@ botón, la acción salía a los dos portales sin decir nada.
 
 ## Cuando la app no puede confirmar un apagado
 
-El 2026-07-28 pasó lo peor que puede pasar: la pantalla decía **apagado** y
-media hora después entró un pedido de PedidosYa con ese producto.
-
 El mecanismo: si la lectura de la carta **no encuentra** un producto —porque el
 nombre del catálogo no coincide con el del portal, o porque no se pudo abrir la
 categoría— la app *no pisa* el estado que tenía. Eso está bien (una lectura mala
-no debería borrar lo que sabíamos), pero el efecto era que un `apagado` viejo
-quedaba **congelado** y la pantalla lo seguía afirmando en presente, sin nada
-que lo delatara.
+no debería borrar lo que sabíamos), pero el efecto es que un `apagado` viejo
+puede quedar **congelado** y la pantalla lo sigue afirmando en presente, sin nada
+que lo delate.
 
 La app no puede prometer que el portal no reviva algo por su cuenta. Lo que sí
-puede es **dejar de afirmar lo que no está viendo**. Ahora:
+puede es **dejar de afirmar lo que no está viendo**. Por eso:
 
 - un producto que figura apagado y que la última lectura **no encontró** en el
   portal aparece marcado en rojo, con el nombre exacto con el que lo estaba
@@ -245,8 +243,8 @@ solas al menú nuevo en la próxima operación.
 
 Arriba de la lista hay un campo de búsqueda. Filtra a medida que escribís y
 busca **por el nombre de los dos portales**, no solo por el que ves: buscando
-`manantial` aparece "Agua chica". Ignora tildes y mayúsculas, así que
-`budin` encuentra "Budín de pan".
+`gaseosa` aparece "Coca-Cola 500 ml". Ignora tildes y mayúsculas, así que
+`bondiola` encuentra "Bondiola al malbec".
 
 La cruz (o la tecla `Esc`) borra la búsqueda y vuelve la lista completa.
 
@@ -268,7 +266,7 @@ En las dos vistas por estado aparece un grupo del medio, **Sin confirmar**,
 con lo que la app no puede asegurar que esté apagado: lo que la última lectura
 no encontró en el portal, lo que falló, lo que todavía no se leyó y lo que
 está en curso. Ese grupo **no se esconde ni siquiera en "solo los prendidos"**,
-porque es justo el que puede estar vendiéndose — es el caso del 2026-07-28.
+porque es justo el que puede estar vendiéndose sin que la pantalla lo avise.
 Y cuando la vista esconde apagados, dice cuántos: esconder cosas sin decir
 cuántas es como se llega a creer que la carta está más prendida de lo que está.
 
@@ -307,16 +305,16 @@ se lo pidiera.
 Si un producto del catálogo figuraba como "no existe en PedidosYa" y el portal
 ahora lo muestra, la app lo detecta en la lectura del estado y avisa arriba:
 
-> **Locro del sabado** ahora también está en PedidosYa como
-> **Locro del sábado** — [Es el mismo] [No, es otro]
+> **Milanesa napolitana** ahora también está en PedidosYa como
+> **Milanesa a la napolitana** — [Es el mismo] [No, es otro]
 
 "Es el mismo" lo engancha con el nombre exacto del portal (las tildes salen de
 ahí, que es lo que necesita `exact=True`). "No, es otro" no vuelve a avisar.
 
 El aviso es **conservador a propósito**: solo aparece cuando el nombre es el
 mismo salvo tildes o mayúsculas, y solo para productos que ya están en el
-catálogo. Con un umbral más flojo propondría vincular "Tarta de verdura
-chica" con "Tarta de verdura porción", que son platos distintos. Lo dudoso
+catálogo. Con un umbral más flojo propondría vincular "Empanada de carne
+chica" con "Empanada de carne porción", que son platos distintos. Lo dudoso
 se decide en la pantalla Carta, con todo a la vista.
 
 Un producto **completamente nuevo** (que no está en el catálogo en ninguna
@@ -361,12 +359,12 @@ seguro), **emparejados solos**, y los que están **solo en un portal**.
 **Renombrar:** el nombre que ves en la pantalla es solo tuyo — los portales se
 buscan por los alias. Se cambia clickeándolo. Sirve cuando dos productos se
 llamaban igual y hubo que desempatarlos: el que se separa queda como
-"Tarta de verdura (PedidosYa)".
+"Empanada de carne (PedidosYa)".
 
 El criterio es que **si no está claro que sea el mismo plato, van separados**,
 y vincularlos es una decisión explícita tuya. Cuando la app no está segura
 avisa qué otro producto parecido existe en el otro portal — que es justo el
-caso de la "Tarta de verdura chica", que en Rappi tiene dos candidatos.
+caso de la "Empanada de carne chica", que en Rappi tiene dos candidatos.
 
 **Importante:** en cuanto vinculás o separás algo, el catálogo pasa a
 manejarse desde la app y `app/seed.py` deja de pisar los nombres en cada
@@ -383,8 +381,8 @@ que una mayúscula o un guión de diferencia y no encuentra nada. Para verlo,
 con la app corriendo, pegá en el navegador:
 
 ```
-http://127.0.0.1:8001/api/buscar-texto?plataforma=rappi&fragmento=Tarta
-http://127.0.0.1:8001/api/diagnostico?plataforma=pedidosya&nombre=Tarta%20de%20verdura
+http://127.0.0.1:8001/api/buscar-texto?plataforma=rappi&fragmento=Empanada
+http://127.0.0.1:8001/api/diagnostico?plataforma=pedidosya&nombre=Empanada%20de%20carne
 ```
 
 - **`buscar-texto`** devuelve todos los textos del portal que contienen el
@@ -442,7 +440,7 @@ plataformas/
   base.py                 # contrato: 4 métodos por plataforma
   pedidosya.py            # confirmado en vivo
   rappi.py                # TODO-SELECTOR (tarjeta y sesión expirada)
-static/index.html         # UI
+static/index.html          # UI
 todo2.ico                 # icono: pestaña del navegador y acceso directo
 pruebas/                  # corren sin tocar los portales, ver pruebas/LEEME.md
 ```
@@ -463,7 +461,7 @@ solo botón; uno con alias en una sola existe solo ahí** (la UI le muestra el
 chip gris "—" en la otra). Eso se cambia desde la pantalla Carta, o por API:
 
 ```
-POST /api/vincular   {"pedidosya": "Agua chica", "rappi": "Manantial sin gas 500 ml"}
+POST /api/vincular   {"pedidosya": "Agua sin gas 500 ml", "rappi": "Agua mineral 500 ml"}
 POST /api/separar    {"producto_id": 12, "plataforma": "rappi"}
 POST /api/agregar    {"plataforma": "rappi", "nombre_remoto": "Wok de vegetales"}
 GET  /api/catalogo   qué nombre tiene cada producto en cada portal
@@ -492,9 +490,9 @@ Con Chrome abierto en los dos portales, hay que:
 ## 0. PedidosYa solo expone una categoría a la vez  ← RESUELTO
 
 Se recorren las categorías (`wk-menu-list wk-menu-list-category-item`) y se
-recuerda en cuál apareció cada producto. Confirmado en vivo el 2026-07-27:
-`/api/carta` leyó los 29 productos de las 3 categorías, y op#17 encontró
-un producto en la categoría que no estaba abierta.
+recuerda en cuál apareció cada producto. Confirmado en vivo: `/api/carta` leyó
+todos los productos de las categorías existentes, incluyendo un producto que
+estaba en una categoría que no había sido abierta todavía.
 
 **Cuidado con una trampa que ya mordió:** el fallback JS de `clickear()` no
 sirve tal cual para las categorías. El listener no está en el custom element
@@ -510,18 +508,18 @@ URL: `https://web-ar.us.restaurant-partners.com/menus/PY_AR/<tu-id-de-menú>`
 
 - [x] `_fila()`: confirmado, es el `<label class="mat-slide-toggle-label">`
       de Angular Material (envuelve nombre + toggle). **Cuidado con los
-      nombres que son prefijo de otros** ("Tarta de verdura" vs "Tarta de
-      verdura chica") — por eso se usa `exact=True`.
+      nombres que son prefijo de otros** ("Empanada de carne" vs "Empanada de
+      carne chica") — por eso se usa `exact=True`.
 - [x] `leer_estado()`: confirmado, el toggle es un `<mat-slide-toggle>` con
       `aria-checked="true"/"false"` sobre el `<input>`.
 - [x] `asegurar_sesion()`: confirmado, PedidosYa no tiene pantalla de sesión
       expirada — se re-loguea solo. Se deja el chequeo de password como red
       de seguridad. El elemento que prueba que el menú cargó espera
       `input.mat-slide-toggle-input`.
-- [x] `prender()`: **confirmado en vivo** (op#17, 2026-07-27). No abre ningún
-      popup: el click sobre el toggle apagado lo prende y queda guardado. El
-      popup de dos opciones es solo del lado de apagar, porque ahí hay que
-      elegir "por hoy" o "indefinidamente".
+- [x] `prender()`: **confirmado en vivo**. No abre ningún popup: el click
+      sobre el toggle apagado lo prende y queda guardado. El popup de dos
+      opciones es solo del lado de apagar, porque ahí hay que elegir "por
+      hoy" o "indefinidamente".
 
 El popup de apagado ya está confirmado por captura: al clickear el toggle de
 un producto prendido aparece un único popup con "No disponible por hoy" y
@@ -532,18 +530,19 @@ con Rappi) rehace la preparación del arranque después del reload: cierra el
 popup de sonido —que vuelve en cada carga— y espera a que el menú exista.
 Dormir 4 segundos no alcanzaba: la relectura caía sobre la página tapada y en
 la primera categoría, no encontraba el producto, y daba por fallado un cambio
-que sí había entrado (op#17 dio "fallo" y el reintento lo encontró prendido).
+que sí había entrado (se detectó un caso donde la operación dio "fallo" y el
+reintento lo encontró prendido).
 
 ## 2. Rappi (`plataformas/rappi.py`)
 
 URL: `https://partners.rappi.com/menu?brandId=<tu-brand>&storeIds=<tu-tienda>`
 (los dos salen de Ajustes; ver «Primera vez»)
 
-**La app opera sobre UNA tienda**, la que digas en Ajustes. En el local para el
-que se escribió esto alcanzaba, porque apagar en la tienda «Turbo» apagaba
-también en la normal — pero eso no tiene por qué valer en todos lados. Si en el
-tuyo las tiendas son independientes, hay que iterar cambiando `storeId` en la
-URL (ver el pendiente de abajo).
+**La app opera sobre UNA tienda**, la que digas en Ajustes. En algunos casos
+alcanza con una sola porque apagar en la tienda «Turbo» apaga también en la
+normal — pero eso no tiene por qué valer en todos lados. Si en el tuyo las
+tiendas son independientes, hay que iterar cambiando `storeId` en la URL (ver
+el pendiente de abajo).
 
 - [x] `_tarjeta()`: sin el HTML completo de la tarjeta, se resolvió subiendo
       desde el nombre hasta el primer ancestro que también contiene el
@@ -574,8 +573,8 @@ sigue vale igual, porque el problema es de los nombres, no de dónde salen.
 
 ### Las trampas confirmadas
 
-- **Los nombres son prefijo de otros.** "Tarta de verdura" es prefijo de
-  "Tarta de verdura chica": buscar sin `exact=True` apaga el que no era. Ya
+- **Los nombres son prefijo de otros.** "Empanada de carne" es prefijo de
+  "Empanada de carne chica": buscar sin `exact=True` apaga el que no era. Ya
   pasó de verdad. Por eso todo se busca exacto.
 - **Las tildes cuentan.** Los nombres se buscan con `exact=True`, así que
   "Budin de pan" no encuentra a "Budín de pan". El nombre hay que copiarlo
@@ -589,8 +588,8 @@ sigue vale igual, porque el problema es de los nombres, no de dónde salen.
   lo dudoso queda **separado** en la pantalla Carta, con un botón cada uno, y
   lo vincula el usuario. Un emparejado automático de más significa apagar un
   plato que se sigue vendiendo.
-- **`con` y `sin` no son ruido.** Son lo único que distingue "Agua chica con
-  gas" de "Agua chica".
+- **`con` y `sin` no son ruido.** Son lo único que distingue "Agua con gas" de
+  "Agua sin gas".
 - **Un producto puede existir en un portal y en el otro no.** La UI lo muestra
   con un chip gris "—" en el que falta. Si un día aparece en el otro, la app
   avisa (ver «Cuando agregás un producto a la carta de un portal»).
@@ -623,4 +622,4 @@ carta entera hay que recorrerlas (ver el punto 0).
 
 Rappi y PedidosYa prohíben el acceso automatizado en sus términos. Esto
 automatiza lo que ya hacés a mano con tu propio login, pero la cuenta es del
-local y el riesgo existe. Vale tenerlo presente.
+local y el riesgo existe.
