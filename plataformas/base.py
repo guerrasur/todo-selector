@@ -29,6 +29,14 @@ class PlataformaBase(ABC):
         """page = pagina de Playwright dedicada a esta plataforma."""
         self.page = page
 
+    # AGREGADO (no toca el contrato de los 4 metodos): si faltan los datos
+    # de la sucursal, no hay a donde navegar. Sin esto la app abria una
+    # pestaña en una URL incompleta y despues decia "sesion caida", que le
+    # manda al usuario a loguearse cuando el problema era otro.
+    @property
+    def configurado(self) -> bool:
+        return True
+
     # ---------- Lo que hay que implementar ----------
 
     @abstractmethod
@@ -379,7 +387,7 @@ class PlataformaBase(ABC):
 
         Los nombres se buscan con exact=True, asi que una mayuscula o un
         guion de diferencia entre el catalogo y el portal hace que no se
-        encuentre nada. Buscando "Coca" con esto se ve como esta escrito
+        encuentre nada. Buscando un fragmento con esto se ve como esta escrito
         realmente el producto y se corrige el alias.
         """
         await self.ir_al_menu()

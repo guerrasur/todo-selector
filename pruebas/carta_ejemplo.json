@@ -1,0 +1,50 @@
+{
+  "_leeme": "Carta INVENTADA de un local que no existe. Es lo que devuelve /api/carta en modo simulado, para poder probar la pantalla Carta sin navegador y sin depender de estar en un local de verdad. Los nombres estan elegidos para reproducir las trampas reales del proyecto: prefijos ('Tarta de verdura' vs 'Tarta de verdura chica'), tildes, variantes que NO son el mismo plato, y productos cuyo nombre no se parece en nada de un portal al otro. Va de la mano de pruebas/catalogo_ejemplo.py.",
+  "total": 20,
+  "emparejados": 11,
+  "a_confirmar": [
+    {
+      "pedidosya": "Tarta de verdura chica",
+      "rappi": "Tarta de verdura individual",
+      "confianza": 0.714,
+      "alternativas": ["Tarta de verdura porción"]
+    },
+    {
+      "pedidosya": "Agua chica",
+      "rappi": "Manantial sin gas 500 ml",
+      "confianza": 0.421
+    },
+    {
+      "pedidosya": "Agua chica con gas",
+      "rappi": "Manantial con gas 500 ml",
+      "confianza": 0.444
+    }
+  ],
+  "solo_pedidosya": [
+    "Tostado de queso"
+  ],
+  "solo_rappi": [
+    "Tarta de verdura porción",
+    "Locro del sábado",
+    "Ñoquis del 29",
+    "Guiso de garbanzos",
+    "Wok de vegetales"
+  ],
+  "pares": [
+    { "pedidosya": "Tarta de verdura", "rappi": "Tarta de verdura", "confianza": 1.0 },
+    { "pedidosya": "Tarta de choclo", "rappi": "Tarta de choclo y queso", "confianza": 0.85 },
+    { "pedidosya": "Tarta de jamon y queso", "rappi": "Tarta de jamón y queso", "confianza": 0.98 },
+    { "pedidosya": "Empanada de carne", "rappi": "Empanada de carne", "confianza": 1.0 },
+    { "pedidosya": "Flan casero", "rappi": "Flan casero", "confianza": 1.0 },
+    { "pedidosya": "Budin de pan", "rappi": "Budín de pan", "confianza": 0.98 },
+    { "pedidosya": "Sopa del dia", "rappi": "Sopa del día", "confianza": 0.97 },
+    { "pedidosya": "Ensalada mixta", "rappi": "Ensalada mixta de hojas", "confianza": 0.82 },
+    { "pedidosya": "Milanesa con pure", "rappi": "Milanesa con puré", "confianza": 0.98 },
+    { "pedidosya": "Pollo al horno", "rappi": "Pollo al horno", "confianza": 1.0 },
+    { "pedidosya": "Gaseosa cola", "rappi": "Gaseosa cola 500 ml", "confianza": 0.8 }
+  ],
+  "leidos": {
+    "pedidosya": 15,
+    "rappi": 19
+  }
+}

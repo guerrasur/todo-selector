@@ -14,6 +14,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # OJO: tiene que estar ANTES de importar app.database, que resuelve la ruta
 # de la base al importarse.
@@ -22,9 +23,14 @@ os.environ["HOME"] = TEMPORAL
 os.environ["LOCALAPPDATA"] = TEMPORAL
 
 from app import catalogo, seed                                    # noqa: E402
+import catalogo_ejemplo                                   # noqa: E402
 from app.database import SessionLocal, init_db                    # noqa: E402
 from app.models import (Producto, AliasPlataforma, EstadoItem,    # noqa: E402
                         Operacion, HistorialCatalogo)
+
+# app/seed.py viene VACIO a proposito: una instalacion nueva no arranca
+# con la carta de otro local. Las pruebas siembran una carta inventada.
+catalogo_ejemplo.usar_catalogo()
 
 fallos = []
 
@@ -103,29 +109,32 @@ def base_recien_creada(db):
     limpiar(db)
     seed.sembrar()
 
-    revisar(remotos(db, "Wrap caesar con batatas") ==
-            {"pedidosya": "Wrap caesar con batatas", "rappi": None},
-            "'Wrap caesar con batatas' queda solo en PedidosYa")
+    revisar(remotos(db, "Tarta de verdura chica") ==
+            {"pedidosya": "Tarta de verdura chica", "rappi": None},
+            "'Tarta de verdura chica' queda solo en PedidosYa")
 
-    revisar(remotos(db, "Wrap caesar con ensalada") ==
-            {"pedidosya": None, "rappi": "Wrap caesar con ensalada"},
-            "'Wrap caesar con ensalada' queda solo en Rappi")
+    revisar(remotos(db, "Tarta de verdura individual") ==
+            {"pedidosya": None, "rappi": "Tarta de verdura individual"},
+            "'Tarta de verdura individual' queda solo en Rappi")
 
-    revisar(remotos(db, "Brie") ==
-            {"pedidosya": "Brie", "rappi": "Ensalada Brie"},
-            "'Brie' sigue vinculado a 'Ensalada Brie'")
+    # El canonico lleva tilde y en PedidosYa se llama sin ella: el alias
+    # tiene que quedar guardado tal cual lo escribe el portal, o el
+    # exact=True de la busqueda no lo encuentra nunca.
+    revisar(remotos(db, "Budín de pan") ==
+            {"pedidosya": "Budin de pan", "rappi": "Budín de pan"},
+            "'Budín de pan' guarda el nombre sin tilde que usa PedidosYa")
 
 
 def base_vieja_se_corrige(db):
     print("\n== Base ya sembrada con el mapeo viejo: el arranque lo corrige ==")
     limpiar(db)
 
-    # Asi estaba la base del usuario hasta hoy: los dos wraps vinculados.
-    p = Producto(nombre="Wrap caesar con batatas", categoria="Wraps")
+    # Una base ya sembrada con el mapeo viejo: las dos tartas vinculadas.
+    p = Producto(nombre="Tarta de verdura chica", categoria="Tartas")
     db.add(p)
     db.flush()
     db.add(AliasPlataforma(producto_id=p.id, plataforma="rappi",
-                           nombre_remoto="Wrap caesar con ensalada"))
+                           nombre_remoto="Tarta de verdura individual"))
     for plat in ("pedidosya", "rappi"):
         db.add(EstadoItem(producto_id=p.id, plataforma=plat,
                           estado=EstadoItem.APAGADO_HOY))
@@ -134,12 +143,12 @@ def base_vieja_se_corrige(db):
     seed.sembrar()
     db.expire_all()
 
-    revisar(remotos(db, "Wrap caesar con batatas") ==
-            {"pedidosya": "Wrap caesar con batatas", "rappi": None},
+    revisar(remotos(db, "Tarta de verdura chica") ==
+            {"pedidosya": "Tarta de verdura chica", "rappi": None},
             "se le saca el alias de Rappi al arrancar")
 
-    revisar(remotos(db, "Wrap caesar con ensalada") ==
-            {"pedidosya": None, "rappi": "Wrap caesar con ensalada"},
+    revisar(remotos(db, "Tarta de verdura individual") ==
+            {"pedidosya": None, "rappi": "Tarta de verdura individual"},
             "el de Rappi aparece como producto propio")
 
 
@@ -151,25 +160,25 @@ def vincular_y_separar(db):
 
     # Dos productos sueltos, uno por plataforma, como los deja la carta
     # cuando el emparejamiento no es seguro.
-    catalogo.agregar(db, "rappi", "Bowl Huerta", categoria="Platos")
+    catalogo.agregar(db, "rappi", "Guiso de garbanzos", categoria="Platos")
     db.commit()
-    revisar(remotos(db, "Bowl Huerta") ==
-            {"pedidosya": None, "rappi": "Bowl Huerta"},
+    revisar(remotos(db, "Guiso de garbanzos") ==
+            {"pedidosya": None, "rappi": "Guiso de garbanzos"},
             "agregar() carga un producto de una sola plataforma")
 
-    # Vincular los dos wraps caesar que el usuario dijo que NO van juntos,
-    # para despues separarlos: es el ida y vuelta que tiene que aguantar.
-    producto = catalogo.vincular(db, "Wrap caesar con batatas",
-                                 "Wrap caesar con ensalada")
+    # Vincular dos que NO son el mismo plato para despues separarlos: es
+    # el ida y vuelta que tiene que aguantar.
+    producto = catalogo.vincular(db, "Tarta de verdura chica",
+                                 "Tarta de verdura individual")
     db.commit()
     db.expire_all()
 
     revisar(remotos(db, producto.nombre) ==
-            {"pedidosya": "Wrap caesar con batatas",
-             "rappi": "Wrap caesar con ensalada"},
+            {"pedidosya": "Tarta de verdura chica",
+             "rappi": "Tarta de verdura individual"},
             "vincular() fusiona los dos productos sueltos en uno")
 
-    revisar(db.query(Producto).filter_by(nombre="Wrap caesar con ensalada")
+    revisar(db.query(Producto).filter_by(nombre="Tarta de verdura individual")
             .first() is None,
             "el producto absorbido desaparece de la lista")
 
@@ -180,11 +189,11 @@ def vincular_y_separar(db):
     db.commit()
     db.expire_all()
 
-    revisar(remotos(db, "Wrap caesar con batatas") ==
-            {"pedidosya": "Wrap caesar con batatas", "rappi": None},
+    revisar(remotos(db, "Tarta de verdura chica") ==
+            {"pedidosya": "Tarta de verdura chica", "rappi": None},
             "separar() deja el de PedidosYa solo")
     revisar(remotos(db, nuevo.nombre) ==
-            {"pedidosya": None, "rappi": "Wrap caesar con ensalada"},
+            {"pedidosya": None, "rappi": "Tarta de verdura individual"},
             "separar() devuelve el de Rappi como producto propio")
 
 
@@ -194,7 +203,7 @@ def separar_conserva_el_estado(db):
     seed.sembrar()
     db.expire_all()
 
-    p = db.query(Producto).filter_by(nombre="Brie").first()
+    p = db.query(Producto).filter_by(nombre="Budín de pan").first()
     est = (db.query(EstadoItem)
            .filter_by(producto_id=p.id, plataforma="rappi").first())
     est.estado = EstadoItem.APAGADO_HOY
@@ -219,13 +228,13 @@ def vincular_remapea_la_cola(db):
     seed.sembrar()
     db.expire_all()
 
-    absorbido = catalogo.agregar(db, "rappi", "Pollo al Curry")
+    absorbido = catalogo.agregar(db, "rappi", "Wok de vegetales")
     db.commit()
     db.add(Operacion(producto_id=absorbido.id, plataforma="rappi",
                      accion="apagar_hoy"))
     db.commit()
 
-    destino = catalogo.vincular(db, "Cobb", "Pollo al Curry")
+    destino = catalogo.vincular(db, "Flan casero", "Wok de vegetales")
     db.commit()
     db.expire_all()
 
@@ -242,19 +251,19 @@ def seed_no_pisa_lo_manual(db):
     seed.sembrar()
     db.expire_all()
 
-    # El usuario decide que el Risotto de Rappi es otra cosa.
-    p = db.query(Producto).filter_by(nombre="Risotto").first()
+    # El usuario decide que el Ensalada mixta de Rappi es otra cosa.
+    p = db.query(Producto).filter_by(nombre="Ensalada mixta").first()
     catalogo.separar(db, p.id, "rappi")
     db.commit()
     db.expire_all()
 
-    revisar(remotos(db, "Risotto") == {"pedidosya": "Risotto", "rappi": None},
+    revisar(remotos(db, "Ensalada mixta") == {"pedidosya": "Ensalada mixta", "rappi": None},
             "queda separado")
 
     # Un reinicio no tiene que deshacerlo.
     seed.sembrar()
     db.expire_all()
-    revisar(remotos(db, "Risotto") == {"pedidosya": "Risotto", "rappi": None},
+    revisar(remotos(db, "Ensalada mixta") == {"pedidosya": "Ensalada mixta", "rappi": None},
             "sigue separado despues de reiniciar la app")
 
 
@@ -264,7 +273,7 @@ def no_se_puede_separar_lo_que_no_esta(db):
     seed.sembrar()
     db.expire_all()
 
-    solo_rappi = db.query(Producto).filter_by(nombre="Wrap de atun").first()
+    solo_rappi = db.query(Producto).filter_by(nombre="Ñoquis del 29").first()
     try:
         catalogo.separar(db, solo_rappi.id, "rappi")
         revisar(False, "separar() rechaza separar un producto de una sola plataforma")
@@ -283,31 +292,31 @@ def no_se_puede_separar_lo_que_no_esta(db):
 def vincular_no_pisa_lo_que_ya_estaba(db):
     """Vincular a mano dos que ya estaban emparejados con otra cosa.
 
-    El caso que lo pidio: "wrap caesar con batatas" (PedidosYa) es en
-    realidad el "wrap caesar" de Rappi. Pero ese ya estaba vinculado con el
-    "Wrap caesar" de PedidosYa. Ese ultimo NO se puede evaporar.
+    El caso que lo pidio: "tarta de verdura chica" (PedidosYa) es en
+    realidad el "tarta de verdura" de Rappi. Pero ese ya estaba vinculado con el
+    "Tarta de verdura" de PedidosYa. Ese ultimo NO se puede evaporar.
     """
     print("\n== Vincular a mano no hace desaparecer al que estaba ==")
     limpiar(db)
     seed.sembrar()
     db.expire_all()
 
-    revisar(remotos(db, "Wrap caesar") ==
-            {"pedidosya": "Wrap caesar", "rappi": "Wrap caesar"},
-            "de entrada, 'Wrap caesar' esta vinculado con el de Rappi")
+    revisar(remotos(db, "Tarta de verdura") ==
+            {"pedidosya": "Tarta de verdura", "rappi": "Tarta de verdura"},
+            "de entrada, 'Tarta de verdura' esta vinculado con el de Rappi")
 
-    catalogo.vincular(db, "Wrap caesar con batatas", "Wrap caesar")
+    catalogo.vincular(db, "Tarta de verdura chica", "Tarta de verdura")
     db.commit()
     db.expire_all()
 
-    revisar(remotos(db, "Wrap caesar con batatas") ==
-            {"pedidosya": "Wrap caesar con batatas", "rappi": "Wrap caesar"},
+    revisar(remotos(db, "Tarta de verdura chica") ==
+            {"pedidosya": "Tarta de verdura chica", "rappi": "Tarta de verdura"},
             "el par nuevo queda vinculado")
 
     sueltos = [p for p in db.query(Producto).all()
-               if catalogo.nombre_remoto(p, "pedidosya") == "Wrap caesar"]
+               if catalogo.nombre_remoto(p, "pedidosya") == "Tarta de verdura"]
     revisar(len(sueltos) == 1,
-            "el 'Wrap caesar' de PedidosYa sigue existiendo, ahora suelto")
+            "el 'Tarta de verdura' de PedidosYa sigue existiendo, ahora suelto")
     revisar(len(sueltos) == 1 and
             catalogo.nombre_remoto(sueltos[0], "rappi") is None,
             "y quedo sin plataforma de Rappi, no vinculado a la fuerza")
@@ -325,36 +334,36 @@ def deshacer_vuelve_atras(db):
     seed.sembrar()
     db.expire_all()
 
-    antes_caesar = remotos(db, "Wrap caesar")
+    antes_tarta = remotos(db, "Tarta de verdura")
     cuantos = db.query(Producto).count()
 
     revisar(catalogo.hay_para_deshacer(db) is None,
             "recien sembrado no hay nada para deshacer")
 
-    catalogo.vincular(db, "Wrap caesar con batatas", "Wrap caesar")
+    catalogo.vincular(db, "Tarta de verdura chica", "Tarta de verdura")
     db.commit()
     db.expire_all()
 
-    revisar(remotos(db, "Wrap caesar con batatas") ==
-            {"pedidosya": "Wrap caesar con batatas", "rappi": "Wrap caesar"},
+    revisar(remotos(db, "Tarta de verdura chica") ==
+            {"pedidosya": "Tarta de verdura chica", "rappi": "Tarta de verdura"},
             "la vinculacion se hizo")
-    revisar(remotos(db, "Wrap caesar (PedidosYa)") ==
-            {"pedidosya": "Wrap caesar", "rappi": None},
+    revisar(remotos(db, "Tarta de verdura (PedidosYa)") ==
+            {"pedidosya": "Tarta de verdura", "rappi": None},
             "el de PedidosYa que se solto queda con un nombre que se entiende")
     revisar(db.query(Producto).count() == cuantos,
             "la cuenta no cambia: uno se solto y el otro se absorbio")
 
     pendiente = catalogo.hay_para_deshacer(db)
-    revisar(pendiente is not None and "Wrap caesar" in pendiente,
+    revisar(pendiente is not None and "Tarta de verdura" in pendiente,
             f"queda anotado que se puede deshacer ({pendiente})")
 
     catalogo.deshacer(db)
     db.commit()
     db.expire_all()
 
-    revisar(remotos(db, "Wrap caesar") == antes_caesar,
+    revisar(remotos(db, "Tarta de verdura") == antes_tarta,
             "deshacer devuelve el vinculo original")
-    revisar(db.query(Producto).filter_by(nombre="Wrap caesar (PedidosYa)")
+    revisar(db.query(Producto).filter_by(nombre="Tarta de verdura (PedidosYa)")
             .first() is None,
             "y se lleva el producto suelto que habia aparecido")
     revisar(catalogo.hay_para_deshacer(db) is None,
@@ -367,27 +376,27 @@ def deshacer_varios_pasos(db):
     seed.sembrar()
     db.expire_all()
 
-    catalogo.agregar(db, "rappi", "Pollo al Curry")
+    catalogo.agregar(db, "rappi", "Wok de vegetales")
     db.commit()
-    catalogo.agregar(db, "rappi", "Bowl Huerta")
+    catalogo.agregar(db, "rappi", "Guiso de garbanzos")
     db.commit()
     db.expire_all()
 
-    revisar(remotos(db, "Bowl Huerta") is not None and
-            remotos(db, "Pollo al Curry") is not None,
+    revisar(remotos(db, "Guiso de garbanzos") is not None and
+            remotos(db, "Wok de vegetales") is not None,
             "los dos productos estan cargados")
 
     catalogo.deshacer(db)
     db.commit()
     db.expire_all()
-    revisar(remotos(db, "Bowl Huerta") is None and
-            remotos(db, "Pollo al Curry") is not None,
+    revisar(remotos(db, "Guiso de garbanzos") is None and
+            remotos(db, "Wok de vegetales") is not None,
             "el primer deshacer saca solo el ultimo")
 
     catalogo.deshacer(db)
     db.commit()
     db.expire_all()
-    revisar(remotos(db, "Pollo al Curry") is None,
+    revisar(remotos(db, "Wok de vegetales") is None,
             "el segundo saca el anterior")
 
     revisar(catalogo.deshacer(db) is None,
@@ -401,14 +410,14 @@ def nombres_de_los_sueltos(db):
     seed.sembrar()
     db.expire_all()
 
-    # "Wrap caesar" se llama igual en los dos portales: al separarlos, uno
+    # "Tarta de verdura" se llama igual en los dos portales: al separarlos, uno
     # de los dos productos necesita otro nombre a la fuerza.
-    p = db.query(Producto).filter_by(nombre="Wrap caesar").first()
+    p = db.query(Producto).filter_by(nombre="Tarta de verdura").first()
     nuevo = catalogo.separar(db, p.id, "pedidosya")
     db.commit()
 
-    revisar(nuevo.nombre == "Wrap caesar (PedidosYa)",
-            f"se llama '{nuevo.nombre}' y no 'Wrap caesar (2)'")
+    revisar(nuevo.nombre == "Tarta de verdura (PedidosYa)",
+            f"se llama '{nuevo.nombre}' y no 'Tarta de verdura (2)'")
 
 
 def main():

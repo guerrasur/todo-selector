@@ -9,6 +9,7 @@ py pruebas/probar_catalogo.py         vincular / separar / sembrar
 py pruebas/probar_estados.py          guardar el estado leído del portal
 py pruebas/probar_cierre.py           apagar todo por plataforma + ajustes
 py pruebas/probar_pantalla_carta.py   la pantalla entera, de punta a punta
+py pruebas/probar_primer_arranque.py  cómo arranca una instalación nueva
 ```
 
 Las dos que usan navegador necesitan Playwright instalado
@@ -60,3 +61,33 @@ y a recargar), y una regresión que costó caro: el chip de plataforma se
 deseleccionaba solo. La lista se repinta cada pocos segundos, y la selección
 vivía en una variable local del repintado; si tardabas más que el refresco en
 apretar el botón, la acción salía a los dos portales sin decir nada.
+
+**`probar_primer_arranque.py`** levanta la app **sin catálogo y sin ajustes**,
+que es exactamente como le llega a alguien que la baja por primera vez. Cubre
+lo que se pidió el 2026-07-28: que un usuario nuevo **no** se encuentre con la
+carta ni con la sucursal de otro. Comprueba que no haya ni un producto cargado,
+que la pantalla pida los dos pasos en orden, que "Leer mi carta" esté bloqueado
+hasta decir qué local sos, que no se guarde media sucursal, y que el panel se
+vaya cuando ya no hace falta.
+
+## La carta de ejemplo
+
+`app/seed.py` viene **vacío** a propósito, así que las pruebas traen su propia
+carta inventada: `catalogo_ejemplo.py` (el catálogo) y `carta_ejemplo.json` (lo
+que devuelve `/api/carta` en modo simulado). Los dos van de la mano: si tocás
+uno, tocá el otro.
+
+No es una lista cualquiera. Reproduce las trampas que ya costaron caro, porque
+un ejemplo fácil deja de cubrirlas:
+
+- **prefijos** — "Tarta de verdura" es prefijo de "Tarta de verdura chica";
+- **tildes** — el canónico "Budín de pan" y el nombre sin tilde de PedidosYa;
+- **nombres que no se parecen en nada entre portales** — "Agua chica" contra
+  "Manantial sin gas 500 ml";
+- **variantes que NO son el mismo plato** — "chica", "individual" y "porción"
+  puntúan altísimo entre sí;
+- **productos que existen en un solo portal**, en los dos sentidos.
+
+Los ids de sucursal de `catalogo_ejemplo.SUCURSAL` también son de mentira: lo
+único que importa es que existan, para que las pruebas no se queden en la
+pantalla de primer arranque.

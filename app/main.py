@@ -243,9 +243,9 @@ def masivo_previo(accion: str = "apagar_hoy"):
 def alertas(db: Session = Depends(get_db)):
     """Lo que la app AFIRMA sin poder confirmarlo. Es lo que puede salir caro.
 
-    El caso real (2026-07-28): el usuario apagó un wrap, Todo-Selector lo
+    El caso real (2026-07-28): el usuario apagó un producto, Todo-Selector lo
     mostró como «apagado hoy», y media hora después entró un pedido de
-    PedidosYa con ese wrap.
+    PedidosYa con ese producto.
 
     El agujero: si la lectura de la carta no encuentra un producto (porque
     el nombre del catálogo no coincide con el del portal, o porque no se
@@ -316,10 +316,24 @@ def estado_sistema(db: Session = Depends(get_db)):
                   .filter(Operacion.estado.in_([Operacion.PENDIENTE,
                                                 Operacion.EN_CURSO]))
                   .count())
+    # Lo que necesita la pantalla para saber si esto es un primer arranque:
+    # sin sucursal no hay a donde entrar, y sin catalogo no hay nada que
+    # mostrar. Van juntos porque el orden importa: primero decir qué local
+    # sos, después leer la carta.
+    falta_sucursal = [
+        plat for plat, claves in (
+            ("pedidosya", ("pedidosya_menu_id",)),
+            ("rappi", ("rappi_store_id", "rappi_brand_id")),
+        )
+        if not all(config.texto(c) for c in claves)
+    ]
+
     return {
         "simulado": MODO_SIMULADO,
         "arrancado_en": ARRANCADO_EN.isoformat(timespec="seconds"),
         "sesiones": worker.sesion_ok,
+        "falta_sucursal": falta_sucursal,
+        "catalogo_vacio": db.query(Producto).count() == 0,
         "operaciones_pendientes": pendientes,
         "ultimo_chequeo": (worker.ultimo_chequeo.isoformat()
                            if worker.ultimo_chequeo else None),
@@ -352,7 +366,7 @@ async def revalidar_sesion(plataforma: str = None):
 async def buscar_texto(plataforma: str, fragmento: str):
     """Diagnostico: como esta escrito realmente un producto en el portal.
 
-    Ej: /api/buscar-texto?plataforma=rappi&fragmento=Coca
+    Ej: /api/buscar-texto?plataforma=rappi&fragmento=Tarta
     """
     return await worker.buscar_textos(plataforma, fragmento)
 
@@ -414,7 +428,7 @@ async def verificar_catalogo(plataforma: str):
 async def diagnostico(plataforma: str, nombre: str):
     """Diagnostico: prueba leer un producto por nombre exacto, sin tocar nada.
 
-    Ej: /api/diagnostico?plataforma=pedidosya&nombre=Coca%20Cola
+    Ej: /api/diagnostico?plataforma=pedidosya&nombre=Tarta%20de%20verdura
     """
     return await worker.diagnosticar(plataforma, nombre)
 

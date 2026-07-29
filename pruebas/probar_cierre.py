@@ -18,14 +18,20 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 TEMPORAL = tempfile.mkdtemp(prefix="todoselector-cierre-")
 os.environ["HOME"] = TEMPORAL
 os.environ["LOCALAPPDATA"] = TEMPORAL
 
 from app import cierre, config, seed                            # noqa: E402
+import catalogo_ejemplo                                   # noqa: E402
 from app.database import SessionLocal, init_db                  # noqa: E402
 from app.models import Producto, EstadoItem, Operacion          # noqa: E402
+
+# app/seed.py viene VACIO a proposito: una instalacion nueva no arranca
+# con la carta de otro local. Las pruebas siembran una carta inventada.
+catalogo_ejemplo.usar_catalogo()
 
 fallos = []
 
@@ -105,9 +111,9 @@ async def no_encola_de_mas(db, worker):
     print("\n== No encola lo que no hace falta ==")
     todo_prendido(db)
 
-    poner(db, "Cobb", EstadoItem.APAGADO_HOY, "rappi")
-    poner(db, "Brie", EstadoItem.APAGADO_AJENO, "rappi")
-    p = db.query(Producto).filter_by(nombre="Caesar").first()
+    poner(db, "Flan casero", EstadoItem.APAGADO_HOY, "rappi")
+    poner(db, "Budín de pan", EstadoItem.APAGADO_AJENO, "rappi")
+    p = db.query(Producto).filter_by(nombre="Tarta de choclo").first()
     p.pausado = True
     db.commit()
 
@@ -115,10 +121,10 @@ async def no_encola_de_mas(db, worker):
     db.expire_all()
     encolados = cola(db, "rappi")
 
-    revisar("Cobb" not in encolados, "saltea lo que la app ya tenia apagado")
-    revisar("Brie" not in encolados, "saltea lo que esta apagado desde afuera")
-    revisar("Caesar" not in encolados, "saltea lo que esta en pausa")
-    revisar("Clasica" in encolados, "y encola lo que si esta prendido")
+    revisar("Flan casero" not in encolados, "saltea lo que la app ya tenia apagado")
+    revisar("Budín de pan" not in encolados, "saltea lo que esta apagado desde afuera")
+    revisar("Tarta de choclo" not in encolados, "saltea lo que esta en pausa")
+    revisar("Milanesa con pure" in encolados, "y encola lo que si esta prendido")
 
     # Segunda pasada: nada nuevo. Es el doble click sobre "Apagar todo".
     cuantas = db.query(Operacion).count()
@@ -131,27 +137,27 @@ async def no_encola_de_mas(db, worker):
 async def prender_todo(db, worker):
     print("\n== Prender todo ==")
     todo_prendido(db)
-    poner(db, "Cobb", EstadoItem.APAGADO_HOY, "rappi")
-    poner(db, "Brie", EstadoItem.APAGADO_AJENO, "rappi")
+    poner(db, "Flan casero", EstadoItem.APAGADO_HOY, "rappi")
+    poner(db, "Budín de pan", EstadoItem.APAGADO_AJENO, "rappi")
 
     await cierre.ejecutar(worker, "prender", ["rappi"], releer=False,
                           solo_propios=True)
     db.expire_all()
     encolados = cola(db, "rappi")
 
-    revisar(encolados == {"Cobb"},
+    revisar(encolados == {"Flan casero"},
             f"solo prende lo que apago la app (encolo: {encolados or 'nada'})")
 
-    # De cero otra vez: la pasada anterior dejo a Cobb en "prendiendo…", y
+    # De cero otra vez: la pasada anterior dejo a Flan casero en "prendiendo…", y
     # eso lo saltea con razon (ya hay una operacion en curso).
     todo_prendido(db)
-    poner(db, "Cobb", EstadoItem.APAGADO_HOY, "rappi")
-    poner(db, "Brie", EstadoItem.APAGADO_AJENO, "rappi")
+    poner(db, "Flan casero", EstadoItem.APAGADO_HOY, "rappi")
+    poner(db, "Budín de pan", EstadoItem.APAGADO_AJENO, "rappi")
 
     await cierre.ejecutar(worker, "prender", ["rappi"], releer=False,
                           solo_propios=False)
     db.expire_all()
-    revisar(cola(db, "rappi") == {"Cobb", "Brie"},
+    revisar(cola(db, "rappi") == {"Flan casero", "Budín de pan"},
             "y con la opcion en off prende tambien lo apagado desde afuera")
 
 
@@ -161,7 +167,7 @@ async def estado_transitorio(db, worker):
     await cierre.ejecutar(worker, "apagar_hoy", ["rappi"], releer=False)
     db.expire_all()
 
-    p = db.query(Producto).filter_by(nombre="Cobb").first()
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
     est = next(e for e in p.estados if e.plataforma == "rappi")
     revisar(est.estado == EstadoItem.APAGANDO,
             "los productos encolados quedan en 'apagando…' sin esperar al worker")
@@ -296,16 +302,19 @@ def sucursal_configurable(db):
             "brandId=AR000002" in rappi.url_menu,
             "Rappi arma la URL con la tienda y la marca que le pasan")
 
-    # Los defaults tienen que seguir siendo los del local de siempre.
-    revisar(PedidosYa(None).url_menu.endswith("/460348") and
-            "storeId=AR221056" in Rappi(None).url_menu,
-            "sin configurar nada, siguen siendo los del local de siempre")
+    # Y sin configurar nada NO hay default: el de otro local mandaria la app
+    # a un menu ajeno, que es peor que no arrancar. Por eso `configurado`
+    # dice que no y el worker ni abre la pestaña.
+    revisar(not PedidosYa(None).configurado and not Rappi(None).configurado,
+            "sin configurar la sucursal, las dos plataformas avisan que faltan datos")
+    revisar(py.configurado and rappi.configurado,
+            "y con los datos puestos, quedan listas")
 
     py.configurar(menu_id="222333")
     revisar(py.url_menu.endswith("/222333"),
             "cambiar de menu no necesita reiniciar la app")
 
-    py._categoria_de["Brie"] = 2
+    py._categoria_de["Budín de pan"] = 2
     py.configurar(menu_id="444555")
     revisar(py._categoria_de == {},
             "y olvida en que categoria vivia cada producto: es otro menu")
@@ -314,7 +323,7 @@ def sucursal_configurable(db):
 async def sesion_caida(db):
     """EL BUG DEL 2026-07-28: Rappi se deslogueo y se perdio lo encolado.
 
-    El usuario apago la Cobb, Rappi estaba deslogueado, le salto el error y
+    El usuario apago la Flan casero, Rappi estaba deslogueado, le salto el error y
     tuvo que loguearse a mano. Para cuando termino, la operacion ya se habia
     muerto: tres reintentos de 2 segundos contra una sesion que solo vuelve
     con un login manual, y despues ERROR. Lo que habia pedido se perdio en
@@ -340,7 +349,7 @@ async def sesion_caida(db):
 
     w._ejecutar = falla_sin_sesion
 
-    p = db.query(Producto).filter_by(nombre="Cobb").first()
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
     db.add(Operacion(producto_id=p.id, plataforma="rappi", accion="apagar_hoy"))
     db.commit()
 
@@ -358,7 +367,7 @@ async def sesion_caida(db):
     revisar("rappi" in w.reintentar_desde, "queda anotada la espera")
 
     # Otra plataforma no tiene por que quedarse esperando por esta.
-    otro = db.query(Producto).filter_by(nombre="Brie").first()
+    otro = db.query(Producto).filter_by(nombre="Budín de pan").first()
     db.add(Operacion(producto_id=otro.id, plataforma="pedidosya",
                      accion="apagar_hoy"))
     db.commit()
