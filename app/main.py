@@ -159,8 +159,18 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
     if desconocidas:
         raise HTTPException(400, f"plataforma desconocida: {desconocidas[0]}")
 
+    activas = config.plataformas_activas()
+
     creadas, salteadas = [], []
     for plat in data.plataformas:
+        # Plataforma apagada en Ajustes (o pantalla vieja, que se repinta
+        # sola pero el click puede salir con los datos de antes): no hay
+        # pestaña, asi que la operacion no tendria a donde ir.
+        if plat not in activas:
+            salteadas.append({"plataforma": plat,
+                              "motivo": "no está activa en esta instalación"})
+            continue
+
         # El EstadoItem es lo que dice "este producto existe en esta
         # plataforma". Sin el, la operacion buscaria el nombre canonico en un
         # portal donde el producto no esta y fallaria tres veces antes de
@@ -236,7 +246,7 @@ def masivo_previo(accion: str = "apagar_hoy"):
     if accion not in cierre.ACCIONES:
         raise HTTPException(400, "accion invalida")
     return {"accion": accion, "por_plataforma": cierre.previo(
-        list(catalogo.PLATAFORMAS), accion)}
+        config.plataformas_activas(), accion)}
 
 
 @app.get("/api/alertas")
@@ -332,6 +342,11 @@ def estado_sistema(db: Session = Depends(get_db)):
         "simulado": MODO_SIMULADO,
         "arrancado_en": ARRANCADO_EN.isoformat(timespec="seconds"),
         "sesiones": worker.sesion_ok,
+        # Las que esta instalación usa de verdad. La pantalla dibuja los
+        # chips y los botones de «Apagar todo» con ESTO y no con una lista
+        # fija: una plataforma opcional que nadie configuró no tiene por qué
+        # aparecerle a nadie.
+        "plataformas": config.plataformas_activas(),
         "falta_sucursal": falta_sucursal,
         "catalogo_vacio": db.query(Producto).count() == 0,
         "operaciones_pendientes": pendientes,
@@ -517,6 +532,9 @@ def enlazar(data: EnlazarIn, db: Session = Depends(get_db)):
     las dos principales (PedidosYa/Rappi) — hoy, Rappi Común: un plato que
     ya se apaga en las otras dos y ahora también hay que apagarlo ahí.
     """
+    if data.plataforma not in config.plataformas_activas():
+        raise HTTPException(400, f"{data.plataforma} no está activa en esta "
+                                 f"instalación")
     try:
         producto = catalogo.enlazar(db, data.producto_id, data.plataforma,
                                     data.nombre_remoto)

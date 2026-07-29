@@ -271,7 +271,13 @@
 </main>
 
 <script>
-const PLATS = ['pedidosya', 'rappi', 'rappi_comun'];
+// Las plataformas que ESTA instalación usa. Arranca con las dos de
+// siempre y lo dice el backend (/api/estado-sistema → plataformas): las
+// opcionales, como Rappi Común, solo entran si el usuario las configuró.
+// Antes esta lista era fija con las tres y todo local que no vendía por
+// Rappi Común igual veía un chip de más en cada producto y una fila de más
+// en «Apagar todo».
+let PLATS = ['pedidosya', 'rappi'];
 const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi', rappi_comun: 'Rappi Común' };
 
 // ------------------------------------------------ Avisos de sesión caída
@@ -695,12 +701,23 @@ function pintarNovedades(novedades) {
 }
 
 function pintarSistema(s) {
+  // Qué plataformas usa esta instalación lo decide el backend. Va primero:
+  // todo lo que se pinta abajo (chips, avisos, «Apagar todo») se arma con
+  // esta lista.
+  if (Array.isArray(s.plataformas) && s.plataformas.length) PLATS = s.plataformas;
+
   const el = document.getElementById('estado-sistema');
   if (s.simulado) {
     el.textContent = 'MODO SIMULADO';
     el.className = 'badge alerta';
   } else {
-    const caidas = PLATS.filter(p => s.sesiones[p] === false);
+    // Una plataforma sin sucursal cargada figura como sesión caída, pero el
+    // problema NO es el login: es que todavía no dijiste qué local sos. Si
+    // te manda a loguearte —y encima con sonido y notificación— en el
+    // primer arranque, te manda al lugar equivocado.
+    const faltaSucursal = s.falta_sucursal || [];
+    const caidas = PLATS.filter(p => s.sesiones[p] === false
+                                     && !faltaSucursal.includes(p));
     if (caidas.length) {
       el.textContent = 'Login pendiente: ' + caidas.map(p => NOMBRE_PLAT[p]).join(', ');
       el.className = 'badge alerta';
@@ -1210,12 +1227,14 @@ async function pintarCierre(mensaje = '') {
     contarCierre('apagar_hoy'), contarCierre('prender'),
   ]);
 
-  const destinos = [
-    ['pedidosya', 'PedidosYa', ['pedidosya']],
-    ['rappi', 'Rappi', ['rappi']],
-    ['rappi_comun', 'Rappi Común', ['rappi_comun']],
-    ['ambas', 'Los dos', ['pedidosya', 'rappi']],
-  ];
+  // Una fila por plataforma activa, más una última con TODAS. Se arma con
+  // PLATS y no a mano: con una plataforma opcional configurada, «los dos»
+  // dejaba afuera justamente a la tercera, así que apagar todo al cierre no
+  // apagaba todo.
+  const destinos = PLATS.map(p => [p, NOMBRE_PLAT[p] || p, [p]]);
+  if (PLATS.length > 1) {
+    destinos.push(['ambas', PLATS.length === 2 ? 'Los dos' : 'Todas', [...PLATS]]);
+  }
 
   for (const [clave, titulo, plats] of destinos) {
     const fila = document.createElement('div');

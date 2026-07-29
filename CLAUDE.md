@@ -26,6 +26,12 @@ plataforma o de las dos**, con un botón por portal: a veces PedidosYa tiene
 que apagarse antes que Rappi. Nunca encola lo que ya está como quiere
 quedar, lo pausado, ni lo que ya está en la cola.
 
+**Rappi Común está a medio hacer y viene APAGADA** (2026-07-29). Es una
+tercera plataforma opcional (tienda de Rappi independiente de Turbo) que solo
+existe si le cargás `rappi_comun_store_id` en Ajustes. Le falta la pantalla
+Carta, que sigue siendo de dos columnas: ver el README, "Pendientes de
+producto". Con el ajuste vacío no tiene que notarse en ningún lado.
+
 **Los ajustes** (`app/config.py`) viven en la tabla `preferencias`, con el
 prefijo `cfg_`. Ahí salen el ritmo del worker y **qué sucursal es** (el id de
 menú de PedidosYa y el storeId de Rappi, que antes estaban clavados en el
@@ -84,6 +90,15 @@ columna sigue sin estar cubierto.
    volvían a quedar los dos seleccionados y mandaban la acción a los dos
    portales. Si el usuario lo eligió, va afuera del repintado (ver
    `excluidas` en `static/index.html`).
+
+9. **Qué plataformas hay lo dice `config.plataformas_activas()`, no una
+   lista escrita a mano.** `catalogo.PLATAFORMAS` es la lista de nombres
+   VÁLIDOS; la de las que esta instalación usa de verdad es la otra, y las
+   opcionales entran solo si el usuario las configuró. La pantalla la
+   recibe en `/api/estado-sistema` → `plataformas` (ahí sale `PLATS`).
+   Escribirla a mano ya hizo que a todo el mundo le apareciera un chip de
+   «Rappi Común» que no usaba, y que el botón "los dos" dejara afuera a la
+   tercera justo al cerrar el local (2026-07-29).
 
 ## Datos del local
 

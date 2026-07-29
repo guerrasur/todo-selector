@@ -205,11 +205,16 @@ OPCIONES = (
         tipo="texto",
         grupo="Rappi Común",
         opcional=True,
-        ayuda="Opcional. Completalo solo si tu local vende también por Rappi "
-              "Común además de Rappi Turbo: son independientes, apagar en "
-              "una no apaga en la otra. Mismo brandId de Rappi de arriba, "
-              "storeId distinto (se saca de la URL del menú de esa tienda). "
-              "Vacío = la app no la toca.",
+        ayuda="INCOMPLETO, dejalo vacío salvo que sepas lo que estás "
+              "haciendo. Vacío = la app no la toca: no le abre pestaña, no "
+              "aparece en la pantalla y no le encola nada. Si lo llenás, "
+              "Rappi Común pasa a ser una tercera plataforma (tienda aparte "
+              "de Rappi Turbo: apagar en una no apaga en la otra; mismo "
+              "brandId, storeId distinto, sale de la URL del menú de esa "
+              "tienda). Lo que le falta: la pantalla «Carta» sigue leyendo "
+              "solo PedidosYa y Rappi, así que enganchar tu catálogo a esta "
+              "tercera depende del aviso de «novedad», que solo salta si el "
+              "nombre es casi idéntico al que ya tenés cargado.",
     ),
 )
 
@@ -286,6 +291,32 @@ def activo(clave: str) -> bool:
 
 def texto(clave: str) -> str:
     return str(obtener(clave))
+
+
+# Las plataformas que SIEMPRE existen. El resto son opcionales y solo
+# cuentan si el usuario las configuró. La lista completa (la que valida los
+# nombres) es catalogo.PLATAFORMAS; esta dice cuáles están en uso HOY.
+PLATAFORMAS_FIJAS = ("pedidosya", "rappi")
+
+# plataforma opcional -> ajuste que la prende. Vacío = no existe para esta
+# instalación: no se le abre pestaña, no se la ve en la pantalla y no se le
+# encolan operaciones.
+PLATAFORMAS_OPCIONALES = {"rappi_comun": "rappi_comun_store_id"}
+
+
+def plataformas_activas() -> list[str]:
+    """Las plataformas que esta instalación realmente usa.
+
+    Es UNA sola respuesta para toda la app: el worker decide con esto a qué
+    portal abrirle pestaña, la API con qué operaciones acepta, y la pantalla
+    qué chips dibuja. Sin esto, "Rappi Común" le aparecía a todo el mundo
+    (un chip de más en cada producto y una fila de más en «Apagar todo»)
+    aunque no la usara.
+    """
+    activas = list(PLATAFORMAS_FIJAS)
+    activas += [plat for plat, clave in PLATAFORMAS_OPCIONALES.items()
+                if texto(clave)]
+    return activas
 
 
 # ---------- Escribir ----------

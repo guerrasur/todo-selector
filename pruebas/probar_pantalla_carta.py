@@ -668,9 +668,10 @@ async def probar_apagar_todo(pagina):
     await pagina.wait_for_selector(".fila-cierre", timeout=5000)
 
     filas = pagina.locator(".fila-cierre")
-    revisar(await filas.count() == 4,
-            "hay un juego de botones para PedidosYa, otro para Rappi, otro "
-            "para Rappi Común y otro para los dos (PedidosYa+Rappi)")
+    revisar(await filas.count() == 3,
+            "hay un juego de botones para PedidosYa, otro para Rappi y otro "
+            "para los dos: la plataforma opcional no esta configurada, asi "
+            "que no aparece")
 
     fila_py = pagina.locator(".fila-cierre[data-destino='pedidosya']")
     revisar("para apagar" in await fila_py.inner_text(),
@@ -697,6 +698,84 @@ async def probar_apagar_todo(pagina):
             "TODAS las operaciones nuevas son de PedidosYa: Rappi quedo intacto")
     revisar(all(o["accion"] == "apagar_hoy" for o in nuevas),
             "y usan el apagado por hoy, que es el default del cierre")
+
+
+async def guardar_config(pagina, cambios: dict):
+    """POST /api/config desde la pagina, como lo hace el panel de Ajustes."""
+    return await pagina.evaluate(
+        """cambios => fetch('/api/config', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify({cambios}),
+           }).then(r => r.json())""", cambios)
+
+
+async def probar_plataforma_opcional(pagina):
+    """Rappi Común: existe en el codigo, pero solo si la configuras.
+
+    EL BUG (2026-07-29): la lista de plataformas de la pantalla era fija con
+    las tres, asi que todo local que NO vende por Rappi Común igual veia un
+    chip "Rappi Común: —" en cada producto y una fila de mas en «Apagar
+    todo». Y al reves: con la tercera configurada, el boton "los dos"
+    seguia mandando solo a PedidosYa+Rappi, o sea que apagar todo al cierre
+    no apagaba todo.
+    """
+    print("\n== La plataforma opcional solo aparece si la configuras ==")
+
+    fila = pagina.locator(".item").first
+    await fila.wait_for(timeout=10000)
+    revisar(await pagina.locator(".pill[data-plat='rappi_comun']").count() == 0,
+            "sin configurar, no hay ningun chip de Rappi Común")
+    revisar("Rappi Común" not in await pagina.locator("#lista").inner_text(),
+            "ni se la nombra en la lista de productos")
+
+    # Y la API tampoco la acepta: una pantalla vieja podria mandarla.
+    item = await pagina.evaluate(
+        "fetch('/api/productos').then(r => r.json()).then(p => p[0])")
+    r = await pagina.evaluate(
+        """id => fetch('/api/accion', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify({producto_id: id, accion: 'apagar_hoy',
+                                     plataformas: ['rappi_comun']}),
+           }).then(r => r.json())""", item["id"])
+    revisar(r["encoladas"] == [] and r["salteadas"],
+            f"y la API no encola nada para una plataforma apagada "
+            f"({r['salteadas'][0]['motivo'] if r['salteadas'] else '?'})")
+
+    print("\n== Y aparece entera en cuanto se configura ==")
+    await guardar_config(pagina, {"rappi_comun_store_id": "9988"})
+    await pagina.reload()
+    await pagina.wait_for_selector(".item", timeout=10000)
+    await pagina.wait_for_timeout(1500)
+
+    revisar(await pagina.locator(".pill.na[data-plat='rappi_comun']").count() > 0
+            or "Rappi Común" in await pagina.locator("#lista").inner_text(),
+            "ahora si aparece en los productos")
+
+    await pagina.click("#btn-cierre")
+    await pagina.wait_for_selector("#panel-cierre:visible", timeout=5000)
+    await pagina.wait_for_selector(".fila-cierre", timeout=5000)
+    revisar(await pagina.locator(".fila-cierre").count() == 4,
+            "«Apagar todo» tiene las tres plataformas y una fila para todas")
+    todas = pagina.locator(".fila-cierre[data-destino='ambas']")
+    revisar("Todas" in await todas.inner_text(),
+            "la fila de todas ya no dice «los dos», que dejaria una afuera")
+
+    print("\n== Y se puede volver a apagar sin reiniciar la app ==")
+    await guardar_config(pagina, {"rappi_comun_store_id": ""})
+    await pagina.reload()
+    await pagina.wait_for_selector(".item", timeout=10000)
+    await pagina.wait_for_timeout(1500)
+    revisar(await pagina.locator(".pill[data-plat='rappi_comun']").count() == 0,
+            "borrar el storeId la saca de la pantalla")
+
+    await pagina.click("#btn-cierre")
+    await pagina.wait_for_selector("#panel-cierre:visible", timeout=5000)
+    await pagina.wait_for_selector(".fila-cierre", timeout=5000)
+    revisar(await pagina.locator(".fila-cierre").count() == 3,
+            "y de «Apagar todo» tambien")
+    await pagina.click("#btn-cierre")      # cerrar
 
 
 async def probar_sin_platos_del_dia(pagina):
@@ -813,6 +892,7 @@ async def main():
         await probar_pausa(pagina)
         await probar_renombrar_y_deshacer(pagina)
         await probar_ajustes(pagina)
+        await probar_plataforma_opcional(pagina)
 
         # Al final: encola la carta entera, y en modo simulado cada operacion
         # tarda 2 segundos. Antes de las otras pruebas les dejaria el worker

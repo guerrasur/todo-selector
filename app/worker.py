@@ -62,6 +62,10 @@ ESPERA_SIN_SESION = 60
 
 # Motivo por el que fallo una operacion, cuando importa distinguirlo.
 SIN_SESION = "sin_sesion"
+# La plataforma no esta activa en esta instalacion (no tiene pestaña). No se
+# arregla reintentando: reintentar tres veces por producto solo llena la cola
+# de errores identicos.
+NO_ACTIVA = "no_activa"
 
 # Lo que antes eran constantes hoy sale de Ajustes (app/config.py). Los
 # valores por defecto son estos mismos, asi que sin tocar nada la app se
@@ -164,20 +168,20 @@ class Worker:
         # a diferencia de las otras dos, la mayoria de los locales no la
         # usa. Si no esta configurada ni se le abre pestaña, para no dejar
         # una sesion "caida" fantasma que alerte de algo que nadie pidio.
-        if config.texto("rappi_comun_store_id"):
-            pag_rappi_comun = await self.browser.new_page()
-            self.plataformas["rappi_comun"] = Rappi(
-                pag_rappi_comun,
-                store_id=config.texto("rappi_comun_store_id"),
-                brand_id=config.texto("rappi_brand_id"),
-                nombre="rappi_comun")
+        if "rappi_comun" in config.plataformas_activas():
+            await self._abrir_rappi_comun()
 
         for nombre, plat in self.plataformas.items():
             # Primer arranque: todavia no dijo que sucursal es. Navegar con
             # el id vacio carga cualquier cosa y el error que sale despues
             # ("sesion caida") lo manda a loguearse, que no es el problema.
             if not plat.configurado:
-                self.sesion_ok[nombre] = False
+                # None y no False: "todavia no dijiste que sucursal sos" no
+                # es "se te cayo la sesion". Marcandolo como sesion caida, el
+                # primer arranque te saludaba con el aviso de login (sonido,
+                # notificacion y titulo parpadeando) mandandote a loguearte
+                # cuando lo que faltaba era completar los ids.
+                self.sesion_ok[nombre] = None
                 log.warning("Falta configurar la sucursal de %s: la pantalla "
                             "lo va a pedir antes de poder leer nada", nombre)
                 continue
@@ -188,6 +192,41 @@ class Worker:
             except Exception as e:
                 self.sesion_ok[nombre] = False
                 log.error("Error verificando sesion %s: %s", nombre, e)
+
+    async def _abrir_rappi_comun(self):
+        """Le abre la pestaña a Rappi Común (la plataforma opcional)."""
+        from plataformas.rappi import Rappi
+
+        pagina = await self.browser.new_page()
+        self.plataformas["rappi_comun"] = Rappi(
+            pagina,
+            store_id=config.texto("rappi_comun_store_id"),
+            brand_id=config.texto("rappi_brand_id"),
+            nombre="rappi_comun")
+
+    async def _cerrar_plataforma(self, nombre: str):
+        """Saca una plataforma opcional que el usuario acaba de desactivar.
+
+        Sin esto, borrar el storeId en Ajustes dejaba la pestaña abierta
+        operando sobre la tienda vieja: seguia entrando en las lecturas y en
+        la revalidacion de sesion, y con el aviso de sesion caida podia
+        ponerse a sonar por una tienda que el usuario acababa de apagar.
+        """
+        plat = self.plataformas.pop(nombre, None)
+        self.sesion_ok.pop(nombre, None)
+        self.ultimo_refresco.pop(nombre, None)
+        self.reintentar_desde.pop(nombre, None)
+        self.novedades.pop(nombre, None)
+        self.no_encontrados.pop(nombre, None)
+        self.bloqueos.pop(nombre, None)
+
+        if plat is None:
+            return
+        try:
+            await plat.page.close()
+        except Exception as e:
+            log.warning("No pude cerrar la pestaña de %s: %s", nombre, e)
+        log.info("%s quedo desactivada: se cerro su pestaña", nombre)
 
     async def detener(self):
         self.corriendo = False
@@ -267,6 +306,18 @@ class Worker:
                 db.commit()
                 return
 
+            # Plataforma apagada en Ajustes (o base traida de otra
+            # instalacion): la operacion no tiene a donde ir. Termina ahi,
+            # sin gastar los 3 intentos en el mismo error.
+            if motivo == NO_ACTIVA:
+                op.estado = Operacion.ERROR
+                op.detalle = detalle
+                op.finalizada_en = datetime.now()
+                self._marcar_fallo(db, op.producto_id, op.plataforma, detalle)
+                log.warning("op#%s cancelada: %s", op.id, detalle)
+                db.commit()
+                return
+
             if exito:
                 log.info("op#%s OK", op.id)
             elif op.intentos < max_intentos:
@@ -309,7 +360,8 @@ class Worker:
 
         plat = self.plataformas.get(plataforma)
         if plat is None:
-            return False, f"plataforma desconocida: {plataforma}", ""
+            return False, (f"{plataforma} no está activa en esta instalación "
+                           f"(revisá Ajustes)"), NO_ACTIVA
 
         async with self.bloqueo(plataforma):
             return await self._ejecutar_sin_turno(plat, plataforma, accion, nombre_remoto)
@@ -318,7 +370,12 @@ class Worker:
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
         if not listo:
-            sin_sesion = not self.sesion_ok.get(plataforma, True)
+            # Sin los ids de la sucursal no hay a donde ir: reintentar no lo
+            # arregla y "sesion caida" manda al usuario a loguearse, que no
+            # es el problema.
+            if not plat.configurado:
+                return False, motivo, NO_ACTIVA
+            sin_sesion = self.sesion_ok.get(plataforma) is False
             return False, motivo, (SIN_SESION if sin_sesion else "")
 
         try:
@@ -427,6 +484,13 @@ class Worker:
         if plat is None:
             return False, f"plataforma desconocida: {plataforma}"
 
+        # Sin los datos de la sucursal no hay a donde navegar: la URL sale
+        # con los ids vacios y carga cualquier cosa. Y la sesion queda en
+        # None (no configurada), que NO es lo mismo que caida.
+        if not plat.configurado:
+            self.sesion_ok[plataforma] = None
+            return False, f"falta configurar la sucursal de {plataforma}"
+
         ultimo = self.ultimo_refresco.get(plataforma)
         vieja = (ultimo is None or
                  (datetime.now() - ultimo).total_seconds()
@@ -477,23 +541,22 @@ class Worker:
             rappi.configurar(store_id=config.texto("rappi_store_id"),
                              brand_id=config.texto("rappi_brand_id"))
 
-        # Rappi Común es opcional: si recien ahora le cargaron el storeId y
-        # el navegador ya esta abierto, hay que abrirle la pestaña recien
-        # aca (al arrancar no existia todavia). Si ya tenia pestaña, solo se
-        # actualiza como las otras dos.
-        rappi_comun_id = config.texto("rappi_comun_store_id")
+        # Rappi Común es opcional y se prende y se apaga desde Ajustes, sin
+        # reiniciar: si recien ahora le cargaron el storeId hay que abrirle
+        # la pestaña aca (al arrancar no existia), y si lo BORRARON hay que
+        # cerrarla. Dejarla abierta era peor que no tenerla: seguia leyendo
+        # y alertando por una tienda que el usuario ya no queria tocar.
+        activa = "rappi_comun" in config.plataformas_activas()
         rappi_comun = self.plataformas.get("rappi_comun")
-        if rappi_comun is not None:
-            rappi_comun.configurar(store_id=rappi_comun_id,
-                                   brand_id=config.texto("rappi_brand_id"))
-        elif rappi_comun_id and self.browser is not None:
-            from plataformas.rappi import Rappi
-            pagina = await self.browser.new_page()
-            self.plataformas["rappi_comun"] = Rappi(
-                pagina, store_id=rappi_comun_id,
-                brand_id=config.texto("rappi_brand_id"),
-                nombre="rappi_comun")
+        if activa and rappi_comun is not None:
+            rappi_comun.configurar(
+                store_id=config.texto("rappi_comun_store_id"),
+                brand_id=config.texto("rappi_brand_id"))
+        elif activa and self.browser is not None:
+            await self._abrir_rappi_comun()
             log.info("Rappi Común recien configurada: se le abre la pestaña")
+        elif not activa and rappi_comun is not None:
+            await self._cerrar_plataforma("rappi_comun")
 
         for nombre, plat in self.plataformas.items():
             if not plat.en_el_menu():

@@ -131,9 +131,13 @@ async def ejecutar(worker, accion: str, plataformas: list[str],
     if accion not in ACCIONES:
         raise ValueError(f"acción inválida: {accion}")
 
-    objetivo = [p for p in plataformas if p in PLATAFORMAS]
+    # Solo las que esta instalacion usa: apagar "toda la carta" de una
+    # plataforma apagada en Ajustes encolaba una operacion por producto que
+    # no tenia a donde ir.
+    activas = config.plataformas_activas()
+    objetivo = [p for p in plataformas if p in PLATAFORMAS and p in activas]
     if not objetivo:
-        raise ValueError("no elegiste ninguna plataforma conocida")
+        raise ValueError("no elegiste ninguna plataforma activa")
 
     if releer is None:
         releer = config.activo("cierre_releer")
@@ -187,6 +191,7 @@ def previo(plataformas: list[str], accion: str) -> dict:
     """
     incluir_pausados = config.activo("cierre_incluir_pausados")
     solo_propios = config.activo("apertura_solo_propios")
+    activas = config.plataformas_activas()
 
     db = SessionLocal()
     try:
@@ -194,7 +199,8 @@ def previo(plataformas: list[str], accion: str) -> dict:
             plataforma: len(planificar(db, plataforma, accion,
                                        incluir_pausados,
                                        solo_propios)["encolar"])
-            for plataforma in plataformas if plataforma in PLATAFORMAS
+            for plataforma in plataformas
+            if plataforma in PLATAFORMAS and plataforma in activas
         }
     finally:
         db.close()
