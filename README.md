@@ -563,7 +563,7 @@ sigue vale igual, porque el problema es de los nombres, no de dónde salen.
 
 ### Las categorías no coinciden
 
-Cada portal agrupa a su manera: lo que en uno está bajo "Ensaladas" en el otro
+Cada portal agrupa a su manera: lo que en uno está bajo "Platos" en el otro
 puede estar bajo "Plato del Día". Todo-Selector usa su propia categoría, que es
 solo visual y no afecta la búsqueda.
 

@@ -58,8 +58,8 @@ def poner(db, nombre, valor, plataforma="rappi"):
 def apagado_que_no_se_puede_confirmar(db):
     """EL BUG DEL 2026-07-28: la pantalla decia apagado y el portal vendia.
 
-    El usuario apago un wrap, Todo-Selector lo mostro como "apagado hoy", y
-    media hora despues entro un pedido de PedidosYa con ese wrap.
+    El usuario apago un producto, Todo-Selector lo mostro como "apagado hoy", y
+    media hora despues entro un pedido de PedidosYa con ese producto.
 
     El mecanismo: si la lectura de la carta no encuentra el producto (el
     nombre del catalogo no coincide con el del portal, o no se pudo abrir la
@@ -78,7 +78,7 @@ def apagado_que_no_se_puede_confirmar(db):
 
     antes_flan, antes_budin = sellado("Flan casero"), sellado("Budín de pan")
 
-    # El portal devuelve a Budín de pan pero NO a Flan casero: es el caso del wrap.
+    # El portal devuelve a Budín de pan pero NO a Flan casero: es el caso del producto.
     leido = {"Budín de pan": False}
     resultado = Worker._guardar_estados("rappi", leido, sostener=True)
     db.expire_all()
