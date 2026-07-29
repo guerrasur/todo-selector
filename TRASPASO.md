@@ -3,7 +3,10 @@
 Pegá esto al arrancar la sesión nueva. Es todo lo que costó averiguar.
 
 **Repo:** `guerrasur/todo-selector` (público) · todo mergeado a `main` hasta el
-PR #22. El dueño tiene un **clon privado** con el historial viejo completo.
+PR #24. El dueño tiene un **clon privado** con el historial viejo completo.
+
+**LO PRIMERO QUE HAY QUE MIRAR:** quedó un paso a medias, el force-push que
+limpia el historial. Ver «El historial de git» abajo.
 
 App local (FastAPI + Playwright) que apaga/prende productos en PedidosYa y
 Rappi desde una pantalla. Corre en `127.0.0.1:8001`.
@@ -28,16 +31,76 @@ tarjeta y el selector de la pantalla de sesión expirada.
 
 El repo es público. El 2026-07-29 se sacó todo rastro del local que lo usa: su
 carta, su id de menú de PedidosYa y su `brandId`/`storeId` de Rappi — del
-código, de la documentación, de los comentarios, de las pruebas **y del
-historial de git**, que se reescribió con `git filter-repo`.
+código, de la documentación, de los comentarios y de las pruebas.
 
 Para los ejemplos está la carta inventada de `pruebas/catalogo_ejemplo.py` y
 `pruebas/carta_ejemplo.json`. No uses nombres ni ids reales en ningún lado, ni
 siquiera en un comentario.
 
-Lo que **no** se pudo borrar: las páginas de los PR #1 a #22 en GitHub siguen
-mostrando los diffs viejos. Eso sólo se va borrando el repo o pidiéndoselo a
-GitHub Support.
+## El historial de git — QUEDÓ UN PASO SIN HACER
+
+El **árbol** de `main` está limpio, pero su **historial** todavía tiene todo:
+la carta vieja y los ids viven en los commits anteriores.
+
+La reescritura está hecha y verificada, en la rama **`historial-limpio`**:
+
+| | commits | árbol | historial |
+|---|---|---|---|
+| `main` | 54 | el bueno | el viejo, con los datos |
+| `historial-limpio` | 52 | **idéntico** al de main | limpio |
+
+`git diff main historial-limpio` no devuelve nada: son el mismo código con dos
+historias distintas. (Dos commits menos porque, al aplicar el scrub a toda la
+historia, el commit cosmético del PR #24 quedó vacío y `filter-repo` lo podó
+junto con su merge. Correcto: ese cambio ya está incorporado más abajo.)
+
+**Lo que falta es una sola línea**, y no se puede hacer con un PR — un merge
+dejaría las dos historias como padres y los commits viejos seguirían colgando
+de `main`:
+
+```
+git push --force origin historial-limpio:main
+```
+
+Después conviene borrar las cinco ramas `claude/*` viejas, que todavía apuntan
+a los objetos originales.
+
+**Cuidado si el force-push se hace:** el `.bat` del usuario, si su carpeta es
+un **clon de git**, actualiza con `git pull --ff-only`. Contra un historial
+reescrito eso falla, y el updater dice *"no se pudo... sigo con la versión que
+tengo"* y **se queda en el código viejo para siempre sin que se note**. Él baja
+el zip, así que no le afecta, pero verificalo con `arrancado_en` en
+`/api/estado-sistema`. Si alguna vez pasa, la salida es borrar la carpeta y
+bajar el zip de nuevo (la base vive afuera, no se pierde nada).
+
+### Cómo se verificó, por si hay que rehacerlo
+
+Se sacaron los 84 nombres que existieron en **cualquier** versión histórica de
+`app/seed.py` y del JSON de la carta, y se buscó cada uno en los 2,7 MB de
+todos los blobs + mensajes de commit + rutas del historial nuevo. Cero nombres
+y cero ids. El único match es la palabra "reabriendo", que contiene "brie" por
+casualidad.
+
+Dos trampas que ese chequeo pescó y que hay que repetir si se rehace:
+
+- **Comparar el árbol final contra el que se probó, archivo por archivo.** Un
+  reemplazo `(?i)brie` convirtió "reabriendo" en "reachoclondo", y un `\bwrap\b`
+  rompió `flex-wrap: wrap` dejándolo en `flex-producto: producto`. **Ninguna
+  prueba detecta un CSS roto.**
+- Los patrones de una sola palabra necesitan `\b` y lookbehind para el guión
+  (`(?<!-)`) y para el valor CSS (`(?<!: )`).
+
+Los archivos de reemplazo vivían en el scratchpad de esa sesión y **ya no
+están**. No hace falta rehacerlos: el resultado está en `historial-limpio`. No
+borres esa rama hasta que `main` esté cambiado.
+
+### Lo que NO se puede borrar
+
+Las páginas de los PR **#1 a #24** en GitHub siguen mostrando los diffs viejos
+con la carta y los ids. Viven en `refs/pull/*`, del lado del servidor, y un
+force-push no las toca. Las únicas dos salidas son borrar el repo público y
+subir uno nuevo desde `historial-limpio` (barato: ya existe el clon privado), o
+pedírselo a GitHub Support. **Está pendiente de decisión del dueño.**
 
 ## Cómo arranca una instalación nueva
 
@@ -49,6 +112,30 @@ de otro local es peor que no arrancar.
 
 `sembrar()` sólo crea productos si la base está vacía, así que esto no le
 borra el catálogo a nadie que ya venía usando la app.
+
+## Qué le pasa a una instalación que YA venía andando
+
+Verificado simulando la actualización con una base con catálogo cargado y los
+ajustes guardados: **el catálogo queda intacto y no aparece ninguna pantalla de
+primer arranque**. La base vive en `%LOCALAPPDATA%\TodoSelector`, fuera de la
+carpeta de la app, así que el autoupdate no la toca.
+
+El único punto delicado es de dónde salen los ids de la sucursal. Antes estaban
+en el código; ahora salen de la tabla `preferencias`:
+
+- **Si alguna vez apretó Guardar en Ajustes**, están en su base y no cambia
+  nada. Apretar Guardar manda las 13 opciones, incluidas las tres de Sucursal,
+  con los valores que la pantalla tenía puestos — que en la versión vieja eran
+  los del local. El dueño lo hizo el 2026-07-28.
+- **Si nunca lo apretó**, `falta_sucursal` sale con las dos plataformas y la
+  pantalla muestra un panel que dice *"Faltan los datos de tu sucursal — tu
+  catálogo está intacto"*, con los tres campos ahí mismo. Se completa una vez y
+  sigue todo igual. No se rompe nada y no hay que tocar la base.
+
+**Cómo saber en cuál de los dos casos está**, sin adivinar: abrir
+`http://127.0.0.1:8001/api/estado-sistema` y mirar `falta_sucursal`. Si es `[]`
+está todo bien. Está cubierto por `probar_falta_solo_la_sucursal` dentro de
+`probar_pantalla_carta.py`.
 
 ## Cómo se trabaja
 
@@ -94,8 +181,11 @@ prendidos primero (ordena, no esconde nada) y solo los prendidos (filtra). El
 grupo del medio, *Sin confirmar*, **no se esconde nunca**: es lo que la app no
 puede asegurar que esté apagado, o sea lo que puede estar vendiéndose.
 
-**App genérica** (PR #22). Lo de arriba: seed vacío, ids de sucursal desde
-Ajustes, pantalla de primer arranque, y los datos del local fuera del repo.
+**App genérica** (PR #22, #23, #24). Seed vacío, ids de sucursal desde
+Ajustes, pantalla de primer arranque, y los datos del local fuera del código,
+de la documentación, de los comentarios y de las pruebas. El #23 y el #24
+fueron los restos que aparecieron al verificar contra la lista completa de
+nombres: casi todos estaban en el TRASPASO viejo y en comentarios.
 
 **Antes** (PR #19-20): apagar todo por plataforma, panel de Ajustes con 13
 opciones, `/api/alertas`, y arreglos (el chip que se deseleccionaba solo, la
@@ -150,7 +240,7 @@ cola).
 
 ---
 
-## LO QUE HAY QUE MIRAR PRIMERO: el pedido de algo apagado
+## EL BUG MÁS CARO: el pedido de algo apagado
 
 **2026-07-28.** El usuario apagó un producto, Todo-Selector lo mostró como
 `apagado`, y **media hora después entró un pedido de PedidosYa con eso**. Es
@@ -239,14 +329,17 @@ filtrar por visible antes del `.first`.
 
 ## Próximos pasos
 
-1. **El click fallado del toggle** (arriba). Es el que más tiempo cuesta ahora
+1. **Terminar la limpieza del historial**: el `push --force` de arriba, y
+   después borrar las ramas `claude/*`. Es un comando y está todo verificado.
+   Falta también que el dueño decida si quiere repo nuevo por lo de los PR.
+2. **El click fallado del toggle** (arriba). Es el que más tiempo cuesta ahora
    que existe "Apagar todo", y el que más riesgo esconde.
-2. **Mostrar el historial en pantalla** (`/api/historial` ya lo devuelve). Es
-   lo que falta para poder reconstruir qué pasó con un producto sin tener la
-   ventana del `.bat` abierta. Ver la sección del pedido de algo apagado.
-3. Terminar el `TODO-SELECTOR` de Rappi: HTML de la tarjeta y pantalla de
+3. **Mostrar el historial de operaciones en pantalla** (`/api/historial` ya lo
+   devuelve). Es lo que falta para poder reconstruir qué pasó con un producto
+   sin tener la ventana del `.bat` abierta. Ver la sección del bug más caro.
+4. Terminar el `TODO-SELECTOR` de Rappi: HTML de la tarjeta y pantalla de
    sesión expirada.
-4. **Apagar en varias tiendas de Rappi a la vez**, si algún usuario las tiene
+5. **Apagar en varias tiendas de Rappi a la vez**, si algún usuario las tiene
    independientes. Hoy hay que iterar cambiando `storeId` en la URL.
 
 ## Diagnóstico disponible (todo GET, no modifican nada)
