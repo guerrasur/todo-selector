@@ -5,6 +5,40 @@ sola pantalla, sin entrar a cada portal.
 
 Corre en `http://127.0.0.1:8001/` (Suipacha Loader usa el 8000).
 
+## ⚠️ Aviso importante — leer antes de usar
+
+Esta app **no es una integración oficial** de PedidosYa ni de Rappi. Automatiza
+un navegador (Chromium vía Playwright) que se loguea con tu cuenta de partner
+y clickea los mismos botones que clickearías vos a mano.
+
+**Ambas plataformas prohíben expresamente el acceso automatizado en sus
+Términos de Servicio.** Usar esta herramienta contra cuentas reales puede
+resultar en:
+
+- Suspensión o baneo de la cuenta de partner del local.
+- Pérdida de acceso a pedidos, historial y facturación asociados a esa cuenta.
+- Detección de patrones de automatización (sesiones persistentes, clicks
+  regulares, reintentos) aunque el comportamiento imite a un humano.
+
+**No hay garantía de que la app refleje el estado real de la carta en todo
+momento.** Un producto puede figurar como apagado en pantalla y estar
+disponible en el portal (o viceversa) si hay un fallo de lectura o el portal
+lo revive por su cuenta. Revisar siempre `/api/alertas` y el grupo "Sin
+confirmar" antes de asumir que algo está apagado.
+
+**Se recomienda usar la app en modo simulado**
+(`iniciar_app.bat simulado`), que no toca ningún portal real y sirve solo
+para conocer la interfaz con fines educativos/de prueba. El modo que opera
+en vivo contra PedidosYa y Rappi queda a criterio y responsabilidad de quien
+lo ejecute.
+
+**Quién asume el riesgo:** quien instala y ejecuta esta app lo hace bajo su
+propia responsabilidad y con su propia cuenta. El autor de este repositorio
+no se responsabiliza por baneos, suspensiones, pérdidas de pedidos, o
+cualquier otro perjuicio derivado de su uso. Este proyecto se comparte con
+fines educativos/personales, no como producto soportado, y puede dejar de
+funcionar en cualquier momento si Rappi o PedidosYa cambian su sitio.
+
 ## Estado: EN USO
 
 Las cuatro operaciones corrieron en vivo contra los dos portales.
