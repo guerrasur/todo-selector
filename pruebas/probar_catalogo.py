@@ -42,12 +42,17 @@ def revisar(condicion, titulo):
 
 
 def remotos(db, nombre):
-    """Como se llama ese producto en cada portal. None = no esta ahi."""
+    """Como se llama ese producto en cada portal. None = no esta ahi.
+
+    Solo PedidosYa y Rappi: es lo unico que trae catalogo_ejemplo.py. Rappi
+    Común es una plataforma aparte (ver PLATAFORMAS) que este archivo no
+    ejercita.
+    """
     p = db.query(Producto).filter_by(nombre=nombre).first()
     if p is None:
         return None
     return {plat: catalogo.nombre_remoto(p, plat)
-            for plat in catalogo.PLATAFORMAS}
+            for plat in ("pedidosya", "rappi")}
 
 
 def limpiar(db):

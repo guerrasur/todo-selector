@@ -159,6 +159,19 @@ class Worker:
             store_id=config.texto("rappi_store_id"),
             brand_id=config.texto("rappi_brand_id"))
 
+        # Rappi Común es una tienda de Rappi aparte (mismo brandId, otro
+        # storeId) que funciona independiente de Rappi Turbo, y es OPCIONAL:
+        # a diferencia de las otras dos, la mayoria de los locales no la
+        # usa. Si no esta configurada ni se le abre pestaña, para no dejar
+        # una sesion "caida" fantasma que alerte de algo que nadie pidio.
+        if config.texto("rappi_comun_store_id"):
+            pag_rappi_comun = await self.browser.new_page()
+            self.plataformas["rappi_comun"] = Rappi(
+                pag_rappi_comun,
+                store_id=config.texto("rappi_comun_store_id"),
+                brand_id=config.texto("rappi_brand_id"),
+                nombre="rappi_comun")
+
         for nombre, plat in self.plataformas.items():
             # Primer arranque: todavia no dijo que sucursal es. Navegar con
             # el id vacio carga cualquier cosa y el error que sale despues
@@ -463,6 +476,24 @@ class Worker:
         if rappi is not None:
             rappi.configurar(store_id=config.texto("rappi_store_id"),
                              brand_id=config.texto("rappi_brand_id"))
+
+        # Rappi Común es opcional: si recien ahora le cargaron el storeId y
+        # el navegador ya esta abierto, hay que abrirle la pestaña recien
+        # aca (al arrancar no existia todavia). Si ya tenia pestaña, solo se
+        # actualiza como las otras dos.
+        rappi_comun_id = config.texto("rappi_comun_store_id")
+        rappi_comun = self.plataformas.get("rappi_comun")
+        if rappi_comun is not None:
+            rappi_comun.configurar(store_id=rappi_comun_id,
+                                   brand_id=config.texto("rappi_brand_id"))
+        elif rappi_comun_id and self.browser is not None:
+            from plataformas.rappi import Rappi
+            pagina = await self.browser.new_page()
+            self.plataformas["rappi_comun"] = Rappi(
+                pagina, store_id=rappi_comun_id,
+                brand_id=config.texto("rappi_brand_id"),
+                nombre="rappi_comun")
+            log.info("Rappi Común recien configurada: se le abre la pestaña")
 
         for nombre, plat in self.plataformas.items():
             if not plat.en_el_menu():
