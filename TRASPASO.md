@@ -8,6 +8,18 @@ PR #24. El dueño tiene un **clon privado** con el historial viejo completo.
 **LO PRIMERO QUE HAY QUE MIRAR:** quedó un paso a medias, el force-push que
 limpia el historial. Ver «El historial de git» abajo.
 
+**RECORDATORIO PARA LA SESIÓN QUE VIENE (dejado el 2026-07-30):** preguntarle
+al usuario qué devolvió `/api/estado-tienda?plataforma=rappi` y con
+`rappi_comun`. Se arregló el selector del badge de estado de tienda de Rappi
+(buscaba una `<td>` que no existe; el DOM real es un div, confirmado por
+DevTools del usuario) y ahora, cuando no puede confirmar, la respuesta trae
+`motivo` y `diagnostico`. **Falta el paso de él**, que es el único que puede
+entrar al portal: correrlo y pasar el resultado. Los tres desenlaces posibles
+y qué hacer con cada uno están en el README, sección «TAREAS PENDIENTES» →
+«Estado de tienda de Rappi». Si el motivo es «no encontré ningún texto de
+estado conocido», la respuesta trae `textos_en_pantalla` y con eso se agrega
+el estado que falte a `ESTADOS_TIENDA_ABIERTA` / `ESTADOS_TIENDA_CERRADA`.
+
 App local (FastAPI + Playwright) que apaga/prende productos en PedidosYa y
 Rappi desde una pantalla. Corre en `127.0.0.1:8001`.
 
@@ -375,6 +387,8 @@ filtrar por visible antes del `.first`.
 /api/buscar-texto?plataforma=&fragmento=     cómo está escrito realmente
 /api/estructura?plataforma=                  dónde vive la navegación
 /api/esqueleto?plataforma=                   árbol del DOM (tag/id/clases/texto)
+/api/estado-tienda?plataforma=               si la TIENDA está abierta, y si no
+                                             se pudo, el motivo y qué vio
 /api/masivo/previo?accion=                   cuántos tocaría cada portal
 ```
 

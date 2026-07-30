@@ -461,6 +461,13 @@ async def estado_tienda(plataforma: str):
     Ej: /api/estado-tienda?plataforma=rappi
     Sirve para probar rappi_nombre_tienda / rappi_comun_nombre_tienda recien
     cargados en Ajustes sin esperar a la proxima ronda de reverificacion.
+
+    Si no se pudo confirmar, devuelve "abierta": null CON el motivo y un
+    diagnostico (que textos habia en la pantalla, cuantas tiendas se veian).
+    Un "no se" mudo no distingue "el selector no encontro nada" de "falta un
+    dato en Ajustes", que son arreglos distintos: eso fue exactamente lo que
+    dejo el badge de las dos tiendas de Rappi en "sin datos" sin pista
+    ninguna (2026-07-30).
     """
     resultado = await worker.estado_tienda(plataforma)
     worker.estado_tiendas[plataforma] = resultado

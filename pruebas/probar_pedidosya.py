@@ -53,8 +53,10 @@ def servir() -> socketserver.TCPServer:
     """Sirve la carpeta de pruebas. Con file:// no anda el localStorage."""
     handler = functools.partial(http.server.SimpleHTTPRequestHandler,
                                 directory=str(RAIZ))
+    # Antes de instanciar: puesto despues, el bind ya paso y correr la
+    # prueba de nuevo enseguida explota con "Address already in use".
+    socketserver.TCPServer.allow_reuse_address = True
     servidor = socketserver.TCPServer(("127.0.0.1", PUERTO), handler)
-    servidor.allow_reuse_address = True
     threading.Thread(target=servidor.serve_forever, daemon=True).start()
     return servidor
 
