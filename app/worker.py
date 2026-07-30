@@ -226,7 +226,8 @@ class Worker:
             store_id=config.texto("rappi_comun_store_id"),
             brand_id=config.texto("rappi_brand_id"),
             nombre="rappi_comun",
-            nombre_tienda=config.texto("rappi_comun_nombre_tienda"))
+            nombre_tienda=config.texto("rappi_comun_nombre_tienda"),
+            brand_id_conectividad=config.texto("rappi_comun_brand_id_conectividad"))
 
     async def _cerrar_plataforma(self, nombre: str):
         """Saca una plataforma opcional que el usuario acaba de desactivar.
@@ -577,7 +578,8 @@ class Worker:
             rappi_comun.configurar(
                 store_id=config.texto("rappi_comun_store_id"),
                 brand_id=config.texto("rappi_brand_id"),
-                nombre_tienda=config.texto("rappi_comun_nombre_tienda"))
+                nombre_tienda=config.texto("rappi_comun_nombre_tienda"),
+                brand_id_conectividad=config.texto("rappi_comun_brand_id_conectividad"))
         elif activa and self.browser is not None:
             await self._abrir_rappi_comun()
             log.info("Rappi Común recien configurada: se le abre la pestaña")

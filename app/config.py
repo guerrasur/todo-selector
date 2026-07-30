@@ -252,6 +252,26 @@ OPCIONES = (
         ayuda="Igual que el de Rappi, pero el nombre EXACTO de la tienda "
               "Común en esa misma tabla de Conectividad.",
     ),
+    # CONFIRMADO EN VIVO (2026-07-30): pese a lo que dice "rappi_comun_store_id"
+    # mas arriba ("mismo brandId, storeId distinto"), Rappi Común puede tener
+    # su PROPIO brandId, distinto del de Turbo (en la cuenta de prueba:
+    # AR72021 contra AR75000). No hacia falta para el menu de productos
+    # (Rappi tolera el storeId aunque el brandId de la URL sea el de la otra
+    # tienda), pero SI hace falta para encontrar la fila correcta en
+    # Conectividad. Vacio = usa el mismo rappi_brand_id de siempre.
+    Opcion(
+        clave="rappi_comun_brand_id_conectividad",
+        titulo="brandId de Rappi Común en \"Conectividad\"",
+        defecto="",
+        tipo="texto",
+        grupo="Rappi Común",
+        opcional=True,
+        ayuda="Normalmente NO hace falta tocarlo. Solo si el badge de estado "
+              "de Rappi Común nunca muestra nada: entrá a Administración → "
+              "Conectividad con la tienda Común seleccionada y mirá el "
+              "brandId en la URL — puede ser distinto al de Rappi Turbo. "
+              "Vacío = usa el mismo brandId de Rappi Turbo.",
+    ),
 )
 
 POR_CLAVE = {o.clave: o for o in OPCIONES}

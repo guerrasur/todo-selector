@@ -75,7 +75,8 @@ class Rappi(PlataformaBase):
     TXT_INDEFINIDO = "No disponible indefinidamente"
 
     def __init__(self, page, store_id: str = None, brand_id: str = None,
-                 nombre: str = None, nombre_tienda: str = None):
+                 nombre: str = None, nombre_tienda: str = None,
+                 brand_id_conectividad: str = None):
         super().__init__(page)
         self.store_id = store_id or self.STORE_ID
         self.brand_id = brand_id or self.BRAND_ID
@@ -86,18 +87,24 @@ class Rappi(PlataformaBase):
         if nombre:
             self.nombre = nombre
         # Nombre EXACTO tal cual figura en Administracion > Conectividad,
-        # columna "Tienda". Sale de Ajustes (rappi_nombre_tienda /
-        # rappi_comun_nombre_tienda) porque el storeId NO aparece en ese DOM
-        # (ver leer_estado_tienda): sin este dato no hay como saber cual de
-        # las tarjetas de esa pantalla es la nuestra.
+        # columna "Tienda". Sirve de desempate si la URL directa (ver
+        # leer_estado_tienda) igual muestra mas de una tarjeta.
         self.nombre_tienda = nombre_tienda or ""
+        # CONFIRMADO EN VIVO (2026-07-30): Rappi Comun tiene su PROPIO
+        # brandId, distinto del de Turbo (AR72021 contra AR75000 en la
+        # cuenta de prueba) -- el supuesto "mismo brandId, otro storeId" de
+        # mas abajo resulto ser falso para Conectividad. Esto NO toca
+        # self.brand_id (el que usa url_menu para el menu de productos, que
+        # ya viene andando en produccion); es solo para construir la URL de
+        # Conectividad. Sin este ajuste, cae a self.brand_id.
+        self.brand_id_conectividad = brand_id_conectividad or self.brand_id
 
     @property
     def configurado(self) -> bool:
         return bool(self.store_id and self.brand_id)
 
     def configurar(self, store_id: str = None, brand_id: str = None,
-                   nombre_tienda: str = None):
+                   nombre_tienda: str = None, brand_id_conectividad: str = None):
         """Cambia de tienda/marca sin reiniciar la app (viene de Ajustes)."""
         if store_id and store_id != self.store_id:
             log.info("Rappi pasa a la tienda %s (antes %s)", store_id, self.store_id)
@@ -107,6 +114,8 @@ class Rappi(PlataformaBase):
             self.brand_id = brand_id
         if nombre_tienda is not None and nombre_tienda != self.nombre_tienda:
             self.nombre_tienda = nombre_tienda
+        if brand_id_conectividad and brand_id_conectividad != self.brand_id_conectividad:
+            self.brand_id_conectividad = brand_id_conectividad
 
     @property
     def url_menu(self) -> str:
@@ -279,30 +288,91 @@ class Rappi(PlataformaBase):
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
 
     # =====================================================================
-    #  DESACTIVADO EN VIVO (2026-07-30): confirmado por log que clickear
-    #  "Conectividad" NO se queda en la marca configurada.
+    #  Estado de tienda via Conectividad (reactivado 2026-07-30, v2)
     # =====================================================================
-    # El plan original (ver commit anterior) era: click en el nav
-    # "Conectividad", buscar la fila cuya columna "Tienda" matcheara
-    # nombre_tienda, leer su columna "Estado". Se probo en vivo contra
-    # rappi_comun y el log mostro esto DESPUES del click:
+    # El primer intento clickeaba el nav "Conectividad" y terminaba en
+    # cualquier marca de la cuenta (ver commit anterior): el click no
+    # respeta la marca de la pestaña actual. Esta version navega DIRECTO
+    # por URL con el brandId y storeId de ESTA instancia (confirmado en
+    # vivo que /home/real-time acepta brandId+storeIds+brandIds+storeId
+    # igual que /menu), y ademas verifica que la navegacion se haya
+    # quedado en nuestro storeId antes de leer nada: si el portal
+    # redirige a otro lado, "no se" (None) en vez de leer una tienda
+    # ajena.
     #
-    #   Refrescando rappi_comun antes de operar (https://partners.rappi.com/
-    #   home/real-time?brandId=AR72021&storeIds=AR221599,...&storeId=AR221599)
+    # Con la URL apuntando a un solo storeId debería quedar UNA tarjeta;
+    # nombre_tienda queda como desempate por si igual aparece mas de una.
     #
-    # brandId=AR72021 no es el brandId configurado (era AR75000): el click
-    # en "Conectividad" no navega a una pantalla filtrada por la marca de
-    # ESTA pestaña, sino a un dashboard que puede terminar en cualquier
-    # marca de la cuenta. Ir a buscar ahi el nombre_tienda configurado no
-    # solo no encuentra nada (explica el "no toma la conectividad" del
-    # usuario) -- ademas la pestaña queda parada en un contexto de OTRA
-    # marca hasta que la proxima operacion la vuelve a poner en menu.
-    #
-    # Nada de esto llego a apagar o prender algo equivocado (ir_al_menu()
-    # se ejecuta antes de cualquier apagar()/prender() real y corrige la
-    # URL), pero es motivo suficiente para no dejarlo andando sin entender
-    # primero por que aparece una marca ajena. Los ajustes nombre_tienda
-    # quedan guardados (no hacen dano estando ahi) para cuando se retome
-    # esto con la URL real de Conectividad confirmada en vivo.
+    # Estados vistos en captura: "Activa", "Cerrada" (fuera de horario,
+    # normal) y "Suspendida" (la corta Rappi, alerta real). Cualquier otro
+    # texto que no reconozcamos devuelve None en vez de adivinar.
+    ESTADOS_TIENDA_ABIERTA = {"activa"}
+    ESTADOS_TIENDA_CERRADA = {"cerrada", "suspendida"}
+
+    def _url_conectividad(self) -> str:
+        marca = self.brand_id_conectividad
+        return (
+            f"https://partners.rappi.com/home/real-time"
+            f"?brandId={marca}&storeIds={self.store_id}"
+            f"&brandIds={marca}&storeId={self.store_id}"
+        )
+
     async def leer_estado_tienda(self) -> Optional[ResultadoTienda]:
+        if not self.brand_id_conectividad or not self.store_id:
+            return None
+
+        try:
+            await self.page.goto(self._url_conectividad(), wait_until="domcontentloaded")
+            await self.page.wait_for_timeout(2500)
+
+            # Si el portal nos mando a otro lado, no seguimos: mejor "no se"
+            # que leer el estado de una tienda que no es la nuestra.
+            if self.store_id not in self.page.url:
+                log.warning("%s: la navegacion a Conectividad no se quedo en "
+                            "la tienda configurada (termino en %s)",
+                            self.nombre, self.page.url)
+                return None
+
+            celdas_estado = self.page.locator(
+                "xpath=//td[normalize-space(text())='Estado']"
+                "/following-sibling::td[1]"
+            )
+            total = await celdas_estado.count()
+            if total == 0:
+                return None
+
+            if total == 1:
+                objetivo = celdas_estado.first
+            elif self.nombre_tienda:
+                valor_tienda = self.page.get_by_text(self.nombre_tienda, exact=True)
+                if await valor_tienda.count() == 0:
+                    return None
+                tarjeta = valor_tienda.locator("xpath=ancestor::table[1]").first
+                objetivo = tarjeta.locator(
+                    "xpath=.//td[normalize-space(text())='Estado']"
+                    "/following-sibling::td[1]"
+                )
+                if await objetivo.count() == 0:
+                    return None
+            else:
+                # Mas de una tarjeta y no hay nombre para desempatar:
+                # adivinar cual es la nuestra es peor que no decir nada.
+                return None
+
+            texto = (await objetivo.inner_text()).strip()
+        except Exception as e:
+            log.warning("%s: no pude leer el estado de la tienda en "
+                        "Conectividad: %s", self.nombre,
+                        " ".join(str(e).split())[:120])
+            return None
+        finally:
+            # Nos fuimos del menu a proposito: volvemos para que la proxima
+            # lectura de productos no se encuentre en otra pantalla.
+            await self.ir_al_menu()
+
+        t = texto.lower()
+        if t in self.ESTADOS_TIENDA_ABIERTA:
+            return ResultadoTienda(abierta=True, detalle=texto)
+        if t in self.ESTADOS_TIENDA_CERRADA:
+            return ResultadoTienda(abierta=False, detalle=texto)
         return None
