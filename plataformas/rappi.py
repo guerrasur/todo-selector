@@ -279,67 +279,30 @@ class Rappi(PlataformaBase):
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
 
     # =====================================================================
-    #  TODO-SELECTOR: pendiente de confirmar en vivo (2026-07-30)
+    #  DESACTIVADO EN VIVO (2026-07-30): confirmado por log que clickear
+    #  "Conectividad" NO se queda en la marca configurada.
     # =====================================================================
-    # Por captura de /api/esqueleto en Administracion > Conectividad: cada
-    # tienda de la marca tiene su propia tabla, con filas etiqueta/valor:
+    # El plan original (ver commit anterior) era: click en el nav
+    # "Conectividad", buscar la fila cuya columna "Tienda" matcheara
+    # nombre_tienda, leer su columna "Estado". Se probo en vivo contra
+    # rappi_comun y el log mostro esto DESPUES del click:
     #
-    #   Tienda:  "Lima Ba - Gurruchaga - Turbo"
-    #   Pais:    Argentina
-    #   Estado:  Activa | Cerrada | Suspendida
+    #   Refrescando rappi_comun antes de operar (https://partners.rappi.com/
+    #   home/real-time?brandId=AR72021&storeIds=AR221599,...&storeId=AR221599)
     #
-    # NO hay storeId visible en ese DOM (ni id, ni data-testid, ni href): la
-    # unica forma de saber cual tarjeta es la nuestra es por el nombre EXACTO
-    # de la columna "Tienda", de ahi que haga falta el ajuste nombre_tienda
-    # (rappi_nombre_tienda / rappi_comun_nombre_tienda). Sin ese dato, "no
-    # se" (None) es la unica respuesta honesta -- misma regla que
-    # leer_estado(): no afirmar un estado que no se pudo leer.
+    # brandId=AR72021 no es el brandId configurado (era AR75000): el click
+    # en "Conectividad" no navega a una pantalla filtrada por la marca de
+    # ESTA pestaña, sino a un dashboard que puede terminar en cualquier
+    # marca de la cuenta. Ir a buscar ahi el nombre_tienda configurado no
+    # solo no encuentra nada (explica el "no toma la conectividad" del
+    # usuario) -- ademas la pestaña queda parada en un contexto de OTRA
+    # marca hasta que la proxima operacion la vuelve a poner en menu.
     #
-    # "Cerrada" no es necesariamente un problema (vimos el motivo "it is out
-    # of regular hours", o sea fuera de horario configurado); "Suspendida" si
-    # lo es (la corta Rappi). Cualquier otro texto que no reconozcamos
-    # tambien devuelve None en vez de adivinar.
-    NAV_CONECTIVIDAD = "Conectividad"
-    ESTADOS_TIENDA_ABIERTA = {"activa"}
-    ESTADOS_TIENDA_CERRADA = {"cerrada", "suspendida"}
-
+    # Nada de esto llego a apagar o prender algo equivocado (ir_al_menu()
+    # se ejecuta antes de cualquier apagar()/prender() real y corrige la
+    # URL), pero es motivo suficiente para no dejarlo andando sin entender
+    # primero por que aparece una marca ajena. Los ajustes nombre_tienda
+    # quedan guardados (no hacen dano estando ahi) para cuando se retome
+    # esto con la URL real de Conectividad confirmada en vivo.
     async def leer_estado_tienda(self) -> Optional[ResultadoTienda]:
-        if not self.nombre_tienda:
-            return None
-
-        await self.ir_al_menu()  # asegura sesion antes de irnos a otra pantalla
-
-        try:
-            nav = self.page.get_by_text(self.NAV_CONECTIVIDAD, exact=True)
-            if await nav.count() == 0:
-                return None
-            await self.clickear(nav, que="nav Conectividad")
-
-            valor_tienda = self.page.get_by_text(self.nombre_tienda, exact=True)
-            if await valor_tienda.count() == 0:
-                return None
-
-            tarjeta = valor_tienda.locator("xpath=ancestor::table[1]").first
-            valor_estado = tarjeta.locator(
-                "xpath=.//td[normalize-space(text())='Estado']"
-                "/following-sibling::td[1]"
-            )
-            if await valor_estado.count() == 0:
-                return None
-            texto = (await valor_estado.inner_text()).strip()
-        except Exception as e:
-            log.warning("%s: no pude leer el estado de la tienda en "
-                        "Conectividad: %s", self.nombre,
-                        " ".join(str(e).split())[:120])
-            return None
-        finally:
-            # Nos fuimos del menu a proposito: volvemos para que la proxima
-            # lectura de productos no se encuentre en otra pantalla.
-            await self.ir_al_menu()
-
-        t = texto.lower()
-        if t in self.ESTADOS_TIENDA_ABIERTA:
-            return ResultadoTienda(abierta=True, detalle=texto)
-        if t in self.ESTADOS_TIENDA_CERRADA:
-            return ResultadoTienda(abierta=False, detalle=texto)
         return None
