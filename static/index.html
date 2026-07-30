@@ -235,6 +235,7 @@
 
 <header>
   <h1>Todo-Selector</h1>
+  <span class="badge" id="version" title="Version instalada"></span>
   <span class="badge" id="estado-sistema">cargando…</span>
   <span class="badge" id="pendientes"></span>
   <span class="badge" id="lectura"></span>
@@ -758,6 +759,8 @@ function pintarSistema(s) {
   // esta lista.
   if (Array.isArray(s.plataformas) && s.plataformas.length) PLATS = s.plataformas;
   nombrarPlataformas();
+
+  if (s.version) document.getElementById('version').textContent = 'v' + s.version;
 
   const el = document.getElementById('estado-sistema');
   if (s.simulado) {

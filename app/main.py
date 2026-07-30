@@ -82,6 +82,19 @@ MODO_SIMULADO = os.environ.get("STOCKSWITCH_SIMULADO", "0") == "1"
 # lo hace visible en vez de que se note como un 404 raro.
 ARRANCADO_EN = datetime.now()
 
+# Un numero que se bumpea a mano en cada cambio que vale la pena distinguir
+# (ver VERSION en la raiz). No es la version de un paquete: es solo para que
+# la pantalla y el log de actualizar.ps1 puedan decir "estoy en la X" y
+# "pase de la X a la Y" sin que el usuario tenga que leer un commit.
+def _leer_version() -> str:
+    try:
+        return (RAIZ / "VERSION").read_text(encoding="utf-8").strip() or "?"
+    except OSError:
+        return "?"
+
+
+VERSION = _leer_version()
+
 
 @app.on_event("startup")
 async def arrancar():
@@ -344,6 +357,7 @@ def estado_sistema(db: Session = Depends(get_db)):
     ]
 
     return {
+        "version": VERSION,
         "simulado": MODO_SIMULADO,
         "arrancado_en": ARRANCADO_EN.isoformat(timespec="seconds"),
         "sesiones": worker.sesion_ok,
