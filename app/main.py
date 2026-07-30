@@ -832,3 +832,15 @@ def favicon():
 @app.get("/")
 def index():
     return FileResponse(str(STATIC / "index.html"), headers=SIN_CACHE)
+
+
+# Ajustes y Carta son pantallas propias (URL propia via history.pushState,
+# no un panel que se despliega arriba del dashboard -- ver mostrarPantalla()
+# en index.html), pero siguen siendo el mismo archivo. Estas rutas son solo
+# para que un F5 (o abrir el link a mano) no tire 404: sirven el mismo
+# index.html, que arranca mostrando el dashboard (no reabre la pantalla
+# sola). Navegar ahi con los botones de la app sigue andando igual.
+@app.get("/ajustes")
+@app.get("/carta")
+def pantalla_spa():
+    return FileResponse(str(STATIC / "index.html"), headers=SIN_CACHE)
