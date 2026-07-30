@@ -588,6 +588,14 @@ class Worker:
             if not plat.en_el_menu():
                 self.ultimo_refresco.pop(nombre, None)
 
+        # Si lo que acaban de guardar es justo el nombre_tienda (o cualquier
+        # otro ajuste), conviene refrescar el badge de "abierta/cerrada" ya
+        # mismo y no esperar a la proxima ronda de reverificacion (que puede
+        # ser en 15 minutos). En background: navegar a Conectividad tarda,
+        # y esto no puede colgar el POST que guarda los ajustes.
+        if not self.modo_simulado:
+            asyncio.create_task(self._refrescar_estado_tiendas())
+
         return {nombre: plat.url_menu
                 for nombre, plat in self.plataformas.items()}
 
