@@ -685,10 +685,11 @@ carta entera hay que recorrerlas (ver el punto 0).
       reverificación). **Vacío —el default— es como si no existiera.**
       La pantalla Carta lee las tres y deja vincular las tres, que era lo
       que le faltaba. Ver «Las dos tiendas de Rappi».
-- [ ] **Ajustes como pantalla propia, no desplegable.** Pedido del usuario
-      (2026-07-30): hoy `#panel-ajustes` es un dropdown/panel superpuesto
-      dentro de `static/index.html`; pasarlo a una pantalla aparte (ruta o
-      vista propia, no un `<div>` que se abre encima de lo demás).
+- [x] **Ajustes y Carta como pantallas propias, no desplegables.** Hecho
+      (2026-07-30). Tapan todo el dashboard mientras están abiertas y
+      tienen su propia URL (`/ajustes`, `/carta`, vía `history.pushState`),
+      con un botón "← Volver". "Apagar todo" no se tocó, sigue como panel
+      de siempre.
 - [ ] **Rediseñar la estética de la aplicación.** Pedido del usuario
       (2026-07-30), para más adelante: **recién cuando lo funcional esté
       terminado**. No tocar esto todavía.
