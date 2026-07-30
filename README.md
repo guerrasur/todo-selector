@@ -685,6 +685,13 @@ carta entera hay que recorrerlas (ver el punto 0).
       reverificación). **Vacío —el default— es como si no existiera.**
       La pantalla Carta lee las tres y deja vincular las tres, que era lo
       que le faltaba. Ver «Las dos tiendas de Rappi».
+- [ ] **Ajustes como pantalla propia, no desplegable.** Pedido del usuario
+      (2026-07-30): hoy `#panel-ajustes` es un dropdown/panel superpuesto
+      dentro de `static/index.html`; pasarlo a una pantalla aparte (ruta o
+      vista propia, no un `<div>` que se abre encima de lo demás).
+- [ ] **Rediseñar la estética de la aplicación.** Pedido del usuario
+      (2026-07-30), para más adelante: **recién cuando lo funcional esté
+      terminado**. No tocar esto todavía.
 
 ## Nota sobre términos de servicio
 
