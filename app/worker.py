@@ -184,7 +184,8 @@ class Worker:
             pag_rappi,
             store_id=config.texto("rappi_store_id"),
             brand_id=config.texto("rappi_brand_id"),
-            nombre_tienda=config.texto("rappi_nombre_tienda"))
+            nombre_tienda=config.texto("rappi_nombre_tienda"),
+            brand_id_conectividad=config.texto("rappi_brand_id_conectividad"))
 
         # Rappi Común es una tienda de Rappi aparte (mismo brandId, otro
         # storeId) que funciona independiente de Rappi Turbo, y es OPCIONAL:
@@ -563,9 +564,11 @@ class Worker:
 
         rappi = self.plataformas.get("rappi")
         if rappi is not None:
-            rappi.configurar(store_id=config.texto("rappi_store_id"),
-                             brand_id=config.texto("rappi_brand_id"),
-                             nombre_tienda=config.texto("rappi_nombre_tienda"))
+            rappi.configurar(
+                store_id=config.texto("rappi_store_id"),
+                brand_id=config.texto("rappi_brand_id"),
+                nombre_tienda=config.texto("rappi_nombre_tienda"),
+                brand_id_conectividad=config.texto("rappi_brand_id_conectividad"))
 
         # Rappi Común es opcional y se prende y se apaga desde Ajustes, sin
         # reiniciar: si recien ahora le cargaron el storeId hay que abrirle
@@ -711,8 +714,16 @@ class Worker:
                 log.exception("Leyendo estado de tienda de %s", plataforma)
                 return {"error": _resumen(e)}
 
+        # El diagnostico viaja SIEMPRE que no se pudo confirmar: es lo que
+        # convierte un "sin datos" mudo en algo accionable (que paso, que
+        # textos habia en la pantalla, si falta un dato de Ajustes).
         if resultado is None:
-            return {"abierta": None}
+            diag = dict(getattr(plat, "diagnostico_tienda", {}) or {})
+            salida = {"abierta": None}
+            if diag:
+                salida["motivo"] = diag.pop("motivo", "")
+                salida["diagnostico"] = diag
+            return salida
         return {"abierta": resultado.abierta, "detalle": resultado.detalle}
 
     async def _refrescar_estado_tiendas(self):

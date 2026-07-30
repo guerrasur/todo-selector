@@ -303,11 +303,80 @@ class Rappi(PlataformaBase):
     # Con la URL apuntando a un solo storeId debería quedar UNA tarjeta;
     # nombre_tienda queda como desempate por si igual aparece mas de una.
     #
-    # Estados vistos en captura: "Activa", "Cerrada" (fuera de horario,
-    # normal) y "Suspendida" (la corta Rappi, alerta real). Cualquier otro
-    # texto que no reconozcamos devuelve None en vez de adivinar.
+    # LA PANTALLA NO ES UNA TABLA (confirmado por DevTools del usuario,
+    # 2026-07-30). La version anterior buscaba <td>Estado</td> + la celda
+    # siguiente, leido de una captura, y encontraba CERO celdas siempre: por
+    # eso las dos tiendas de Rappi decian "sin datos" mientras PedidosYa
+    # andaba. El estado es un div suelto de styled-components:
+    #
+    #     <div class="sc-papXJ iobIXi rcf-typography-caption2 portal207"
+    #          color="neutrals.grays.gray50"
+    #          data-testid="test-typography">Cerrada</div>
+    #
+    # Las clases son generadas (sc-papXJ, iobIXi) y el data-testid es
+    # generico: lo comparte TODO texto del portal, no es el estado. Lo unico
+    # estable es el TEXTO, asi que se busca por texto (regla 2 de CLAUDE.md)
+    # y se desempata por el nombre de la tienda.
+    #
+    # Estados vistos: "Activa", "Cerrada" (fuera de horario, normal) y
+    # "Suspendida" (la corta Rappi, alerta real). Cualquier otro texto
+    # devuelve None en vez de adivinar, y el diagnostico dice cual fue.
     ESTADOS_TIENDA_ABIERTA = {"activa"}
     ESTADOS_TIENDA_CERRADA = {"cerrada", "suspendida"}
+
+    # Cuantas veces mirar antes de rendirse. La pantalla de Conectividad es
+    # un SPA: el primer render puede no tener todavia el estado. Esperar un
+    # rato fijo y decidir ahi es lo que ya nos mordio en _confirmar().
+    INTENTOS_ESTADO_TIENDA = 5
+    ESPERA_ENTRE_INTENTOS = 1500
+
+    # Busca en el DOM los textos que son un estado de tienda, y para cada uno
+    # el contexto (la tarjeta/fila donde vive) para poder desempatar por
+    # nombre de tienda. Devuelve tambien una muestra de textos cortos de la
+    # pantalla: si no reconocemos ningun estado, eso es lo unico que dice
+    # como los escribe el portal de verdad.
+    JS_ESTADOS_TIENDA = """
+        ([estados, nombreTienda]) => {
+            const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+            // Solo el texto PROPIO: si no, cada ancestro cuenta como otro
+            // candidato y una tienda parece cinco.
+            const propio = el => {
+                let t = '';
+                for (const n of el.childNodes) if (n.nodeType === 3) t += n.textContent;
+                return norm(t);
+            };
+
+            const candidatos = [], muestra = [];
+            for (const el of document.querySelectorAll('body *')) {
+                const t = propio(el);
+                if (!t) continue;
+                if (t.length <= 40 && !muestra.includes(t)) muestra.push(t);
+                if (!estados.includes(t.toLowerCase())) continue;
+
+                // A cuantos niveles esta el nombre de la tienda. OJO: no
+                // alcanza con "algun ancestro lo contiene". Subiendo lo
+                // suficiente se llega al contenedor de TODAS las tarjetas, y
+                // ahi el estado de la tienda B tambien "contiene" el nombre
+                // de la A: con dos tiendas las dos daban positivo y no se
+                // podia desempatar. Lo que distingue es la DISTANCIA — el
+                // estado de una tarjeta tiene su propio nombre mas cerca —
+                // asi que se guarda el nivel y decide el mas cercano.
+                let contexto = '', nivel = null;
+                for (let p = el, i = 0; p && i < 10; p = p.parentElement, i++) {
+                    const texto = norm(p.innerText || p.textContent);
+                    if (texto.length > 600) break;
+                    contexto = texto;
+                    if (nombreTienda && texto.includes(nombreTienda)) {
+                        nivel = i;
+                        break;
+                    }
+                }
+                candidatos.push({texto: t, contexto: contexto.slice(0, 200),
+                                 nivel: nivel});
+            }
+            return {candidatos: candidatos, muestra: muestra.slice(0, 60)};
+        }
+    """
 
     def _url_conectividad(self) -> str:
         marca = self.brand_id_conectividad
@@ -317,8 +386,92 @@ class Rappi(PlataformaBase):
             f"&brandIds={marca}&storeId={self.store_id}"
         )
 
+    async def _buscar_estado_en_pantalla(self) -> tuple[Optional[ResultadoTienda], dict]:
+        """Lee el estado de la pantalla que ya esta abierta. No navega.
+
+        Separado de leer_estado_tienda() a proposito: asi la parte que
+        depende del DOM se puede probar contra una replica local sin portal
+        ni login (pruebas/probar_rappi_conectividad.py), que es lo que
+        faltaba cuando esto se escribio mirando una captura.
+
+        Devuelve (resultado, diagnostico). El diagnostico es lo que se
+        muestra cuando NO se pudo afirmar nada: sin eso, un "sin datos" no
+        distingue "no encontre el texto" de "hay tres tiendas y no se cual
+        sos", que son arreglos distintos.
+        """
+        estados = sorted(self.ESTADOS_TIENDA_ABIERTA | self.ESTADOS_TIENDA_CERRADA)
+
+        hallazgo = {"candidatos": [], "muestra": []}
+        for intento in range(self.INTENTOS_ESTADO_TIENDA):
+            hallazgo = await self.page.evaluate(
+                self.JS_ESTADOS_TIENDA, [estados, self.nombre_tienda or ""])
+            if hallazgo["candidatos"]:
+                break
+            if intento < self.INTENTOS_ESTADO_TIENDA - 1:
+                await self.page.wait_for_timeout(self.ESPERA_ENTRE_INTENTOS)
+
+        candidatos = hallazgo["candidatos"]
+        diag = {"url": self.page.url, "candidatos": len(candidatos)}
+
+        if not candidatos:
+            diag["motivo"] = ("no encontre ningun texto de estado conocido "
+                              f"({', '.join(estados)}) en Conectividad")
+            diag["textos_en_pantalla"] = hallazgo["muestra"]
+            return None, diag
+
+        elegido = None
+        if len(candidatos) == 1:
+            elegido = candidatos[0]
+        else:
+            # El mas cercano al nombre gana; si empatan dos, no se sabe.
+            con_nombre = [c for c in candidatos if c["nivel"] is not None]
+            cerca = min((c["nivel"] for c in con_nombre), default=None)
+            propios = [c for c in con_nombre if c["nivel"] == cerca]
+            if len(propios) == 1:
+                elegido = propios[0]
+            elif not self.nombre_tienda:
+                # Adivinar cual de las tiendas de la cuenta sos es peor que
+                # no decir nada: el badge quedaria afirmando el estado de
+                # otro local.
+                diag["motivo"] = (
+                    f"la pantalla muestra {len(candidatos)} tiendas y no hay "
+                    "nombre de tienda cargado en Ajustes para saber cual sos")
+                diag["vistos"] = [c["texto"] for c in candidatos[:10]]
+                return None, diag
+            else:
+                diag["motivo"] = (
+                    f"'{self.nombre_tienda}' no identifica una sola tienda "
+                    f"entre las {len(candidatos)} de la pantalla "
+                    f"({len(propios)} coincidencias)")
+                diag["contextos"] = [c["contexto"] for c in candidatos[:10]]
+                return None, diag
+
+        texto = elegido["texto"]
+        diag["texto"] = texto
+        t = texto.lower()
+        if t in self.ESTADOS_TIENDA_ABIERTA:
+            return ResultadoTienda(abierta=True, detalle=texto), diag
+        if t in self.ESTADOS_TIENDA_CERRADA:
+            return ResultadoTienda(abierta=False, detalle=texto), diag
+
+        # No deberia pasar (el JS ya filtro por los conocidos), pero si el
+        # dia de mañana se agranda la lista, no adivinar.
+        diag["motivo"] = f"no se que significa el estado '{texto}'"
+        return None, diag
+
     async def leer_estado_tienda(self) -> Optional[ResultadoTienda]:
+        """Navega a Conectividad, lee el estado y vuelve al menu.
+
+        El diagnostico de la ultima lectura queda en self.diagnostico_tienda
+        (lo muestra /api/estado-tienda). No se levanta una excepcion ni se
+        devuelve un estado inventado en ningun camino: si no se pudo
+        confirmar, es None y el motivo explica cual de los pasos fallo.
+        """
+        self.diagnostico_tienda = {}
+
         if not self.brand_id_conectividad or not self.store_id:
+            self.diagnostico_tienda = {
+                "motivo": "faltan el brandId o el storeId de esta tienda en Ajustes"}
             return None
 
         try:
@@ -331,48 +484,26 @@ class Rappi(PlataformaBase):
                 log.warning("%s: la navegacion a Conectividad no se quedo en "
                             "la tienda configurada (termino en %s)",
                             self.nombre, self.page.url)
+                self.diagnostico_tienda = {
+                    "url": self.page.url,
+                    "motivo": (f"Conectividad no se quedo en la tienda "
+                               f"{self.store_id}: el brandId puede ser otro "
+                               "(ver el ajuste de brandId en Conectividad)")}
                 return None
 
-            celdas_estado = self.page.locator(
-                "xpath=//td[normalize-space(text())='Estado']"
-                "/following-sibling::td[1]"
-            )
-            total = await celdas_estado.count()
-            if total == 0:
-                return None
-
-            if total == 1:
-                objetivo = celdas_estado.first
-            elif self.nombre_tienda:
-                valor_tienda = self.page.get_by_text(self.nombre_tienda, exact=True)
-                if await valor_tienda.count() == 0:
-                    return None
-                tarjeta = valor_tienda.locator("xpath=ancestor::table[1]").first
-                objetivo = tarjeta.locator(
-                    "xpath=.//td[normalize-space(text())='Estado']"
-                    "/following-sibling::td[1]"
-                )
-                if await objetivo.count() == 0:
-                    return None
-            else:
-                # Mas de una tarjeta y no hay nombre para desempatar:
-                # adivinar cual es la nuestra es peor que no decir nada.
-                return None
-
-            texto = (await objetivo.inner_text()).strip()
+            resultado, self.diagnostico_tienda = await self._buscar_estado_en_pantalla()
         except Exception as e:
+            resumen = " ".join(str(e).split())[:120]
             log.warning("%s: no pude leer el estado de la tienda en "
-                        "Conectividad: %s", self.nombre,
-                        " ".join(str(e).split())[:120])
+                        "Conectividad: %s", self.nombre, resumen)
+            self.diagnostico_tienda = {"motivo": f"error leyendo Conectividad: {resumen}"}
             return None
         finally:
             # Nos fuimos del menu a proposito: volvemos para que la proxima
             # lectura de productos no se encuentre en otra pantalla.
             await self.ir_al_menu()
 
-        t = texto.lower()
-        if t in self.ESTADOS_TIENDA_ABIERTA:
-            return ResultadoTienda(abierta=True, detalle=texto)
-        if t in self.ESTADOS_TIENDA_CERRADA:
-            return ResultadoTienda(abierta=False, detalle=texto)
-        return None
+        if resultado is None:
+            log.info("%s: estado de tienda sin confirmar (%s)", self.nombre,
+                     self.diagnostico_tienda.get("motivo", "sin motivo"))
+        return resultado

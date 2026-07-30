@@ -35,6 +35,11 @@ class PlataformaBase(ABC):
     def __init__(self, page):
         """page = pagina de Playwright dedicada a esta plataforma."""
         self.page = page
+        # Por que la ultima lectura de estado de tienda no pudo afirmar
+        # nada. Vacio = no hay nada que explicar. Un "sin datos" mudo no
+        # distingue "no encontre el texto" de "no se cual de las tiendas
+        # sos", y son arreglos distintos (ver leer_estado_tienda).
+        self.diagnostico_tienda: dict = {}
 
     # AGREGADO (no toca el contrato de los 4 metodos): si faltan los datos
     # de la sucursal, no hay a donde navegar. Sin esto la app abria una

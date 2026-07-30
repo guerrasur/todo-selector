@@ -224,6 +224,23 @@ OPCIONES = (
               "Conectividad, columna «Tienda» (ej: «Mi Local - Turbo»). "
               "Vacío = la pantalla no muestra el estado de esta tienda.",
     ),
+    # Rappi Común ya tenia su override de brandId para Conectividad y Turbo
+    # no: si la pantalla de Conectividad de Turbo tambien vive bajo otra
+    # marca, no habia ningun ajuste que lo arreglara. Mismo significado y
+    # mismo default (vacio = el rappi_brand_id de siempre).
+    Opcion(
+        clave="rappi_brand_id_conectividad",
+        titulo="brandId de Rappi (Turbo) en \"Conectividad\"",
+        defecto="",
+        tipo="texto",
+        grupo="Estado de tienda",
+        opcional=True,
+        ayuda="Normalmente NO hace falta tocarlo. Solo si el badge de estado "
+              "de Rappi Turbo dice que Conectividad no se quedó en tu tienda: "
+              "entrá a Administración → Conectividad y mirá el brandId de la "
+              "URL, puede no ser el mismo que el del menú. Vacío = usa el "
+              "brandId de siempre.",
+    ),
     Opcion(
         clave="rappi_comun_store_id",
         titulo="storeId de Rappi Común",

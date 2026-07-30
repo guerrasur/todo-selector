@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!--
+  Replica de la pantalla "Conectividad" de Rappi Partners (Administración →
+  Conectividad / home/real-time), armada con el HTML real que el usuario sacó
+  de DevTools el 2026-07-30:
+
+      <div class="sc-papXJ iobIXi rcf-typography-caption2 portal207"
+           color="neutrals.grays.gray50"
+           data-testid="test-typography">Cerrada</div>
+
+  Lo importante de esta réplica es lo que NO tiene: no hay <table>, no hay
+  <td>Estado</td>, y el data-testid es el mismo para todos los textos de la
+  pantalla (nombre de tienda, etiquetas, dirección y estado). Es exactamente
+  la trampa que hizo que la versión anterior encontrara cero celdas y las dos
+  tiendas de Rappi quedaran en "sin datos" para siempre.
+
+  Parámetros (?tiendas=…&estado=…&demora=…):
+    tiendas=1|2   una sola tarjeta, o dos (la cuenta con Turbo y Común)
+    estado=…      texto del estado de la PRIMERA tarjeta (Activa / Cerrada /
+                  Suspendida / cualquier cosa, para probar lo desconocido)
+    demora=ms     cuántos ms tarda el SPA en pintar el estado (0 = ya está)
+
+  Los nombres de tienda son inventados a propósito (ver CLAUDE.md: no va en
+  el repo la carta ni los ids de un local de verdad).
+-->
+<html lang="es">
+<head><meta charset="utf-8"><title>Conectividad</title></head>
+<body>
+  <div class="sc-header portal12">
+    <div class="sc-papXJ iobIXi rcf-typography-title3" data-testid="test-typography">Conectividad</div>
+    <div class="sc-papXJ iobIXi rcf-typography-caption2" data-testid="test-typography">Tiempo real</div>
+  </div>
+
+  <div id="tarjetas"></div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const cuantas = parseInt(params.get('tiendas') || '1', 10);
+  const estado  = params.get('estado') || 'Cerrada';
+  const demora  = parseInt(params.get('demora') || '0', 10);
+
+  // Las dos tiendas de una cuenta con Turbo y Común. Inventadas.
+  const TIENDAS = [
+    { nombre: 'Rotisería Ejemplo - Turbo',  dir: 'Av. Inventada 1234', estado: estado },
+    { nombre: 'Rotisería Ejemplo',          dir: 'Av. Inventada 1234', estado: 'Activa' },
+  ];
+
+  // Un texto cualquiera de la pantalla: mismo data-testid que el estado, que
+  // es justamente por qué el data-testid no alcanza para encontrarlo.
+  function texto(padre, contenido, clase) {
+    const d = document.createElement('div');
+    d.className = 'sc-papXJ iobIXi ' + (clase || 'rcf-typography-caption2') + ' portal207';
+    d.setAttribute('color', 'neutrals.grays.gray50');
+    d.setAttribute('data-testid', 'test-typography');
+    d.textContent = contenido;
+    padre.appendChild(d);
+    return d;
+  }
+
+  const cont = document.getElementById('tarjetas');
+  for (let i = 0; i < cuantas; i++) {
+    const t = TIENDAS[i];
+    const tarjeta = document.createElement('div');
+    tarjeta.className = 'sc-card portal88';
+
+    texto(tarjeta, t.nombre, 'rcf-typography-body1');
+    texto(tarjeta, t.dir);
+    texto(tarjeta, 'Estado');            // la ETIQUETA, no el valor
+    const valor = texto(tarjeta, '');    // el valor llega después (SPA)
+    texto(tarjeta, 'Ver detalle');
+
+    cont.appendChild(tarjeta);
+    setTimeout(() => { valor.textContent = t.estado; }, demora);
+  }
+</script>
+</body>
+</html>

@@ -616,6 +616,51 @@ misma.
       desloguea por inactividad) pero falta confirmar el selector exacto
       para `asegurar_sesion()`.
 
+### Estado de tienda de Rappi (badge 🟢/🔴 del header) — FALTA UN PASO TUYO
+
+El 2026-07-30 las dos tiendas de Rappi mostraban «sin datos» mientras
+PedidosYa andaba. **Causa encontrada:** la pantalla de Conectividad no es una
+tabla. El código buscaba `<td>Estado</td>` + la celda siguiente (leído de una
+captura) y encontraba **cero** celdas siempre. El DOM real es un div suelto:
+
+```html
+<div class="sc-papXJ iobIXi rcf-typography-caption2 portal207"
+     color="neutrals.grays.gray50" data-testid="test-typography">Cerrada</div>
+```
+
+Las clases son generadas y el `data-testid` lo comparte **todo** texto del
+portal, así que ahora se busca por **texto** («Activa» / «Cerrada» /
+«Suspendida») y se desempata por el nombre de la tienda, midiendo cuál está
+más cerca — no alcanza con «algún ancestro contiene el nombre», porque
+subiendo lo suficiente se llega al contenedor de todas las tarjetas y con dos
+tiendas las dos daban positivo. Cubierto sin portal por
+`pruebas/probar_rappi_conectividad.py` (14 casos, contra una réplica del DOM
+real).
+
+**Lo que falta, y lo tenés que hacer vos** (no se puede confirmar sin entrar
+al portal con tu cuenta):
+
+1. Actualizá (`actualizar.ps1` o el `.bat`) y abrí
+   `localhost:8001/api/estado-tienda?plataforma=rappi` y lo mismo con
+   `plataforma=rappi_comun`.
+2. Si sale `{"abierta": true/false}`, listo: el badge del header ya anda.
+3. Si sale `{"abierta": null, ...}`, **ahora viene con `motivo`**, que dice
+   cuál de los pasos falló, y con `diagnostico`. Los tres casos:
+   - *«no encontré ningún texto de estado conocido»* → Rappi los escribe de
+     otra forma. El diagnóstico trae `textos_en_pantalla`: buscá ahí cómo
+     figura el estado y hay que agregarlo a `ESTADOS_TIENDA_ABIERTA` /
+     `ESTADOS_TIENDA_CERRADA` en `plataformas/rappi.py`.
+   - *«la pantalla muestra N tiendas y no hay nombre de tienda cargado»* →
+     cargá en Ajustes → «Estado de tienda» el nombre EXACTO de la tienda tal
+     cual figura en Administración → Conectividad.
+   - *«Conectividad no se quedó en la tienda …»* → el `brandId` de esa
+     pantalla es otro. Entrá a Conectividad, copiá el `brandId` de la URL y
+     ponelo en el ajuste correspondiente (hay uno para Turbo y otro para
+     Común; ver «brandId … en Conectividad»).
+
+El badge nunca inventa: ante cualquier duda queda ⚪ «sin datos», y ahora el
+tooltip dice el motivo.
+
 ## 3. El mapeo de nombres
 
 El mismo plato casi nunca se llama igual en los dos portales, y ahí es donde

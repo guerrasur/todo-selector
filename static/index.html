@@ -787,8 +787,13 @@ function pintarTiendas(tiendas) {
       punto = '🔴'; texto = 'cerrada';
     }
     span.textContent = `${punto} ${NOMBRE_PLAT[plat] || plat}`;
+    // El tooltip de un "sin datos" tiene que decir POR QUE: casi siempre es
+    // un dato que falta en Ajustes, y sin el motivo el usuario no tiene de
+    // dónde agarrarse (pasó con las dos tiendas de Rappi, 2026-07-30).
     if (info && info.detalle) span.title = info.detalle;
     else if (info && info.error) span.title = info.error;
+    else if (info && info.motivo) span.title = info.motivo;
+    else span.title = 'Todavía no se pudo leer el estado de esta tienda';
     cont.appendChild(span);
   }
 }

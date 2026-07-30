@@ -11,6 +11,7 @@ py pruebas/probar_cierre.py           apagar todo por plataforma + ajustes
 py pruebas/probar_pantalla_carta.py   la pantalla entera, de punta a punta
 py pruebas/probar_primer_arranque.py  cómo arranca una instalación nueva
 py pruebas/probar_rappi_sync.py       las dos tiendas de Rappi (Turbo y Común)
+py pruebas/probar_rappi_conectividad.py  el badge de tienda abierta/cerrada
 ```
 
 Las dos que usan navegador necesitan Playwright instalado
@@ -77,6 +78,21 @@ borre en silencio la tercera tienda, que al apagar mande **la selección
 explícita** (nada de espejos por atrás), que lo no vinculado se saltee en vez
 de apagar cualquier cosa, y que quede avisado lo que terminó apagado en una
 tienda y prendido en la otra.
+
+**`probar_rappi_conectividad.py`** cubre el badge 🟢/🔴 del header (si la
+TIENDA entera está tomando pedidos). Corre la clase `Rappi` de verdad contra
+`portal_rappi_conectividad.html`, que replica el DOM real de Administración →
+Conectividad: **no es una tabla**, es un div de styled-components con clases
+generadas y un `data-testid` genérico que comparte todo texto del portal. Esa
+era la trampa: el código buscaba `<td>Estado</td>`, encontraba cero celdas
+siempre y las dos tiendas de Rappi quedaban en «sin datos» sin decir por qué
+(2026-07-30). Cubre que lea el estado del div, que **reintente** mientras el
+SPA todavía no lo pintó, que con dos tiendas y ningún nombre cargado devuelva
+"no sé" en vez de adivinar cuál sos, que con el nombre cargado desempate por
+la tarjeta **más cercana** (subiendo lo suficiente, el contenedor común
+contiene los dos nombres y las dos daban positivo), que un estado desconocido
+no se invente, y que **nunca** haya un "sin datos" mudo: si no se pudo
+confirmar, hay motivo.
 
 **`probar_primer_arranque.py`** levanta la app **sin catálogo y sin ajustes**,
 que es exactamente como le llega a alguien que la baja por primera vez. Cubre
