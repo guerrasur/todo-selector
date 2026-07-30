@@ -234,28 +234,32 @@
 <body>
 
 <header>
+  <button id="btn-volver" class="solo-pantalla" style="display:none">← Volver</button>
   <h1>Todo-Selector</h1>
-  <span class="badge" id="version" title="Version instalada"></span>
-  <span class="badge" id="estado-sistema">cargando…</span>
-  <span class="badge" id="pendientes"></span>
-  <span class="badge" id="lectura"></span>
-  <span id="tiendas"></span>
-  <button id="btn-cierre" style="margin-left:auto">Apagar todo</button>
-  <button id="btn-leer-estado">Leer estado real</button>
-  <button id="btn-carta">Actualizar carta</button>
-  <button id="btn-revalidar">Revalidar sesión</button>
-  <button id="btn-avisos" title="Click para que te avise con una notificación si se cae una sesión">🔔</button>
+  <span class="badge solo-dashboard" id="version" title="Version instalada"></span>
+  <span class="badge solo-dashboard" id="estado-sistema">cargando…</span>
+  <span class="badge solo-dashboard" id="pendientes"></span>
+  <span class="badge solo-dashboard" id="lectura"></span>
+  <span class="solo-dashboard" id="tiendas"></span>
+  <button id="btn-cierre" class="solo-dashboard" style="margin-left:auto">Apagar todo</button>
+  <button id="btn-leer-estado" class="solo-dashboard">Leer estado real</button>
+  <button id="btn-revalidar" class="solo-dashboard">Revalidar sesión</button>
+  <button id="btn-avisos" class="solo-dashboard" title="Click para que te avise con una notificación si se cae una sesión">🔔</button>
+  <!-- Estos dos quedan visibles siempre (dashboard y pantallas): son la
+       navegación a Ajustes/Carta, no solo el botón para abrirlas. Con
+       margin-left:auto en el primero de los dos que quede a la vista. -->
+  <button id="btn-carta" style="margin-left:auto">Actualizar carta</button>
   <button id="btn-ajustes" title="Ajustes">⚙</button>
 </header>
 
 <main>
-  <div id="panel-busqueda">
+  <div id="panel-busqueda" class="solo-dashboard">
     <input id="buscador" type="search" autocomplete="off"
            placeholder="Buscar un producto…  (por el nombre de cualquiera de los dos portales)">
     <button id="btn-limpiar" title="Borrar la búsqueda (Esc)">✕</button>
     <span id="resultado-busqueda"></span>
   </div>
-  <div id="panel-vista">
+  <div id="panel-vista" class="solo-dashboard">
     <span class="rotulo">Vista:</span>
     <button class="chip-vista" data-vista="todos"
             title="Por categoría, como siempre">Por categoría</button>
@@ -265,18 +269,18 @@
             title="Esconde lo que está apagado y confirmado">Solo los prendidos</button>
     <span id="cuenta-prendidos"></span>
   </div>
-  <div id="pista-chips" class="pista">
+  <div id="pista-chips" class="pista solo-dashboard">
     Clickeá el chip <b>PedidosYa</b> o <b>Rappi</b> de un producto para sacarlo
     de la acción: el botón queda actuando sobre el otro portal solo. Sirve
     cuando hay que apagar en un portal antes que en el otro.
   </div>
-  <div id="panel-inicio" class="carta" style="display:none"></div>
-  <div id="panel-alertas" style="display:none"></div>
-  <div id="panel-novedades" style="display:none"></div>
-  <div id="panel-cierre" class="carta" style="display:none"></div>
+  <div id="panel-inicio" class="carta solo-dashboard" style="display:none"></div>
+  <div id="panel-alertas" class="solo-dashboard" style="display:none"></div>
+  <div id="panel-novedades" class="solo-dashboard" style="display:none"></div>
+  <div id="panel-cierre" class="carta solo-dashboard" style="display:none"></div>
   <div id="panel-ajustes" class="carta" style="display:none"></div>
   <div id="panel-carta" class="carta" style="display:none"></div>
-  <div id="lista" class="vacio">Cargando productos…</div>
+  <div id="lista" class="vacio solo-dashboard">Cargando productos…</div>
 </main>
 
 <script>
@@ -423,13 +427,21 @@ async function pintarInicio(s) {
   const falta = s.falta_sucursal || [];
   const vacio = !!s.catalogo_vacio;
 
+  // cargar() repite cada pocos segundos sin importar la pantalla. El
+  // CONTENIDO se sigue calculando siempre (así está listo al toque si
+  // volvés al dashboard, sin una espera de por medio); lo único que se
+  // frena es la VISIBILIDAD: si no, este panel podía aparecer solo encima
+  // de Ajustes o Carta (que lo tapan a mano al entrar, ver
+  // mostrarPantalla) en el próximo tick.
+  const mostrar = pantallaActual === 'dashboard';
+
   if (!falta.length && !vacio) {
-    panel.style.display = 'none';
+    if (mostrar) panel.style.display = 'none';
     inicioPintado = '';
     return;
   }
 
-  panel.style.display = 'block';
+  if (mostrar) panel.style.display = 'block';
 
   // Este panel tiene campos de texto y la pantalla se repinta sola cada
   // pocos segundos: redibujarlo mientras escribís el id de tu sucursal te
@@ -563,11 +575,10 @@ function pasoCarta(cont, falta) {
     ? 'Primero decime qué local sos: sin eso no sé a qué menú entrar'
     : 'Lee los dos portales y arma el catálogo';
   boton.onclick = async () => {
-    // Se abre el panel a mano y no con abrirCarta(): esa trae la última
-    // lectura guardada y la pinta, y acá vamos a releer igual. Se veía la
-    // carta vieja un segundo y desaparecía, que parece un error.
-    cerrarPaneles('panel-carta');
-    document.getElementById('panel-carta').style.display = 'block';
+    // Se muestra la pantalla a mano y no con abrirCarta(): esa trae la
+    // última lectura guardada y la pinta, y acá vamos a releer igual. Se
+    // veía la carta vieja un segundo y desaparecía, que parece un error.
+    mostrarPantalla('carta');
     await leerCarta();
   };
 
@@ -1447,10 +1458,10 @@ async function correrMasivo(que, plats, titulo, boton) {
 function panelAjustes() { return document.getElementById('panel-ajustes'); }
 
 async function abrirAjustes() {
-  const panel = panelAjustes();
-  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
-  cerrarPaneles();
-  panel.style.display = 'block';
+  // Mismo botón abre y cierra, como los paneles de siempre (Apagar todo):
+  // clickear "Ajustes" estando ahí vuelve al dashboard.
+  if (pantallaActual === 'ajustes') { irAlDashboard(); return; }
+  mostrarPantalla('ajustes');
   await pintarAjustes();
 }
 
@@ -1594,6 +1605,10 @@ async function guardarAjustes() {
     await pintarAjustes();
     document.getElementById('estado-ajustes').textContent = 'Guardado.';
     aplicarRefresco();
+    // Sin esto, el resto de la pantalla (badges, panel-inicio si depende
+    // de la sucursal, etc.) quedaba con el dato viejo hasta el próximo
+    // tick automático (hasta unos segundos, según refresco_pantalla).
+    await cargar();
   } catch (e) {
     estado.textContent = 'No se pudo: ' + e;
   } finally {
@@ -1608,6 +1623,7 @@ async function restablecerAjustes() {
   document.getElementById('estado-ajustes').textContent =
     'Listo, quedaron como venían de fábrica.';
   aplicarRefresco();
+  await cargar();   // ídem guardarAjustes(): no esperar al próximo tick
 }
 
 // ---------------------------------------------------------------- Carta
@@ -1629,11 +1645,60 @@ function cerrarPaneles(salvo) {
   }
 }
 
-async function abrirCarta() {
-  const panel = panelCarta();
-  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+// ---------------------------------------------------------------- Pantallas
+//
+// Ajustes y Carta son PANTALLAS propias (URL /ajustes y /carta, tapan todo
+// el dashboard), no un panel que se despliega arriba de la lista de
+// productos como Apagar todo (ese sigue igual, a propósito: no lo pidieron
+// mover). `.solo-dashboard` son los elementos que no tienen sentido ahí
+// (buscador, vista, lista de productos, los otros paneles); `.solo-pantalla`
+// es lo que solo se ve en una pantalla propia (el botón Volver).
+const RUTA_DE = { ajustes: '/ajustes', carta: '/carta' };
+let pantallaActual = 'dashboard';   // lo lee pintarInicio() para no reaparecer
+
+function mostrarPantalla(cual) {
+  pantallaActual = cual;
   cerrarPaneles();
-  panel.style.display = 'block';
+  const esDashboard = cual === 'dashboard';
+  for (const el of document.querySelectorAll('.solo-dashboard')) {
+    el.style.display = esDashboard ? '' : 'none';
+  }
+  for (const el of document.querySelectorAll('.solo-pantalla')) {
+    el.style.display = esDashboard ? 'none' : '';
+  }
+  if (cual === 'ajustes') panelAjustes().style.display = 'block';
+  if (cual === 'carta') panelCarta().style.display = 'block';
+
+  const ruta = RUTA_DE[cual] || '/';
+  if (location.pathname !== ruta) history.pushState({ pantalla: cual }, '', ruta);
+}
+
+function irAlDashboard() {
+  // El contenido del dashboard (panel-inicio, alertas, novedades, lista) se
+  // sigue calculando en segundo plano aunque no se vea (ver pintarInicio):
+  // no hace falta forzar un cargar() extra, mostrarPantalla ya deja todo
+  // visible con lo último que se pintó.
+  mostrarPantalla('dashboard');
+}
+
+// Atrás/adelante del navegador: la URL ya cambió sola, solo hay que pintar
+// la pantalla que corresponde (y los datos, si hace falta).
+window.addEventListener('popstate', () => {
+  const cual = location.pathname === '/ajustes' ? 'ajustes'
+             : location.pathname === '/carta' ? 'carta' : 'dashboard';
+  mostrarPantalla(cual);
+  if (cual === 'ajustes') pintarAjustes();
+  else if (cual === 'carta') refrescarCarta();
+  else cargar();
+});
+
+document.getElementById('btn-volver').onclick = irAlDashboard;
+
+async function abrirCarta() {
+  // Mismo botón abre y cierra, como los paneles de siempre (Apagar todo):
+  // clickear "Actualizar carta" estando ahí vuelve al dashboard.
+  if (pantallaActual === 'carta') { irAlDashboard(); return; }
+  mostrarPantalla('carta');
 
   // Al abrir se muestra la última lectura guardada en el server: recargar el
   // navegador no tiene por qué costar otro minuto de leer los portales.
