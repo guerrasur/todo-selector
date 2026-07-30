@@ -57,7 +57,7 @@ import logging
 import re
 from typing import Optional
 
-from .base import PlataformaBase, ResultadoEstado
+from .base import PlataformaBase, ResultadoEstado, ResultadoTienda
 
 log = logging.getLogger("pedidosya")
 
@@ -464,3 +464,43 @@ class PedidosYa(PlataformaBase):
         # prendido. El popup de dos opciones es solo del lado de apagar,
         # porque ahi hay que elegir "por hoy" o "indefinidamente".
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
+
+    # CONFIRMADO POR /api/esqueleto (2026-07-30): en la barra superior de la
+    # pantalla del menu (la misma que ya usamos para los productos, no hace
+    # falta navegar a otro lado) hay:
+    #
+    #   wk-availability-status-button#tutorial-vendor-availability-status-button
+    #     ... span "open"
+    #     wk-availability-circle-icon.OPEN
+    #
+    # "closed" y la clase que le corresponde al icono NO estan confirmados
+    # en vivo todavia (no vimos la tienda cerrada), pero son el complemento
+    # obvio de "open"/OPEN. Si el texto o la clase no matchean ninguno de
+    # los dos, se devuelve None: mejor "no se" que un color inventado.
+    SELECTOR_ESTADO_TIENDA = "wk-availability-status-button"
+
+    async def leer_estado_tienda(self) -> Optional[ResultadoTienda]:
+        await self.ir_al_menu()
+
+        boton = self.page.locator(self.SELECTOR_ESTADO_TIENDA)
+        if await boton.count() == 0:
+            return None
+
+        texto = ""
+        try:
+            texto = (await boton.first.inner_text()).strip()
+        except Exception:
+            pass
+
+        clases = ""
+        icono = boton.locator("wk-availability-circle-icon").first
+        if await icono.count() > 0:
+            clases = (await icono.get_attribute("class")) or ""
+
+        texto_l = texto.strip().lower()
+        tokens_clase = clases.split()
+        if texto_l == "open" or "OPEN" in tokens_clase:
+            return ResultadoTienda(abierta=True, detalle=texto or clases)
+        if texto_l == "closed" or "CLOSED" in tokens_clase:
+            return ResultadoTienda(abierta=False, detalle=texto or clases)
+        return None

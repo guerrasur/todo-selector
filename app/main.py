@@ -82,6 +82,19 @@ MODO_SIMULADO = os.environ.get("STOCKSWITCH_SIMULADO", "0") == "1"
 # lo hace visible en vez de que se note como un 404 raro.
 ARRANCADO_EN = datetime.now()
 
+# Un numero que se bumpea a mano en cada cambio que vale la pena distinguir
+# (ver VERSION en la raiz). No es la version de un paquete: es solo para que
+# la pantalla y el log de actualizar.ps1 puedan decir "estoy en la X" y
+# "pase de la X a la Y" sin que el usuario tenga que leer un commit.
+def _leer_version() -> str:
+    try:
+        return (RAIZ / "VERSION").read_text(encoding="utf-8").strip() or "?"
+    except OSError:
+        return "?"
+
+
+VERSION = _leer_version()
+
 
 @app.on_event("startup")
 async def arrancar():
@@ -344,6 +357,7 @@ def estado_sistema(db: Session = Depends(get_db)):
     ]
 
     return {
+        "version": VERSION,
         "simulado": MODO_SIMULADO,
         "arrancado_en": ARRANCADO_EN.isoformat(timespec="seconds"),
         "sesiones": worker.sesion_ok,
@@ -352,6 +366,11 @@ def estado_sistema(db: Session = Depends(get_db)):
         # fija: una plataforma opcional que nadie configuró no tiene por qué
         # aparecerle a nadie.
         "plataformas": config.plataformas_activas(),
+        # Estado de la TIENDA entera (abierta/cerrada), no de un producto.
+        # None de valor en el dict = todavia no se leyo o esta plataforma no
+        # tiene el dato que hace falta (ver worker.estado_tienda). No
+        # confundir con "falta_sucursal": esto es solo lectura.
+        "tiendas": worker.estado_tiendas,
         "falta_sucursal": falta_sucursal,
         "catalogo_vacio": db.query(Producto).count() == 0,
         "operaciones_pendientes": pendientes,
@@ -433,6 +452,19 @@ async def esqueleto(plataforma: str):
     Ej: /api/esqueleto?plataforma=pedidosya
     """
     return await worker.esqueleto(plataforma)
+
+
+@app.get("/api/estado-tienda")
+async def estado_tienda(plataforma: str):
+    """Fuerza releer si la TIENDA (no un producto) esta abierta o cerrada.
+
+    Ej: /api/estado-tienda?plataforma=rappi
+    Sirve para probar rappi_nombre_tienda / rappi_comun_nombre_tienda recien
+    cargados en Ajustes sin esperar a la proxima ronda de reverificacion.
+    """
+    resultado = await worker.estado_tienda(plataforma)
+    worker.estado_tiendas[plataforma] = resultado
+    return resultado
 
 
 @app.get("/api/verificar-catalogo")

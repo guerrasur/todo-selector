@@ -136,8 +136,17 @@ function Crear-AccesoDirecto {
 }
 
 
+function Leer-Version($Carpeta) {
+    $archivo = Join-Path $Carpeta 'VERSION'
+    if (-not (Test-Path -LiteralPath $archivo)) { return $null }
+    return (Get-Content -LiteralPath $archivo -Raw).Trim()
+}
+
+
 $esClon = Test-Path -LiteralPath (Join-Path $Carpeta '.git')
 $hayGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
+
+$versionAntes = Leer-Version $Carpeta
 
 try {
     if ($esClon -and $hayGit) {
@@ -160,6 +169,15 @@ try {
 catch {
     Write-Host "No se pudo actualizar: $($_.Exception.Message)"
     Write-Host 'Sigo con la version que ya tengo.'
+}
+
+# El numero de VERSION es el unico dato estable entre un metodo de
+# actualizacion y el otro (git pull o copia de zip). Si cambio, hubo
+# actualizacion de verdad; si no, aunque git haya bajado commits menores
+# (o el zip haya tocado algun archivo suelto) no hay nada que anunciar.
+$versionDespues = Leer-Version $Carpeta
+if ($versionAntes -and $versionDespues -and $versionAntes -ne $versionDespues) {
+    Write-Host "Actualizando de version $versionAntes a version $versionDespues"
 }
 
 # Despues de actualizar, porque el icono puede haber llegado recien ahora.
