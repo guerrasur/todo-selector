@@ -109,6 +109,12 @@ class Worker:
         # plataforma -> hasta cuando no vale la pena reintentar la cola
         # porque la sesion esta caida y hay que loguearse a mano.
         self.reintentar_desde = {}
+        # plataforma -> {"abierta": bool, "detalle": str} | None. Es la
+        # tienda ENTERA, no un producto. Se refresca en la lectura inicial y
+        # en cada ronda de reverificacion, no en cada poll de la pantalla
+        # (leerlo en Rappi implica navegar a otra pestaña, no vale la pena
+        # hacerlo cada 3 segundos).
+        self.estado_tiendas = {}
         # Una pestaña por plataforma = un solo usuario a la vez. Sin esto,
         # el worker y los endpoints de diagnostico navegan la misma pagina
         # al mismo tiempo y se cancelan entre si (net::ERR_ABORTED en el
@@ -149,6 +155,7 @@ class Worker:
             await self.sincronizar_estados()
         except Exception as e:
             log.exception("Error en la lectura inicial de estados: %s", e)
+        await self._refrescar_estado_tiendas()
 
     async def _abrir_navegador(self):
         from plataformas.rappi import Rappi
@@ -176,7 +183,8 @@ class Worker:
         self.plataformas["rappi"] = Rappi(
             pag_rappi,
             store_id=config.texto("rappi_store_id"),
-            brand_id=config.texto("rappi_brand_id"))
+            brand_id=config.texto("rappi_brand_id"),
+            nombre_tienda=config.texto("rappi_nombre_tienda"))
 
         # Rappi Común es una tienda de Rappi aparte (mismo brandId, otro
         # storeId) que funciona independiente de Rappi Turbo, y es OPCIONAL:
@@ -217,7 +225,8 @@ class Worker:
             pagina,
             store_id=config.texto("rappi_comun_store_id"),
             brand_id=config.texto("rappi_brand_id"),
-            nombre="rappi_comun")
+            nombre="rappi_comun",
+            nombre_tienda=config.texto("rappi_comun_nombre_tienda"))
 
     async def _cerrar_plataforma(self, nombre: str):
         """Saca una plataforma opcional que el usuario acaba de desactivar.
@@ -554,7 +563,8 @@ class Worker:
         rappi = self.plataformas.get("rappi")
         if rappi is not None:
             rappi.configurar(store_id=config.texto("rappi_store_id"),
-                             brand_id=config.texto("rappi_brand_id"))
+                             brand_id=config.texto("rappi_brand_id"),
+                             nombre_tienda=config.texto("rappi_nombre_tienda"))
 
         # Rappi Común es opcional y se prende y se apaga desde Ajustes, sin
         # reiniciar: si recien ahora le cargaron el storeId hay que abrirle
@@ -566,7 +576,8 @@ class Worker:
         if activa and rappi_comun is not None:
             rappi_comun.configurar(
                 store_id=config.texto("rappi_comun_store_id"),
-                brand_id=config.texto("rappi_brand_id"))
+                brand_id=config.texto("rappi_brand_id"),
+                nombre_tienda=config.texto("rappi_comun_nombre_tienda"))
         elif activa and self.browser is not None:
             await self._abrir_rappi_comun()
             log.info("Rappi Común recien configurada: se le abre la pestaña")
@@ -668,6 +679,45 @@ class Worker:
                 return {"url": plat.page.url, "error": _resumen(e)}
 
         return {"url": plat.page.url, "nodos": len(lineas), "arbol": lineas}
+
+    async def estado_tienda(self, plataforma: str) -> dict:
+        """Si la TIENDA entera esta tomando pedidos ahora. Solo lectura.
+
+        Se cachea en self.estado_tiendas (lectura inicial + cada ronda de
+        reverificacion): pedirlo en vivo cada vez que la pantalla se repinta
+        seria navegar Rappi a Conectividad cada 3 segundos.
+        """
+        plat = self.plataformas.get(plataforma)
+        if self.modo_simulado or plat is None:
+            return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
+
+        async with self.bloqueo(plataforma):
+            listo, motivo = await self._preparar(plataforma)
+            if not listo:
+                return {"error": motivo}
+            try:
+                resultado = await plat.leer_estado_tienda()
+            except Exception as e:
+                log.exception("Leyendo estado de tienda de %s", plataforma)
+                return {"error": _resumen(e)}
+
+        if resultado is None:
+            return {"abierta": None}
+        return {"abierta": resultado.abierta, "detalle": resultado.detalle}
+
+    async def _refrescar_estado_tiendas(self):
+        """Actualiza self.estado_tiendas para todas las plataformas activas."""
+        if self.modo_simulado:
+            return
+        for nombre in config.plataformas_activas():
+            plat = self.plataformas.get(nombre)
+            if plat is None or not plat.configurado:
+                continue
+            try:
+                self.estado_tiendas[nombre] = await self.estado_tienda(nombre)
+            except Exception as e:
+                log.exception("Refrescando estado de tienda de %s", nombre)
+                self.estado_tiendas[nombre] = {"error": _resumen(e)}
 
     async def leer_carta(self, releer: bool = True) -> dict:
         """Lee la carta de las dos plataformas y las cruza.
@@ -1064,6 +1114,8 @@ class Worker:
 
         for caso in revividos:
             await self._reencolar_si_revivio(caso)
+
+        await self._refrescar_estado_tiendas()
 
         self.ultimo_chequeo = datetime.now()
 

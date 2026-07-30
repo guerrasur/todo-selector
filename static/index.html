@@ -239,6 +239,7 @@
   <span class="badge" id="estado-sistema">cargando…</span>
   <span class="badge" id="pendientes"></span>
   <span class="badge" id="lectura"></span>
+  <span id="tiendas"></span>
   <button id="btn-cierre" style="margin-left:auto">Apagar todo</button>
   <button id="btn-leer-estado">Leer estado real</button>
   <button id="btn-carta">Actualizar carta</button>
@@ -753,6 +754,34 @@ function pintarNovedades(novedades) {
   }
 }
 
+// Si la TIENDA entera (no un producto) esta tomando pedidos. Se arma con
+// s.tiendas, que el backend cachea (leerlo en Rappi implica navegar a otra
+// pantalla, no se hace en cada poll de 3 segundos). Cada plataforma puede
+// no tener el dato todavia (recien arrancado) o nunca (falta el ajuste de
+// nombre de tienda en Rappi): en los dos casos se muestra "sin datos" y NO
+// un color inventado, porque no se pudo confirmar.
+function pintarTiendas(tiendas) {
+  const cont = document.getElementById('tiendas');
+  cont.innerHTML = '';
+  for (const plat of PLATS) {
+    const info = tiendas[plat];
+    const span = document.createElement('span');
+    span.className = 'badge';
+    span.style.marginLeft = '4px';
+
+    let punto = '⚪', texto = 'sin datos';
+    if (info && !info.error && info.abierta === true) {
+      punto = '🟢'; texto = 'abierta';
+    } else if (info && !info.error && info.abierta === false) {
+      punto = '🔴'; texto = 'cerrada';
+    }
+    span.textContent = `${punto} ${NOMBRE_PLAT[plat] || plat}`;
+    if (info && info.detalle) span.title = info.detalle;
+    else if (info && info.error) span.title = info.error;
+    cont.appendChild(span);
+  }
+}
+
 function pintarSistema(s) {
   // Qué plataformas usa esta instalación lo decide el backend. Va primero:
   // todo lo que se pinta abajo (chips, avisos, «Apagar todo») se arma con
@@ -761,6 +790,8 @@ function pintarSistema(s) {
   nombrarPlataformas();
 
   if (s.version) document.getElementById('version').textContent = 'v' + s.version;
+
+  pintarTiendas(s.tiendas || {});
 
   const el = document.getElementById('estado-sistema');
   if (s.simulado) {

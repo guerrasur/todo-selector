@@ -366,6 +366,11 @@ def estado_sistema(db: Session = Depends(get_db)):
         # fija: una plataforma opcional que nadie configuró no tiene por qué
         # aparecerle a nadie.
         "plataformas": config.plataformas_activas(),
+        # Estado de la TIENDA entera (abierta/cerrada), no de un producto.
+        # None de valor en el dict = todavia no se leyo o esta plataforma no
+        # tiene el dato que hace falta (ver worker.estado_tienda). No
+        # confundir con "falta_sucursal": esto es solo lectura.
+        "tiendas": worker.estado_tiendas,
         "falta_sucursal": falta_sucursal,
         "catalogo_vacio": db.query(Producto).count() == 0,
         "operaciones_pendientes": pendientes,
@@ -447,6 +452,19 @@ async def esqueleto(plataforma: str):
     Ej: /api/esqueleto?plataforma=pedidosya
     """
     return await worker.esqueleto(plataforma)
+
+
+@app.get("/api/estado-tienda")
+async def estado_tienda(plataforma: str):
+    """Fuerza releer si la TIENDA (no un producto) esta abierta o cerrada.
+
+    Ej: /api/estado-tienda?plataforma=rappi
+    Sirve para probar rappi_nombre_tienda / rappi_comun_nombre_tienda recien
+    cargados en Ajustes sin esperar a la proxima ronda de reverificacion.
+    """
+    resultado = await worker.estado_tienda(plataforma)
+    worker.estado_tiendas[plataforma] = resultado
+    return resultado
 
 
 @app.get("/api/verificar-catalogo")

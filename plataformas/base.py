@@ -19,6 +19,13 @@ class ResultadoEstado:
     detalle: str = ""         # texto crudo util para debug
 
 
+@dataclass
+class ResultadoTienda:
+    """Lo que devuelve leer_estado_tienda(): la TIENDA entera, no un producto."""
+    abierta: bool             # True = esta tomando pedidos ahora
+    detalle: str = ""         # texto crudo del portal ("open", "Suspendida", ...)
+
+
 class PlataformaBase(ABC):
     """Cada implementacion maneja UNA pestaña del navegador compartido."""
 
@@ -67,6 +74,20 @@ class PlataformaBase(ABC):
     async def prender(self, nombre_remoto: str) -> bool:
         """Vuelve a poner el producto disponible. Confirma releyendo."""
         ...
+
+    # ---------- Opcional (no rompe el contrato de los 4 de arriba) ----------
+
+    async def leer_estado_tienda(self) -> Optional[ResultadoTienda]:
+        """Si la TIENDA entera esta tomando pedidos ahora. Solo lectura.
+
+        A proposito no hay forma de abrir/cerrar la tienda desde aca: el
+        usuario solo pidio VER el estado, no manejarlo (ver conversacion del
+        2026-07-30). Cada plataforma expone esto de forma distinta (o
+        todavia no lo expone), asi que el default es "no se". Devolver None
+        en vez de adivinar es la misma regla que en leer_estado(): no
+        afirmar un estado que no se pudo leer de verdad.
+        """
+        return None
 
     # ---------- Helpers comunes ----------
 

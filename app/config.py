@@ -199,6 +199,31 @@ OPCIONES = (
     # usar la app (ver pasoSucursal() en static/index.html). Esto es
     # opcional — la mayoría de los locales no vende por Rappi Común — así
     # que no puede bloquear a nadie que no lo tenga.
+    # Solo para poder MOSTRAR si la tienda entera esta abierta o cerrada
+    # (ver conversacion del 2026-07-30). Rappi no expone el storeId en la
+    # pantalla de Conectividad, asi que hay que decirle a la app como se
+    # llama la tienda ahi para encontrar la fila correcta. Opcional: sin
+    # esto la pantalla simplemente no muestra el estado de esta tienda, no
+    # rompe nada mas (leer_estado_tienda devuelve None).
+    #
+    # Grupo aparte y NO "Sucursal" a propósito, mismo motivo que
+    # rappi_comun_store_id mas abajo: ese grupo es el que la pantalla de
+    # primer arranque exige completar ENTERO antes de dejar usar la app
+    # (pasoSucursal() en static/index.html no mira `opcional`). Un campo
+    # opcional metido ahi bloqueaba el primer arranque de cualquier
+    # instalacion nueva (confirmado por pruebas/probar_primer_arranque.py).
+    Opcion(
+        clave="rappi_nombre_tienda",
+        titulo="Nombre de la tienda en \"Conectividad\" (Rappi)",
+        defecto="",
+        tipo="texto_libre",
+        grupo="Estado de tienda",
+        opcional=True,
+        ayuda="Para mostrar si la tienda está abierta o cerrada. Es el "
+              "nombre EXACTO que Rappi Partners muestra en Administración → "
+              "Conectividad, columna «Tienda» (ej: «Mi Local - Turbo»). "
+              "Vacío = la pantalla no muestra el estado de esta tienda.",
+    ),
     Opcion(
         clave="rappi_comun_store_id",
         titulo="storeId de Rappi Común",
@@ -216,6 +241,16 @@ OPCIONES = (
               "apaga en la otra, así que hay que decirle en la pantalla "
               "Carta qué producto de una es cuál de la otra. Después, un "
               "solo botón apaga las dos.",
+    ),
+    Opcion(
+        clave="rappi_comun_nombre_tienda",
+        titulo="Nombre de la tienda en \"Conectividad\" (Rappi Común)",
+        defecto="",
+        tipo="texto_libre",
+        grupo="Rappi Común",
+        opcional=True,
+        ayuda="Igual que el de Rappi, pero el nombre EXACTO de la tienda "
+              "Común en esa misma tabla de Conectividad.",
     ),
 )
 
@@ -342,6 +377,20 @@ def _validar(opcion: Opcion, valor: Any) -> Any:
         if valor not in validos:
             raise ValueError(f"«{opcion.titulo}»: {valor} no es una opción")
         return valor
+
+    if opcion.tipo == "texto_libre":
+        # A diferencia de "texto" (ids que van en una URL), esto es un
+        # nombre tal cual lo escribe el portal: tiene espacios, tildes,
+        # guiones sueltos. Sin validar formato, solo que no venga vacio si
+        # no es opcional.
+        limpio = str(valor).strip()
+        if opcion.opcional and not limpio:
+            return ""
+        if not limpio:
+            raise ValueError(f"«{opcion.titulo}» no puede estar vacío")
+        if len(limpio) > 120:
+            raise ValueError(f"«{opcion.titulo}»: demasiado largo")
+        return limpio
 
     limpio = str(valor).strip()
     if opcion.opcional and not limpio:
