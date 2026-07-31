@@ -6,56 +6,130 @@
 <title>Todo-Selector</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <style>
+  /* ---------------------------------------------------------------
+     Tema oscuro alto contraste, inspirado en Suipacha Loader:
+     barra de navegación de color con la nav en pills, tarjetas de
+     borde suave sobre un fondo casi negro, rótulos chicos en
+     mayúsculas y un azul como acento.
+
+     Los nombres de las variables NO se tocan: el JS escribe estilos
+     inline que las usan (var(--bg), var(--borde), var(--texto),
+     var(--tenue), var(--curso), var(--error)). Se pueden cambiar los
+     valores y agregar variables nuevas, no renombrar las que hay.
+     --------------------------------------------------------------- */
   :root {
-    --bg: #12141a;
-    --panel: #1b1e26;
-    --panel-2: #232733;
-    --texto: #e8eaf0;
-    --tenue: #8a92a6;
-    --borde: #2d3240;
-    --on: #22c55e;
-    --off: #6b7280;
-    --curso: #f59e0b;
-    --error: #ef4444;
+    --bg: #06080d;
+    --panel: #101725;
+    --panel-2: #182238;
+    --texto: #e9eff9;
+    --tenue: #93a3bd;
+    --borde: #26344d;
+    --on: #4ade80;
+    --off: #7a879e;
+    --curso: #fbbf24;
+    --error: #fb7185;
+
+    /* Acento (el azul de Suipacha) y superficies derivadas. */
+    --acento: #5b9dff;
+    --acento-fuerte: #1d4ed8;
+    --barra: #0e1b30;
+    --barra-borde: #2b4266;
+    --borde-fuerte: #33456380;
+
+    /* Fondos tintados de los estados. Tienen que leerse como estado,
+       no como decoración: el código de color es el mismo de siempre. */
+    --on-fondo: #0e2a1c;
+    --on-borde: #1d5b39;
+    --error-fondo: #2a1420;
+    --error-borde: #5e2233;
+    --curso-fondo: #2a2110;
+    --curso-borde: #6b4c14;
+
+    --sombra: 0 1px 2px rgba(0, 0, 0, .5);
+    --sombra-alta: 0 10px 30px rgba(0, 0, 0, .55);
+    --radio: 12px;
+    --radio-chico: 8px;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--texto);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 15px/1.55 "Segoe UI", system-ui, -apple-system, Inter, Roboto,
+          "Helvetica Neue", sans-serif;
+    letter-spacing: -.011em;
+    -webkit-font-smoothing: antialiased;
   }
+  /* Los números (contadores, ids de sucursal, minutos) no tienen que
+     bailar de ancho entre repintado y repintado. */
+  input, select, .cuantos, .badge, #cuenta-prendidos, #resultado-busqueda {
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible {
+    outline: 2px solid var(--acento);
+    outline-offset: 2px;
+  }
+
+  /* ---- Barra de navegación ---- */
   header {
     position: sticky; top: 0; z-index: 10;
-    background: var(--panel); border-bottom: 1px solid var(--borde);
-    padding: 14px 20px; display: flex; align-items: center; gap: 16px;
+    background: var(--barra); border-bottom: 1px solid var(--barra-borde);
+    padding: 11px 18px; display: flex; align-items: center; gap: 7px;
+    flex-wrap: wrap;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .03), 0 6px 20px rgba(0, 0, 0, .45);
   }
-  h1 { margin: 0; font-size: 19px; letter-spacing: -.3px; }
+  h1 {
+    margin: 0 6px 0 0; font-size: 18px; font-weight: 650;
+    letter-spacing: -.02em;
+  }
+  /* Los botones de la barra son pills, como la nav de Suipacha. Ajustados
+     para que los siete entren en una sola fila en una pantalla de 1280. */
+  header button {
+    border-radius: 999px; padding: 6px 13px; font-size: 12.5px;
+    background: #1a2b48; border-color: #33507d; color: #dbe7fb;
+    font-weight: 500; white-space: nowrap;
+  }
+  header button:hover { background: #24395e; border-color: #43639a; }
   .badge {
-    font-size: 12px; padding: 3px 9px; border-radius: 20px;
-    background: var(--panel-2); color: var(--tenue);
+    font-size: 11.5px; font-weight: 500; padding: 4px 11px;
+    border-radius: 999px; background: #17253d; color: #a9bbd6;
+    border: 1px solid #2c4368; white-space: nowrap;
   }
-  .badge.alerta { background: #422; color: #fca5a5; }
-  main { padding: 20px; max-width: 1000px; margin: 0 auto; }
-  .categoria { margin: 26px 0 10px; font-size: 13px; letter-spacing: 1.2px;
-               text-transform: uppercase; color: var(--tenue); }
+  /* Los badges de pendientes/lectura/tiendas viven vacíos hasta que hay algo
+     que contar: sin esto quedan tres cápsulas en blanco en la barra. */
+  .badge:empty { display: none; }
+  .badge.alerta {
+    background: var(--error-fondo); color: #fda4af;
+    border-color: var(--error-borde);
+  }
+
+  main { padding: 24px 20px 56px; max-width: 1040px; margin: 0 auto; }
+
+  /* ---- Lista de productos ---- */
+  .categoria {
+    margin: 30px 0 10px; font-size: 11.5px; font-weight: 650;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--tenue);
+  }
   .item {
     background: var(--panel); border: 1px solid var(--borde);
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+    border-radius: var(--radio); padding: 13px 16px; margin-bottom: 8px;
     display: grid; grid-template-columns: 1fr auto auto; gap: 14px;
-    align-items: center;
+    align-items: center; box-shadow: var(--sombra);
+    transition: border-color .12s, background .12s;
   }
-  .nombre { font-weight: 500; }
+  .item:hover { border-color: #33456a; }
+  .nombre { font-weight: 550; letter-spacing: -.005em; }
   .nombre.editable { cursor: text; }
   .nombre.editable:hover { text-decoration: underline dotted var(--tenue); }
   .plats { display: flex; gap: 8px; }
   .pill {
-    font-size: 11px; padding: 4px 10px; border-radius: 6px;
+    font-size: 11px; padding: 5px 11px; border-radius: 999px;
     background: var(--panel-2); border: 1px solid var(--borde);
-    display: flex; align-items: center; gap: 6px; min-width: 108px;
+    display: flex; align-items: center; gap: 7px; min-width: 112px;
     color: var(--tenue); cursor: pointer; opacity: .45;
-    transition: opacity .12s, border-color .12s;
+    letter-spacing: .01em;
+    transition: opacity .12s, border-color .12s, background .12s;
   }
-  .pill.sel { opacity: 1; color: var(--texto); border-color: #4a5165; }
-  .pill:hover { border-color: #5a6178; }
+  .pill.sel { opacity: 1; color: var(--texto); border-color: #3c4f75; }
+  .pill:hover { border-color: var(--acento); }
   .pill.na { opacity: .25; cursor: default; font-style: italic; }
   .pill.na:hover { border-color: var(--borde); }
   /* Excluida con un click: tiene que verse APAGADA, no apenas mas tenue.
@@ -67,50 +141,80 @@
   }
   .pill:not(.sel):not(.na) .punto { opacity: .35; }
   .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .p-prendido { background: var(--on); }
+  .p-prendido { background: var(--on); box-shadow: 0 0 0 3px #4ade8025; }
   .p-apagado_hoy, .p-apagado_indefinido, .p-apagado_ajeno { background: var(--off); }
   .p-apagado_ajeno { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--off); }
   .p-apagando, .p-prendiendo { background: var(--curso); animation: late 1s infinite; }
-  .p-fallo { background: var(--error); }
-  .p-desconocido { background: #444; }
+  .p-fallo { background: var(--error); box-shadow: 0 0 0 3px #fb718530; }
+  .p-desconocido { background: #4a566d; }
   @keyframes late { 50% { opacity: .3; } }
   .acciones { display: flex; gap: 6px; }
+
+  /* ---- Botones ---- */
   button {
-    font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 7px;
+    font: inherit; font-size: 13px; font-weight: 500;
+    padding: 8px 13px; border-radius: var(--radio-chico);
     border: 1px solid var(--borde); background: var(--panel-2);
-    color: var(--texto); cursor: pointer;
+    color: var(--texto); cursor: pointer; white-space: nowrap;
+    transition: background .12s, border-color .12s, color .12s;
   }
-  button:hover { background: #2c3140; }
-  button.on { border-color: #14532d; color: #86efac; }
-  button.off { border-color: #431407; color: #fdba74; }
-  .vacio { color: var(--tenue); padding: 40px; text-align: center; }
+  button:hover { background: #22304c; border-color: #3c4f75; }
+  button:active { transform: translateY(1px); }
+  button[disabled] {
+    opacity: .4; cursor: default; transform: none;
+  }
+  button[disabled]:hover { background: var(--panel-2); border-color: var(--borde); }
+  /* Prender: el verde de acción confirmada de Suipacha. */
+  button.on {
+    background: #143a26; border-color: #2a7a4d; color: #9ff2bb;
+  }
+  button.on:hover { background: #1a4a30; border-color: #2f8a58; }
+  /* Apagar: ámbar, que es lo que ya significaba. */
+  button.off {
+    background: #2a1f0e; border-color: #6b4c14; color: #fcd34d;
+  }
+  button.off:hover { background: #3a2b12; border-color: #8a6318; }
+  button.grande { padding: 10px 16px; font-size: 13.5px; }
+  .vacio {
+    color: var(--tenue); padding: 56px 20px; text-align: center;
+    background: var(--panel); border: 1px dashed var(--borde);
+    border-radius: var(--radio);
+  }
   /* Los pausados no se esconden, se corren del camino. */
   .item.pausado { opacity: .5; }
   .item.pausado:hover { opacity: .85; }
   button.pausa {
     background: transparent; border-color: transparent; color: var(--tenue);
-    font-size: 12px; padding: 7px 8px;
+    font-size: 12px; padding: 8px 9px;
   }
   button.pausa:hover { background: var(--panel-2); color: var(--texto); }
   /* Fila propia abajo del producto: .item es un grid de 3 columnas. */
   .detalle-fallo {
     grid-column: 1 / -1;
-    font-size: 12px; color: var(--error); line-height: 1.4;
+    font-size: 12px; color: var(--error); line-height: 1.45;
     word-break: break-word;
+    background: var(--error-fondo); border: 1px solid var(--error-borde);
+    border-radius: var(--radio-chico); padding: 8px 11px;
   }
+
   /* ---- Buscador ---- */
   #panel-busqueda {
     display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
   }
   #buscador {
-    flex: 1; padding: 10px 12px; border-radius: 9px; font: inherit;
+    flex: 1; padding: 11px 14px; border-radius: var(--radio-chico);
+    font: inherit;
     border: 1px solid var(--borde); background: var(--panel); color: var(--texto);
+    box-shadow: var(--sombra);
+    transition: border-color .12s, background .12s, box-shadow .12s;
   }
+  #buscador::placeholder { color: #6c7c99; }
   #buscador:focus {
-    outline: none; border-color: #4a5165; background: var(--panel-2);
+    outline: none; border-color: var(--acento); background: var(--panel-2);
+    box-shadow: 0 0 0 3px #5b9dff26;
   }
   #buscador::-webkit-search-cancel-button { display: none; }
-  #btn-limpiar { display: none; padding: 9px 12px; line-height: 1; }
+  #btn-limpiar { display: none; padding: 10px 13px; line-height: 1; }
   #panel-busqueda.buscando #btn-limpiar { display: block; }
   #resultado-busqueda { color: var(--tenue); font-size: 13px; white-space: nowrap; }
 
@@ -119,106 +223,147 @@
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     margin: -8px 0 16px;
   }
-  #panel-vista .rotulo { color: var(--tenue); font-size: 13px; }
+  #panel-vista .rotulo {
+    color: var(--tenue); font-size: 11.5px; font-weight: 650;
+    letter-spacing: .09em; text-transform: uppercase;
+  }
   .chip-vista {
-    font-size: 13px; padding: 6px 12px; border-radius: 7px;
+    font-size: 13px; padding: 7px 14px; border-radius: 999px;
     color: var(--tenue); background: var(--panel);
+    border-color: var(--borde);
   }
   .chip-vista:hover { background: var(--panel-2); color: var(--texto); }
   .chip-vista.sel {
-    background: var(--panel-2); color: var(--texto); border-color: #14532d;
+    background: #16294a; color: #cfe0fb; border-color: var(--acento);
   }
   #cuenta-prendidos { color: var(--tenue); font-size: 13px; }
   /* El grupo del medio de la vista por estado: lo que la app NO puede
      afirmar que esté apagado. Va del color de las alertas, no del de los
      títulos, porque es lo que hay que mirar. */
-  .categoria.incierta { color: #fca5a5; }
-  .categoria .suelto { text-transform: none; letter-spacing: 0; }
-
-  .aviso {
-    background: var(--panel); border: 1px solid #4a4020;
-    border-left: 3px solid var(--curso);
-    border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
-    display: flex; align-items: center; gap: 14px; justify-content: space-between;
+  .categoria.incierta { color: #fda4af; }
+  .categoria .suelto {
+    text-transform: none; letter-spacing: 0; font-weight: 400;
   }
-  .aviso.ok { border-color: var(--borde); border-left-color: var(--on); }
+
+  /* ---- Avisos ---- */
+  .aviso {
+    background: var(--panel); border: 1px solid var(--curso-borde);
+    border-left: 3px solid var(--curso);
+    border-radius: var(--radio); padding: 14px 16px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 14px; justify-content: space-between;
+    box-shadow: var(--sombra);
+  }
+  /* El texto del aviso puede ser largo; los botones no se achican. */
+  .aviso .acciones { flex-shrink: 0; }
+  .aviso.ok { border-color: var(--on-borde); border-left-color: var(--on); }
   /* Lo que la app afirma sin poder confirmarlo: es lo que puede costar
      plata (un pedido de algo que no hay). Va en rojo, no en amarillo. */
-  .aviso.grave { border-color: #5a2020; border-left-color: var(--error); }
-  .aviso.grave b { color: #fca5a5; }
+  .aviso.grave {
+    border-color: var(--error-borde); border-left-color: var(--error);
+    background: linear-gradient(90deg, var(--error-fondo), var(--panel) 55%);
+  }
+  .aviso.grave b { color: #fda4af; }
   .pista {
     color: var(--tenue); font-size: 12.5px; margin: -6px 0 16px;
-    line-height: 1.5;
+    line-height: 1.55;
   }
-  .pista b { color: #aab2c5; font-weight: 500; }
+  .pista b { color: #b9c6dc; font-weight: 550; }
   /* Un producto que la app da por apagado y no puede confirmar. */
-  .item.dudoso { border-color: #5a2020; }
-  .pill.dudoso { border-color: #5a2020; }
+  .item.dudoso { border-color: var(--error-borde); }
+  .item.dudoso:hover { border-color: #7a2e42; }
+  .pill.dudoso { border-color: var(--error-borde); }
   .nota-dudosa {
-    grid-column: 1 / -1; font-size: 12px; color: #fca5a5; line-height: 1.4;
+    grid-column: 1 / -1; font-size: 12px; color: #fda4af; line-height: 1.45;
   }
 
-  /* ---- Pantalla Carta: lo que dicen los portales vs lo que hay cargado ---- */
-  .carta { background: var(--panel); border: 1px solid var(--borde);
-           border-radius: 10px; padding: 16px; margin-bottom: 20px; }
-  .carta h2 { font-size: 15px; margin: 0 0 4px; }
-  .carta .ayuda { color: var(--tenue); font-size: 13px; margin-bottom: 14px; }
-  .grupo { margin-top: 18px; }
-  .grupo > h3 { font-size: 12px; letter-spacing: 1.1px; text-transform: uppercase;
-                color: var(--tenue); margin: 0 0 8px; font-weight: 600; }
+  /* ---- Tarjetas: Carta, Apagar todo, Ajustes, primer arranque ---- */
+  .carta {
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: var(--radio); padding: 20px; margin-bottom: 20px;
+    box-shadow: var(--sombra-alta);
+  }
+  .carta h2 {
+    font-size: 16px; font-weight: 650; margin: 0 0 6px;
+    letter-spacing: -.015em;
+  }
+  .carta .ayuda {
+    color: var(--tenue); font-size: 13px; margin-bottom: 16px; line-height: 1.55;
+  }
+  .grupo { margin-top: 22px; }
+  .grupo > h3 {
+    font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--tenue); margin: 0 0 10px; font-weight: 650;
+  }
   /* Una columna por portal + la de los botones. El default son los dos de
      siempre; con las dos tiendas de Rappi la fila tiene TRES portales y el
      grid se arma desde JS (ver columnasDeLaFila), porque cuántos hay lo
      sabe recién ahí. */
   .par { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px;
-         align-items: center; padding: 8px 10px; border-radius: 8px;
-         background: var(--panel-2); margin-bottom: 6px; font-size: 14px; }
+         align-items: center; padding: 10px 12px; border-radius: var(--radio-chico);
+         background: var(--panel-2); margin-bottom: 6px; font-size: 14px;
+         border: 1px solid transparent; }
+  .par:hover { border-color: var(--borde); }
   .par .quien input[type=checkbox] { vertical-align: middle; margin: 0 2px 0 0; }
   .par .acciones { display: flex; gap: 6px; align-items: center;
                    flex-wrap: wrap; justify-content: flex-end; }
-  .par .lado { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .par .quien { font-size: 11px; color: var(--tenue); }
+  .par .lado { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .par .quien {
+    font-size: 10.5px; color: var(--tenue); font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+  }
   .par .qué { overflow-wrap: anywhere; }
   .par .nada { color: var(--tenue); font-style: italic; }
   .par .alt { font-size: 11px; color: var(--curso); }
   .par .conf { font-size: 11px; color: var(--tenue); }
   .par.ok { border-left: 3px solid var(--on); }
-  .par .hecho { color: var(--on); font-size: 12px; }
+  .par .hecho { color: var(--on); font-size: 12px; font-weight: 550; }
   .carta .cargando { color: var(--curso); }
 
   /* ---- Cierre: apagar/prender una plataforma entera ---- */
   .fila-cierre {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding: 10px 0; border-top: 1px solid var(--borde);
+    padding: 12px 0; border-top: 1px solid var(--borde);
   }
   .fila-cierre:first-of-type { border-top: none; }
-  .fila-cierre .quien-cierre { min-width: 96px; font-weight: 500; }
+  .fila-cierre .quien-cierre { min-width: 104px; font-weight: 600; }
   .fila-cierre .cuantos { color: var(--tenue); font-size: 12px; }
-  button.grande { padding: 9px 14px; }
-  #resultado-cierre { font-size: 13px; margin-top: 12px; white-space: pre-line; }
+  #resultado-cierre {
+    font-size: 13px; margin-top: 14px; white-space: pre-line;
+    color: var(--tenue);
+  }
 
   /* ---- Ajustes ---- */
   .ajuste {
     display: grid; grid-template-columns: 1fr auto; gap: 8px 14px;
-    align-items: center; padding: 10px 0; border-top: 1px solid var(--borde);
+    align-items: center; padding: 12px 0; border-top: 1px solid var(--borde);
   }
   .ajuste:first-of-type { border-top: none; }
   .ajuste .ayuda-ajuste {
     grid-column: 1; font-size: 12px; color: var(--tenue); margin-top: 2px;
+    line-height: 1.5;
   }
   .ajuste .control { grid-row: 1 / span 2; display: flex;
                      align-items: center; gap: 8px; }
   .ajuste input[type="number"] { width: 84px; }
-  .ajuste input[type="text"] { width: 160px; }
+  .ajuste input[type="text"] { width: 170px; }
   .ajuste input[type="number"], .ajuste input[type="text"], .ajuste select {
-    padding: 7px 9px; border-radius: 7px; font: inherit; font-size: 13px;
+    padding: 8px 10px; border-radius: var(--radio-chico); font: inherit;
+    font-size: 13px;
     border: 1px solid var(--borde); background: var(--bg); color: var(--texto);
   }
+  .ajuste input:focus, .ajuste select:focus {
+    outline: none; border-color: var(--acento);
+    box-shadow: 0 0 0 3px #5b9dff26;
+  }
   .ajuste .unidad { color: var(--tenue); font-size: 12px; }
-  .ajuste.cambiado { background: #1f2330; }
+  /* Cambiado y sin guardar: se tiene que ver de un vistazo cuál tocaste. */
+  .ajuste.cambiado {
+    background: #12213a; box-shadow: inset 3px 0 0 var(--acento);
+    border-radius: var(--radio-chico); padding-left: 12px;
+  }
   .pie-ajustes {
-    display: flex; align-items: center; gap: 10px; margin-top: 16px;
-    padding-top: 14px; border-top: 1px solid var(--borde);
+    display: flex; align-items: center; gap: 10px; margin-top: 18px;
+    padding-top: 16px; border-top: 1px solid var(--borde);
   }
   #estado-ajustes { font-size: 13px; color: var(--tenue); }
 
@@ -226,9 +371,12 @@
   #panel-inicio { border-left: 3px solid var(--curso); }
   #panel-inicio .grupo > h3 { color: var(--texto); }
   #panel-inicio .pie-paso {
-    display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    display: flex; align-items: center; gap: 10px; margin-top: 14px;
   }
   #panel-inicio .nota { font-size: 13px; color: var(--tenue); }
+
+  /* La barra de scroll clara sobre un fondo casi negro es un tajo blanco. */
+  * { scrollbar-color: #2f3d59 var(--bg); }
 </style>
 </head>
 <body>
