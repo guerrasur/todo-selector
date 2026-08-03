@@ -28,12 +28,18 @@ cinco (cada una sola, «Ambos Rappi» y «Todas»). Nunca encola lo que ya está
 como quiere quedar, lo pausado, ni lo que ya está en la cola.
 
 **Lo que se apaga es lo que elegiste, y nada más.** No hay espejos ni
-propagación automática entre plataformas. Los chips de cada producto
-arrancan **sin elegir** y se van eligiendo con un click (al revés de como
-era hasta el 2026-08-03): sin nada elegido los botones están apagados, y si
-elegiste las dos tiendas de Rappi un botón apaga las dos. El portal que no
-elegiste no se toca. Una acción que apaga algo que el usuario no eligió es
-indistinguible de un bug, y un default puesto es una forma de elegir por él.
+propagación automática entre plataformas: si un producto está en las dos
+tiendas de Rappi, un botón apaga las dos porque es el MISMO producto del
+catálogo, no porque algo propague por atrás.
+
+**Los chips ACOTAN, no habilitan** (2026-08-03). Arrancan sin marcar y el
+botón actúa sobre **todos** los portales del producto, que es el caso de
+todos los días. Clickeás un chip y la acción va **solo ahí** (el chip queda
+con contorno y brillo, y el botón dice «· solo PedidosYa»); lo clickeás de
+nuevo y lo soltás. Antes venían los tres marcados y el click sacaba: marcar
+de arranque lo que iba a pasar igual no informa nada. Lo marcado **no** se
+suelta solo al mandar la acción — si se soltara, el botón siguiente saldría
+a los tres portales sin que se note.
 
 **Rappi Común** (2026-07-29) es una tercera plataforma **opcional**: la
 segunda tienda de Rappi, independiente de Turbo, que solo existe si le cargás

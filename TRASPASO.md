@@ -410,7 +410,8 @@ Todo esto está cubierto sin portales por `pruebas/probar_rappi_menu.py` +
   el usuario eligió con los chips y los botones, ni más ni menos. Que apagar
   en Turbo apague en común sale de que el usuario eligió los dos chips de un
   producto que es el MISMO del catálogo, no de una regla que propague por
-  atrás. Los chips arrancan vacíos (2026-08-03): sin elegir no se apaga nada.
+  atrás. Los chips (2026-08-03) **acotan**: arrancan sin marcar y el botón va
+  a todos los portales del producto; marcás uno y va solo ahí.
 - **Lo dudoso lo decide el usuario, una vez, en la pantalla Carta**, y queda
   guardado. La app no empareja sola entre las dos tiendas de Rappi si no es
   prácticamente el mismo nombre.

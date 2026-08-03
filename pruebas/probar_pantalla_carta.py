@@ -439,14 +439,15 @@ async def probar_vista_de_prendidos(pagina):
 
 
 async def probar_seleccion_de_plataforma(pagina):
-    """Los chips se clickean para ELEGIR, y lo elegido sobrevive al repintado.
+    """Los chips ACOTAN la accion, y lo elegido sobrevive al repintado.
 
     Van juntas dos cosas:
 
-    EL PEDIDO (2026-08-03): antes venia todo elegido y el click SACABA. Con
-    el default puesto alcanzaba con no mirar los chips para mandar la accion
-    a los tres portales sin haberlo pedido. Ahora se arranca sin nada: el
-    boton no hace nada hasta que digas donde.
+    EL PEDIDO (2026-08-03): los chips se marcan de a uno, con un click, y sin
+    ninguno marcado el boton actua sobre TODOS los portales del producto —
+    que es lo de siempre y lo que se usa casi siempre—. Antes venian los tres
+    marcados y el click SACABA: marcar de arranque lo que iba a pasar igual
+    no informa nada.
 
     EL BUG (2026-07-28): la seleccion vivia en una variable local de fila(),
     y la lista se repinta sola cada 3 segundos. Elegias un portal, tardabas
@@ -454,7 +455,7 @@ async def probar_seleccion_de_plataforma(pagina):
     estaba, sin ningun aviso. Por eso vive afuera, y por eso se prueba
     esperando MAS que el refresco.
     """
-    print("\n== Elegir las plataformas con los chips ==")
+    print("\n== Acotar la accion con los chips ==")
     fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
     await fila.wait_for(timeout=10000)
 
@@ -464,15 +465,26 @@ async def probar_seleccion_de_plataforma(pagina):
 
     revisar("sel" not in (await chip_py.get_attribute("class")) and
             "sel" not in (await chip_rappi.get_attribute("class")),
-            "los chips arrancan SIN elegir")
-    revisar(await boton.is_disabled(),
-            "y los botones arrancan apagados: todavia no dijiste a donde")
+            "los chips arrancan sin marcar")
+    revisar(await boton.is_enabled() and
+            "solo" not in await boton.inner_text(),
+            "y aun asi el boton anda: sin marcar nada va a los dos portales")
+
+    # Sin tocar ningun chip, la accion tiene que salir a los DOS portales.
+    antes = await pagina.evaluate("fetch('/api/historial').then(r => r.json())")
+    await boton.click()
+    await pagina.wait_for_timeout(1500)
+    despues = await pagina.evaluate("fetch('/api/historial').then(r => r.json())")
+    ids = {o["id"] for o in antes}
+    nuevas = [o for o in despues if o["id"] not in ids]
+    revisar(sorted(o["plataforma"] for o in nuevas) == ["pedidosya", "rappi"],
+            f"sin chips marcados va a los dos ({[o['plataforma'] for o in nuevas]})")
 
     await chip_py.click()
     revisar("sel" in (await chip_py.get_attribute("class")),
-            "el chip queda elegido al clickearlo")
+            "el chip queda marcado al clickearlo")
     revisar("sel" not in (await chip_rappi.get_attribute("class")),
-            "y elegir uno NO elige el otro")
+            "y marcar uno NO marca el otro")
 
     # Mas que el refresco de la pantalla: es el escenario del bug.
     await pagina.wait_for_timeout(4500)
@@ -480,7 +492,7 @@ async def probar_seleccion_de_plataforma(pagina):
     chip_py = fila.locator(".pill[data-plat='pedidosya']")
     boton = fila.locator("button", has_text="Apagar hoy")
     revisar("sel" in (await chip_py.get_attribute("class")),
-            "y SIGUE elegido despues de que la lista se repinte sola")
+            "y SIGUE marcado despues de que la lista se repinte sola")
 
     # El boton tiene que DECIR sobre que portal va a actuar. Antes decia
     # "Apagar hoy" y para saberlo habia que interpretar la opacidad de los
@@ -498,26 +510,27 @@ async def probar_seleccion_de_plataforma(pagina):
     revisar(len(nuevas) == 1 and nuevas[0]["plataforma"] == "pedidosya",
             f"la accion va solo a PedidosYa ({[o['plataforma'] for o in nuevas]})")
 
-    # La eleccion se consume con la accion: si quedara puesta, un rato
-    # despues es una intencion vieja que el usuario ya no esta mirando.
+    # La marca NO se suelta sola al mandar la accion. Si se soltara, el
+    # boton siguiente (que sin chips va a TODOS) apagaria en portales que el
+    # usuario no habia pedido, y encima sin que se note.
+    fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
+    revisar("sel" in (await fila.locator(".pill[data-plat='pedidosya']")
+                      .get_attribute("class")),
+            "despues de mandar la accion el chip sigue marcado")
+    revisar("solo PedidosYa" in await fila.locator(
+                "button", has_text="Apagar hoy").inner_text(),
+            "y el boton sigue diciendo que va a uno solo")
+
+    # Se suelta clickeandolo de nuevo, y ahi vuelve a ir a los dos.
+    await fila.locator(".pill[data-plat='pedidosya']").click()
+    await pagina.wait_for_timeout(4500)
     fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
     revisar("sel" not in (await fila.locator(".pill[data-plat='pedidosya']")
                           .get_attribute("class")),
-            "despues de mandar la accion los chips vuelven a arrancar vacios")
-
-    # Y se pueden elegir los dos.
-    await fila.locator(".pill[data-plat='pedidosya']").click()
-    await fila.locator(".pill[data-plat='rappi']").click()
-    await pagina.wait_for_timeout(4500)
-    fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
-    revisar("sel" in (await fila.locator(".pill[data-plat='rappi']")
-                      .get_attribute("class")) and
-            "sel" in (await fila.locator(".pill[data-plat='pedidosya']")
-                      .get_attribute("class")),
-            "elegir los dos queda, y tambien sobrevive al repintado")
+            "volver a clickearlo lo suelta, y tambien sobrevive al repintado")
     revisar("solo" not in await fila.locator("button", has_text="Apagar hoy")
             .inner_text(),
-            "y ahi el boton no aclara nada: actua sobre los dos")
+            "y el boton vuelve a actuar sobre los dos")
 
     revisar(await pagina.locator("#pista-chips").count() == 1,
             "la pantalla explica que los chips se pueden clickear")

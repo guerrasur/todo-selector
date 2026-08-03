@@ -143,23 +143,29 @@ Las operaciones tardan 2 segundos y siempre dan OK. Sirve para ver la UI.
 ## Apagar un producto en un solo portal
 
 Cada producto muestra un chip por portal (PedidosYa / Rappi / Rappi Común).
-**Arrancan todos sin elegir**: clickeás los que quieras y el botón actúa sobre
-esos, y solo esos. Sirve cuando hay que apagar en un portal antes que en el
-otro, o cuando una plataforma ya está bien y solo hay que corregir la otra.
+**Sin tocar nada, el botón actúa sobre todos**: es lo de siempre, apagar algo
+que se acabó o prenderlo a la mañana.
 
-Mientras no elijas ninguno los botones están **apagados**: la app no tiene a
-dónde mandar la acción y no la manda a ningún lado por su cuenta. Hasta el
-2026-08-03 era al revés —venían todos elegidos y el click sacaba—, así que
-alcanzaba con no mirar los chips para apagar en los tres portales sin haberlo
-pedido.
+Los chips están para el caso raro: **clickeás uno y la acción va solo ahí**.
+Sirve cuando hay que apagar en un portal antes que en el otro, o cuando una
+plataforma ya está bien y solo hay que corregir la otra. Podés marcar varios
+(por ejemplo las dos tiendas de Rappi y no PedidosYa). Para soltarlo, lo
+clickeás de nuevo.
 
-**El botón dice a dónde va**: con un solo chip puesto dice `Apagar hoy · solo
-PedidosYa`, y cuando elegiste todos los portales del producto vuelve a decir
-`Apagar hoy` a secas. La elección **se queda puesta** hasta que apretás el
-botón (ahí se consume: la próxima vuelve a arrancar vacía). Antes se perdía
-sola: la lista se repinta cada pocos segundos y con eso el chip volvía a como
-estaba, así que si tardabas más que el refresco en apretar el botón, la acción
-salía a los dos portales sin decir nada.
+- El chip marcado queda con **contorno y brillo** de acento, para que se vea
+  de una sobre qué portales va a salir la acción.
+- **El botón lo dice**: con un chip marcado pasa a decir `Apagar hoy · solo
+  PedidosYa`, y sin nada marcado (o con todos) dice `Apagar hoy` a secas.
+- Lo marcado **se queda puesto** hasta que lo sueltes: no se borra al apretar
+  el botón, porque el botón siguiente saldría a todos los portales sin que se
+  note. Y tampoco se pierde solo con el refresco de la pantalla, que es un bug
+  que ya pasó: la lista se repinta cada pocos segundos y con eso el chip
+  volvía a como estaba, así que si tardabas más que el refresco en apretar el
+  botón, la acción salía a los dos portales sin decir nada.
+
+Hasta el 2026-08-03 era al revés: venían los tres marcados y el click sacaba.
+Marcar de arranque lo que iba a pasar igual no informaba nada, y el chip
+marcado ahora significa siempre lo mismo — «de acá no sale».
 
 ## Cuando la app no puede confirmar un apagado
 
