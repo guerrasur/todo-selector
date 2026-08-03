@@ -116,6 +116,22 @@ columna sigue sin estar cubierto.
    «Rappi Común» que no usaba, y que el botón "los dos" dejara afuera a la
    tercera justo al cerrar el local (2026-07-29).
 
+10. **Una intención vieja no se sostiene contra una nueva.** Todo lo que se
+    programa para "más tarde" (la verificación a los 2 min, la ronda de 15)
+    lleva congelada la acción de cuando se programó, y entre medio el
+    usuario pudo haber cambiado de idea. Antes de sostener nada hay que
+    mirar `est.estado`: si ya no está en `APAGADOS_PROPIOS`, no es asunto
+    nuestro. Sin eso, la app le apagó al usuario algo que acababa de
+    prender a mano (2026-08-03).
+
+11. **Si el nombre llega a dos productos, no se toca ninguno.** Los
+    localizadores arrancan en `get_by_text(nombre, exact=True)` y siguen
+    con `.first`. Dos matches en la misma tarjeta da igual; dos matches en
+    dos tarjetas es elegir al azar cuál apagar. Ahí `revisar_ambiguedad()`
+    tira `NombreAmbiguo` y la operación termina en rojo con un mensaje. Un
+    apagado que no ocurre y se ve es mejor que uno que cae en el plato
+    equivocado.
+
 ## Datos del local
 
 No metas en el repo la carta ni los ids de un local de verdad — ni en el

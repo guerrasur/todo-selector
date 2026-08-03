@@ -74,6 +74,27 @@ class Rappi(PlataformaBase):
     TXT_POR_HOY = "Sólo por hoy"
     TXT_INDEFINIDO = "No disponible indefinidamente"
 
+    # CONFIRMADO POR LOG (2026-08-03): el toggle fallaba SIEMPRE con
+    # "<div data-testid='menu-categories-hoverable-gap-5'> intercepts
+    # pointer events", incluso con el elemento centrado en pantalla. Es una
+    # franja invisible de ayuda al hover del menu de categorias: no tiene
+    # nada que clickear, solo se come el click del de abajo. Se le sacan
+    # los pointer-events y el click normal entra (ver neutralizar_estorbos).
+    #
+    # A proposito NO entra aca el "collapsible-panel-header", que tambien
+    # aparecio en el log: ese es un elemento de verdad (role="button"), y
+    # desactivarlo seria romper la UI del portal.
+    SELECTORES_ESTORBO = ('[data-testid^="menu-categories-hoverable-gap"]',)
+
+    # Del nombre del producto se sube al primer ancestro que TAMBIEN tenga
+    # el toggle: esa es la tarjeta. El data-testid del toggle trae el id de
+    # producto del portal, asi que identifica la tarjeta sin ambiguedad
+    # (ej: menu-category-101536-product-1148962-availability-switch-control).
+    XPATH_TARJETA = ("xpath=ancestor::*"
+                     "[.//*[contains(@data-testid,'availability-switch-control')]][1]")
+    SELECTOR_ID_TARJETA = '[data-testid*="availability-switch-control"]'
+    ATRIBUTO_ID_TARJETA = "data-testid"
+
     def __init__(self, page, store_id: str = None, brand_id: str = None,
                  nombre: str = None, nombre_tienda: str = None,
                  brand_id_conectividad: str = None):
@@ -145,9 +166,15 @@ class Rappi(PlataformaBase):
             await self.page.wait_for_selector(
                 '[data-testid*="availability-switch-control"]', timeout=15000
             )
-            return True
         except Exception:
             return False
+
+        # El menu ya esta: recien ahora existe la franja que se come los
+        # clicks. Va aca y no en apagar()/prender() porque asegurar_sesion()
+        # es lo que se rehace despues de cada recarga (base._confirmar) y en
+        # cada _preparar, y el <style> no sobrevive a una navegacion.
+        await self.neutralizar_estorbos()
+        return True
 
     def _tarjeta(self, nombre_remoto: str):
         """Locator de la tarjeta del producto.
@@ -159,11 +186,7 @@ class Rappi(PlataformaBase):
         depender de cuantos <div> hay entre el nombre y el resto de la
         tarjeta.
         """
-        texto = self.page.get_by_text(nombre_remoto, exact=True).first
-        return texto.locator(
-            "xpath=ancestor::*"
-            "[.//*[contains(@data-testid,'availability-switch-control')]][1]"
-        )
+        return self.texto_exacto(nombre_remoto).first.locator(self.XPATH_TARJETA)
 
     def _toggle_clickeable(self, tarjeta):
         """El elemento que hay que clickear para togglear disponibilidad.
@@ -236,6 +259,9 @@ class Rappi(PlataformaBase):
         return ResultadoEstado(disponible=True, detalle="sin badge de apagado")
 
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
+        # Va ANTES de leer: con un nombre que llega a dos productos, la
+        # lectura tampoco vale (leer_estado usa el mismo `.first`).
+        await self.revisar_ambiguedad(nombre_remoto)
         estado = await self.leer_estado(nombre_remoto)
         if estado is None:
             return False
@@ -244,25 +270,36 @@ class Rappi(PlataformaBase):
             return True
 
         tarjeta = self._tarjeta(nombre_remoto)
-        await self.avisar_si_ambiguo(nombre_remoto)
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
-        await self.page.wait_for_timeout(1500)
 
         # El dialogo ofrece 2 radios utiles (la 3ra, "Personalizar
         # disponibilidad", no se usa: pide elegir una fecha).
+        #
+        # CONFIRMADO POR LOG (2026-08-03): aca habia un wait_for_timeout de
+        # 1500 ms y despues un get_by_text(...).first. Se encontraba UN
+        # match y era INVISIBLE: el dialogo todavia no habia montado el
+        # radio de verdad, asi que se clickeaba un fantasma y se perdian 8 s
+        # de timeout. Esperar a que aparezca el visible es lo que hace un
+        # usuario, y ademas sigue apenas esta listo.
         opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
+        radio = self.visible(self.page.get_by_text(opcion, exact=True)).first
         try:
-            await self.clickear(self.page.get_by_text(opcion, exact=True),
-                                que=f"radio '{opcion}'")
-            await self.page.wait_for_timeout(1000)
+            await radio.wait_for(state="visible", timeout=10000)
         except Exception:
+            # Lo unico util no es "no encontre el texto" sino que decia el
+            # dialogo que si se abrio.
+            log.error("No aparecio '%s' en el dialogo. Lo que hay abierto "
+                      "dice: %s", opcion, await self.texto_overlay() or "(nada)")
             return False
+
+        await self.clickear(radio, que=f"radio '{opcion}'")
+        await self.page.wait_for_timeout(1000)
 
         # CONFIRMADO POR CAPTURA (2026-07-27): cualquiera de las 2 opciones
         # abre un segundo modal "¿Desactivar producto?" con botones
         # "Cancelar" y "Sí, desactivar" (rojo). Hay que confirmar ahi.
         for txt in ["Sí, desactivar", "Guardar", "Confirmar", "Aceptar", "Aplicar"]:
-            btn = self.page.get_by_role("button", name=txt)
+            btn = self.visible(self.page.get_by_role("button", name=txt))
             if await btn.count() > 0:
                 await self.clickear(btn, que=f"boton '{txt}'")
                 break
@@ -271,6 +308,7 @@ class Rappi(PlataformaBase):
         return await self._confirmar(nombre_remoto, esperado_disponible=False)
 
     async def prender(self, nombre_remoto: str) -> bool:
+        await self.revisar_ambiguedad(nombre_remoto)
         estado = await self.leer_estado(nombre_remoto)
         if estado is None:
             return False
@@ -283,7 +321,6 @@ class Rappi(PlataformaBase):
         # la relectura despues de recargar lo confirmo. Los dos modales
         # ("Sólo por hoy" y "¿Desactivar producto?") son solo de apagar.
         tarjeta = self._tarjeta(nombre_remoto)
-        await self.avisar_si_ambiguo(nombre_remoto)
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
         await self.page.wait_for_timeout(2500)
 

@@ -5,6 +5,7 @@ temporal y una réplica local del portal. Se pueden correr en cualquier máquina
 
 ```
 py pruebas/probar_pedidosya.py        selectores y clicks de PedidosYa
+py pruebas/probar_rappi_menu.py       selectores y clicks del menu de Rappi
 py pruebas/probar_catalogo.py         vincular / separar / sembrar
 py pruebas/probar_estados.py          guardar el estado leído del portal
 py pruebas/probar_cierre.py           apagar todo por plataforma + ajustes
@@ -14,7 +15,7 @@ py pruebas/probar_rappi_sync.py       las dos tiendas de Rappi (Turbo y Común)
 py pruebas/probar_rappi_conectividad.py  el badge de tienda abierta/cerrada
 ```
 
-Las dos que usan navegador necesitan Playwright instalado
+Las que usan navegador necesitan Playwright instalado
 (`py -m playwright install chromium`).
 
 ## Qué cubre cada una
@@ -31,6 +32,22 @@ backdrop) y corre la clase `PedidosYa` de verdad contra él. Dos escenarios:
 El HTML acepta parámetros para cambiar la dificultad: `?popup=cerrable|pegado`
 y `?handler=hijo|host` (dónde vive el listener de la categoría).
 
+**`probar_rappi_menu.py`** levanta `portal_rappi_menu.html` y corre la clase
+`Rappi` de verdad contra él. Reproduce las cuatro trampas que el log del
+2026-08-03 dejó ver:
+
+- la franja `menu-categories-hoverable-gap`, un overlay invisible que se comía
+  **todos** los clicks sobre los toggles (`?gap=no` la saca, para comparar);
+- el header de categoría pegajoso;
+- un «Sólo por hoy» invisible en el DOM además del real, que el modal monta
+  con retardo: ahí es donde el `.first` de antes clickeaba un fantasma;
+- dos nombres ambiguos, uno repetido dentro de **una** tarjeta (inofensivo) y
+  otro que existe en **dos** tarjetas (ahí no se toca nada y se tira
+  `NombreAmbiguo`).
+
+Lo que prueba, además de que apagar y prender funcionen, es que el click
+normal **entra** — sin pasar por el fallback JS.
+
 **`probar_catalogo.py`** cubre el mapeo de nombres: que una base vieja se
 corrija al arrancar, que vincular fusione y separar desarme, que el estado y
 la cola de operaciones sobrevivan, y que `seed.py` deje de pisar los alias
@@ -42,6 +59,10 @@ apagó el local por su cuenta (`apagado_ajeno`, que la ronda de reverificación
 deja en paz), y que lo que el portal no mostró no borre lo que ya sabíamos —
 pero que **quede avisado**, que es el bug del 2026-07-28: la pantalla decía
 "apagado" y entró un pedido de eso.
+
+También cubre el bug del 2026-08-03: la verificación de 2 minutos reencolaba
+un apagado sobre algo que **el usuario acababa de prender**. Ahora corta si el
+estado ya no es un apagado propio, y ni siquiera va a mirar el portal.
 
 **`probar_cierre.py`** cubre el botón de "apagar todo" y los ajustes. Lo que
 importa ahí es lo que **no** se encola: apagar la carta entera son ~30

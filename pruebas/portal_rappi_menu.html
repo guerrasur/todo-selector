@@ -1,0 +1,209 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Replica del menu de Rappi</title>
+<!--
+  Replica del MENU de Rappi (no de Conectividad, que ya tiene la suya en
+  portal_rappi_conectividad.html). Reproduce las cuatro trampas que el log
+  del 2026-08-03 dejo ver:
+
+    1. La franja `menu-categories-hoverable-gap-N`: un overlay invisible que
+       cubre la lista y se come TODOS los clicks sobre los toggles. Es lo
+       que hacia que el click normal fallara siempre en Rappi.
+    2. El header pegajoso de categoria (`collapsible-panel-header`), que
+       tambien aparecio interceptando.
+    3. Un "Sólo por hoy" INVISIBLE en el DOM ademas del real del modal. El
+       log mostro `count=1, visible=False`: el `.first` agarraba el
+       fantasma porque el modal todavia no habia montado el de verdad.
+    4. Nombres ambiguos: uno que aparece dos veces DENTRO de una tarjeta
+       (inofensivo) y otro que aparece en DOS tarjetas (peligroso).
+-->
+<style>
+  body { font-family: sans-serif; margin: 0; }
+
+  /* El header de categoria, pegajoso como en el portal real. */
+  [data-testid="collapsible-panel-header"] {
+    position: sticky; top: 0; height: 44px; line-height: 44px;
+    padding: 0 12px; background: #eee; z-index: 5; cursor: pointer;
+  }
+
+  /* LA TRAMPA PRINCIPAL: la franja de hover. Invisible, sin nada que
+     clickear, y encima de todo. Es exactamente lo que el log reporto como
+     "intercepts pointer events". */
+  [data-testid^="menu-categories-hoverable-gap"] {
+    position: fixed; left: 0; right: 0; top: 44px; bottom: 0;
+    z-index: 50;                      /* arriba de las tarjetas */
+    background: transparent;
+  }
+
+  .tarjeta { display: flex; align-items: center; gap: 12px;
+             padding: 14px 12px; border-bottom: 1px solid #eee; }
+  .nombre { flex: 1; }
+  .rotulo { color: #999; font-size: 11px; }
+
+  label[data-testid$="availability-switch-control"] {
+    position: relative; display: inline-block;
+    width: 36px; height: 22px; border-radius: 12px;
+    background: #bbb; cursor: pointer;
+  }
+  label[data-testid$="availability-switch-control"].on { background: #2b7; }
+  #switch-hidden-input, .oculto-real {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  /* El fantasma del punto 3: esta en el DOM y no se ve. */
+  .fantasma { display: none; }
+
+  .portal { position: fixed; inset: 0; z-index: 900;
+            background: rgba(0,0,0,.35); }
+  .modal { position: fixed; top: 25%; left: 50%; transform: translateX(-50%);
+           background: #fff; padding: 20px; border-radius: 8px; z-index: 901;
+           min-width: 320px; }
+  .modal div[data-testid="test-typography"] { padding: 8px 4px; cursor: pointer; }
+  .modal button { margin-top: 12px; padding: 8px 14px; }
+</style>
+
+<div data-testid="collapsible-panel-header" role="button">Bebidas</div>
+<div id="lista"></div>
+
+<!-- Punto 3: el mismo texto del radio, presente en el DOM desde el vamos y
+     escondido. Sin filtrar por visible, get_by_text(...).first agarra este. -->
+<div class="fantasma" data-testid="test-typography">Sólo por hoy</div>
+
+<!-- Punto 1: la franja, siempre presente, tapando la lista entera. -->
+<div class="sc-QzmmP fibAA" data-testid="menu-categories-hoverable-gap-5"></div>
+
+<script>
+// ?gap=no  saca la franja, para poder comparar con y sin ella.
+const params = new URLSearchParams(location.search);
+const CON_GAP = params.get("gap") !== "no";
+if (!CON_GAP) {
+  document.querySelector('[data-testid^="menu-categories-hoverable-gap"]').remove();
+}
+
+// [nombre, id de producto, extra]
+//   extra="rotulo"  -> el nombre aparece DOS VECES en la misma tarjeta.
+//                      Inofensivo: las dos llevan al mismo producto.
+const PRODUCTOS = [
+  ["Villavicencio con gas 500 ml", "582221", ""],
+  ["Villavicencio sin gas 500 ml", "582222", ""],
+  // El nombre repetido dentro de la propia tarjeta.
+  ["Gaseosa cola 500 ml", "582223", "rotulo"],
+  // LA TRAMPA DEL PUNTO 4: dos productos distintos, mismo nombre exacto.
+  ["Agua con gas", "1148962", ""],
+  ["Agua con gas", "1148963", ""],
+];
+
+const apagados = new Set(JSON.parse(localStorage.getItem("apagados") || "[]"));
+const guardar = () =>
+  localStorage.setItem("apagados", JSON.stringify([...apagados]));
+
+function pintar() {
+  const lista = document.getElementById("lista");
+  lista.innerHTML = "";
+  PRODUCTOS.forEach(([nombre, pid, extra], i) => {
+    const apagado = apagados.has(pid);
+    const tarjeta = document.createElement("div");
+    tarjeta.className = "tarjeta";
+    // La foto: es de donde listar_productos() saca los nombres.
+    const img = document.createElement("img");
+    img.setAttribute("data-testid", "catalog-item-image");
+    img.alt = nombre;
+    img.width = 28; img.height = 28;
+    img.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+    tarjeta.appendChild(img);
+
+    const n = document.createElement("div");
+    n.className = "nombre";
+    n.textContent = nombre;
+    tarjeta.appendChild(n);
+
+    if (extra === "rotulo") {
+      // El MISMO texto exacto, otra vez, dentro de la misma tarjeta.
+      const r = document.createElement("div");
+      r.className = "rotulo";
+      r.textContent = nombre;
+      tarjeta.appendChild(r);
+    }
+
+    if (apagado) {
+      const badge = document.createElement("span");
+      badge.textContent = "Apagados";
+      tarjeta.appendChild(badge);
+    }
+
+    const label = document.createElement("label");
+    label.setAttribute(
+      "data-testid", `menu-category-101536-product-${pid}-availability-switch-control`);
+    label.className = "sc-iYsgxs" + (apagado ? "" : " on");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = "switch-hidden-input";
+    input.checked = !apagado;
+    input.readOnly = true;
+    label.appendChild(input);
+    label.addEventListener("click", () => togglear(pid, nombre));
+    tarjeta.appendChild(label);
+
+    lista.appendChild(tarjeta);
+  });
+}
+
+function togglear(pid, nombre) {
+  if (apagados.has(pid)) {
+    // Prender no abre ningun dialogo (confirmado en vivo, op#18).
+    apagados.delete(pid);
+    guardar();
+    pintar();
+    return;
+  }
+  abrirModal(pid);
+}
+
+// El modal NO monta el radio de una: el log mostro que al buscarlo solo
+// existia el fantasma. Aca se reproduce con un retardo.
+function abrirModal(pid) {
+  // Un <label> con un <input> adentro dispara el click DOS veces (el
+  // segundo por la activacion del input). Es de la replica, no del portal:
+  // sin esta guarda se apilaban dos modales identicos y el de arriba
+  // tapaba al de abajo, que no es lo que se quiere probar aca.
+  if (document.querySelector(".modal")) return;
+
+  const fondo = document.createElement("div");
+  fondo.className = "portal portal6";
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.innerHTML = '<b>Elegí hasta cuándo</b>';
+  document.body.appendChild(fondo);
+  document.body.appendChild(modal);
+
+  setTimeout(() => {
+    for (const txt of ["No disponible indefinidamente", "Sólo por hoy"]) {
+      const op = document.createElement("div");
+      op.setAttribute("data-testid", "test-typography");
+      op.textContent = txt;
+      op.addEventListener("click", () => confirmar(pid, fondo, modal));
+      modal.appendChild(op);
+    }
+  }, 1200);
+}
+
+function confirmar(pid, fondo, modal) {
+  modal.innerHTML = "<b>¿Desactivar producto?</b>";
+  const btn = document.createElement("button");
+  btn.textContent = "Sí, desactivar";
+  btn.addEventListener("click", () => {
+    apagados.add(pid);
+    guardar();
+    fondo.remove();
+    modal.remove();
+    pintar();
+  });
+  const cancelar = document.createElement("button");
+  cancelar.textContent = "Cancelar";
+  modal.appendChild(btn);
+  modal.appendChild(cancelar);
+}
+
+pintar();
+</script>

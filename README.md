@@ -726,12 +726,15 @@ carta entera hay que recorrerlas (ver el punto 0).
 - [x] Sincronizar el estado real al arrancar. Hecho: al levantar, la app lee
       los dos portales y guarda cómo está cada producto. Ver más arriba.
 - [ ] Mostrar el historial en pantalla (la API ya lo devuelve).
-- [ ] **Los 8-10 segundos que cada operación tira en el click fallado.** El
-      click normal sobre el toggle falla siempre y termina yendo por el
-      fallback JS, en las tres pestañas. Desde el 2026-08-03 el log dice por
-      qué falla (`motivo:` y `estado:` debajo del aviso), pero eso hay que
-      leerlo **contra los portales de verdad**: según lo que diga, el arreglo
-      es distinto. Ver «Rendimiento medido» en `TRASPASO.md`.
+- [x] **Los 8-10 segundos que cada operación tiraba en el click fallado.**
+      Hecho (2026-08-03). El log instrumentado mostró que no era una causa
+      sino tres: en PedidosYa nada tapaba el toggle (Playwright lo daba por
+      deshabilitado), en Rappi lo tapaba una franja decorativa de hover, y el
+      radio del modal de Rappi era un elemento invisible. Ahora `clickear()`
+      tiene un peldaño intermedio de click forzado, la franja se neutraliza
+      con `pointer-events: none`, y los textos del modal se buscan entre los
+      visibles esperando a que aparezcan. Ver «Rendimiento medido» en
+      `TRASPASO.md` y `pruebas/probar_rappi_menu.py`.
 - [x] **Sacar del código los datos del local.** Hecho: el id de menú de
       PedidosYa y el `brandId`/`storeId` de Rappi salen de Ajustes (cambiarlos
       no pide reiniciar la app), y `app/seed.py` quedó vacío — una instalación
