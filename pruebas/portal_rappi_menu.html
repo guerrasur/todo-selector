@@ -16,6 +16,14 @@
        fantasma porque el modal todavia no habia montado el de verdad.
     4. Nombres ambiguos: uno que aparece dos veces DENTRO de una tarjeta
        (inofensivo) y otro que aparece en DOS tarjetas (peligroso).
+
+  Y con ?dialogo=portal, la quinta, que es la del 2026-08-03: el dialogo
+  NO es un modal con el texto tal cual, sino un portal de floating-ui con
+  opciones `menu-item-availability-switch-option-N` cuyo texto NO coincide
+  caracter por caracter con el nuestro ("Solo por hoy", sin tilde) y trae
+  una segunda linea de aclaracion. Con eso, buscar el texto exacto no
+  encuentra nada, el dialogo queda abierto y el intento siguiente arranca
+  con el popup tapando el toggle.
 -->
 <style>
   body { font-family: sans-serif; margin: 0; }
@@ -61,6 +69,18 @@
            min-width: 320px; }
   .modal div[data-testid="test-typography"] { padding: 8px 4px; cursor: pointer; }
   .modal button { margin-top: 12px; padding: 8px 14px; }
+
+  /* El popup de floating-ui: sin fondo oscuro, pero igual tapa la pantalla
+     entera con su contenedor, como en el portal real. */
+  .portal-flotante { position: fixed; inset: 0; z-index: 900; }
+  .portal-flotante .popup {
+    position: absolute; top: 120px; right: 24px; width: 280px;
+    background: #fff; border: 1px solid #ddd; border-radius: 8px;
+    padding: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.2);
+  }
+  .portal-flotante [data-testid^="menu-item-availability-switch-option"] {
+    padding: 10px 8px; cursor: pointer;
+  }
 </style>
 
 <div data-testid="collapsible-panel-header" role="button">Bebidas</div>
@@ -74,9 +94,12 @@
 <div class="sc-QzmmP fibAA" data-testid="menu-categories-hoverable-gap-5"></div>
 
 <script>
-// ?gap=no  saca la franja, para poder comparar con y sin ella.
+// ?gap=no          saca la franja, para poder comparar con y sin ella.
+// ?dialogo=portal  el dialogo del 2026-08-03: portal de floating-ui, con
+//                  opciones por data-testid y el texto SIN tilde.
 const params = new URLSearchParams(location.search);
 const CON_GAP = params.get("gap") !== "no";
+const DIALOGO_PORTAL = params.get("dialogo") === "portal";
 if (!CON_GAP) {
   document.querySelector('[data-testid^="menu-categories-hoverable-gap"]').remove();
 }
@@ -142,7 +165,15 @@ function pintar() {
     input.checked = !apagado;
     input.readOnly = true;
     label.appendChild(input);
-    label.addEventListener("click", () => togglear(pid, nombre));
+    // preventDefault: el estado del switch lo maneja el portal (React), no
+    // la activacion nativa del <input>. Sin esto, abrir el dialogo y
+    // cancelar dejaba el checkbox tildado al reves de lo que el portal
+    // cree, y leer_estado() contestaba "apagado" un producto que seguia
+    // prendido: un bug de la replica que no existe en el portal real.
+    label.addEventListener("click", (e) => {
+      e.preventDefault();
+      togglear(pid, nombre);
+    });
     tarjeta.appendChild(label);
 
     lista.appendChild(tarjeta);
@@ -167,7 +198,10 @@ function abrirModal(pid) {
   // segundo por la activacion del input). Es de la replica, no del portal:
   // sin esta guarda se apilaban dos modales identicos y el de arriba
   // tapaba al de abajo, que no es lo que se quiere probar aca.
-  if (document.querySelector(".modal")) return;
+  if (document.querySelector(".modal") ||
+      document.querySelector("[data-floating-ui-portal]")) return;
+
+  if (DIALOGO_PORTAL) return abrirPopupFlotante(pid);
 
   const fondo = document.createElement("div");
   fondo.className = "portal portal6";
@@ -185,6 +219,68 @@ function abrirModal(pid) {
       op.addEventListener("click", () => confirmar(pid, fondo, modal));
       modal.appendChild(op);
     }
+  }, 1200);
+}
+
+// El dialogo REAL del 2026-08-03: un portal de floating-ui pegado al
+// toggle. Tres cosas que rompian el codigo viejo:
+//   - no es [role=dialog] ni un overlay de Angular, asi que texto_overlay()
+//     contestaba "(nada)" con el dialogo abierto adelante;
+//   - el texto de la opcion no es el nuestro caracter por caracter
+//     ("Solo por hoy", sin tilde, y con una aclaracion abajo);
+//   - queda ABIERTO y tapando la pantalla, asi que el intento siguiente
+//     falla por una razon distinta.
+function abrirPopupFlotante(pid) {
+  const portal = document.createElement("div");
+  portal.setAttribute("data-floating-ui-portal", "");
+  portal.className = "portal-flotante";
+
+  const popup = document.createElement("div");
+  popup.className = "popup";
+  portal.appendChild(popup);
+  document.body.appendChild(portal);
+
+  const cerrar = e => {
+    if (e.key === "Escape") {
+      portal.remove();
+      document.removeEventListener("keydown", cerrar);
+    }
+  };
+  document.addEventListener("keydown", cerrar);
+
+  setTimeout(() => {
+    const OPCIONES = [
+      ["No disponible indefinidamente", "Hasta que lo vuelvas a prender"],
+      // SIN TILDE a proposito, y con segunda linea: es lo que hacia que el
+      // get_by_text(exact=True) no encontrara nada.
+      ["Solo por hoy", "Se reactiva mañana a la mañana"],
+      ["Personalizar disponibilidad", "Elegí una fecha"],
+    ];
+    OPCIONES.forEach(([titulo, aclaracion], i) => {
+      const op = document.createElement("div");
+      op.setAttribute("data-testid",
+                      `menu-item-availability-switch-option-${i + 1}`);
+      op.innerHTML = `<div>${titulo}</div>` +
+                     `<div class="rotulo">${aclaracion}</div>`;
+      op.addEventListener("click", () => {
+        document.removeEventListener("keydown", cerrar);
+        portal.remove();
+        const fondo = document.createElement("div");
+        fondo.className = "portal portal6";
+        const modal = document.createElement("div");
+        modal.className = "modal";
+        document.body.appendChild(fondo);
+        document.body.appendChild(modal);
+        // "Personalizar" no apaga nada: pide una fecha. Si el codigo elige
+        // por posicion en vez de por texto, esta prueba lo tiene que ver.
+        if (titulo.startsWith("Personalizar")) {
+          modal.innerHTML = "<b>Elegí hasta qué fecha</b>";
+          return;
+        }
+        confirmar(pid, fondo, modal);
+      });
+      popup.appendChild(op);
+    });
   }, 1200);
 }
 

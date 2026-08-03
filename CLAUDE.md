@@ -28,10 +28,12 @@ cinco (cada una sola, «Ambos Rappi» y «Todas»). Nunca encola lo que ya está
 como quiere quedar, lo pausado, ni lo que ya está en la cola.
 
 **Lo que se apaga es lo que elegiste, y nada más.** No hay espejos ni
-propagación automática entre plataformas: si el producto está vinculado en
-las dos tiendas de Rappi, sus dos chips vienen seleccionados y un botón apaga
-las dos; si sacaste un chip, ese portal no se toca. Una acción que apaga algo
-que el usuario no eligió es indistinguible de un bug.
+propagación automática entre plataformas. Los chips de cada producto
+arrancan **sin elegir** y se van eligiendo con un click (al revés de como
+era hasta el 2026-08-03): sin nada elegido los botones están apagados, y si
+elegiste las dos tiendas de Rappi un botón apaga las dos. El portal que no
+elegiste no se toca. Una acción que apaga algo que el usuario no eligió es
+indistinguible de un bug, y un default puesto es una forma de elegir por él.
 
 **Rappi Común** (2026-07-29) es una tercera plataforma **opcional**: la
 segunda tienda de Rappi, independiente de Turbo, que solo existe si le cargás
@@ -103,9 +105,9 @@ columna sigue sin estar cubierto.
 7. **La lista de la pantalla se repinta sola cada pocos segundos.** Nada que
    el usuario haya elegido puede vivir en una variable local del repintado:
    se borra sola y no se nota. Ya pasó con los chips de plataforma, que
-   volvían a quedar los dos seleccionados y mandaban la acción a los dos
-   portales. Si el usuario lo eligió, va afuera del repintado (ver
-   `excluidas` en `static/index.html`).
+   volvían solos a como estaban y mandaban la acción a donde el usuario no
+   había pedido. Si el usuario lo eligió, va afuera del repintado (ver
+   `elegidas` en `static/index.html`).
 
 9. **Qué plataformas hay lo dice `config.plataformas_activas()`, no una
    lista escrita a mano.** `catalogo.PLATAFORMAS` es la lista de nombres

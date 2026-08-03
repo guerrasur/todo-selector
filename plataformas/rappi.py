@@ -44,9 +44,10 @@ indefinidamente" aparece un SEGUNDO modal de confirmacion,
 """
 
 import logging
+import time
 from typing import Optional
 
-from .base import PlataformaBase, ResultadoEstado, ResultadoTienda
+from .base import PlataformaBase, ResultadoEstado, ResultadoTienda, plano
 
 log = logging.getLogger("rappi")
 
@@ -73,6 +74,14 @@ class Rappi(PlataformaBase):
     # usa, requiere elegir una fecha).
     TXT_POR_HOY = "Sólo por hoy"
     TXT_INDEFINIDO = "No disponible indefinidamente"
+
+    # CONFIRMADO POR LOG (2026-08-03): cada opcion del dialogo es un
+    # elemento con data-testid "menu-item-availability-switch-option-N"
+    # dentro de un portal de floating-ui. El N es la POSICION, no dice cual
+    # es cual: elegir por numero seria apagar "indefinido" cuando el usuario
+    # pidio "solo por hoy". Se usa para ENCONTRAR las opciones; cual es cual
+    # lo sigue diciendo el texto.
+    SELECTOR_OPCION = '[data-testid*="availability-switch-option"]'
 
     # CONFIRMADO POR LOG (2026-08-03): el toggle fallaba SIEMPRE con
     # "<div data-testid='menu-categories-hoverable-gap-5'> intercepts
@@ -119,6 +128,9 @@ class Rappi(PlataformaBase):
         # ya viene andando en produccion); es solo para construir la URL de
         # Conectividad. Sin este ajuste, cae a self.brand_id.
         self.brand_id_conectividad = brand_id_conectividad or self.brand_id
+        # Los textos de las opciones que vio el ultimo _opcion_del_dialogo().
+        # Es lo que se muestra cuando no se pudo elegir ninguna.
+        self.opciones_vistas: list[str] = []
 
     @property
     def configurado(self) -> bool:
@@ -258,6 +270,84 @@ class Rappi(PlataformaBase):
 
         return ResultadoEstado(disponible=True, detalle="sin badge de apagado")
 
+    def _opciones_abiertas(self):
+        """Las opciones del dialogo de disponibilidad que se estan viendo."""
+        return self.visible(self.page.locator(self.SELECTOR_OPCION))
+
+    async def cerrar_dialogo(self):
+        """Cierra el dialogo de disponibilidad si quedo abierto.
+
+        CONFIRMADO POR LOG (2026-08-03): cuando apagar() no encontraba la
+        opcion, se iba dejando el dialogo ABIERTO. El intento 2 empezaba con
+        ese popup adelante ("menu-item-availability-switch-option-3 ...
+        intercepts pointer events"), asi que fallaba por una razon distinta
+        de la primera, y el 3 igual. Los tres intentos del worker eran, en
+        realidad, uno solo.
+
+        Escape y nada mas: cerrar clickeando "Cancelar" seria clickear a
+        ciegas en un dialogo que no sabemos como esta.
+        """
+        if await self._opciones_abiertas().count() == 0:
+            return
+        try:
+            await self.page.keyboard.press("Escape")
+            await self.page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+    async def _opcion_del_dialogo(self, frase: str, timeout: int = 10000):
+        """El elemento del dialogo que dice `frase`, o None.
+
+        Dos caminos, y en este orden:
+
+          1. El texto exacto visible. Es el que ya venia andando, y lo de
+             "visible" no es un detalle: hay un elemento con el mismo texto
+             ESCONDIDO en el DOM, y el `.first` de antes agarraba ese
+             fantasma y se comia el timeout entero.
+
+          2. Las opciones por su data-testid, comparando el texto SIN
+             TILDES. Este es el que faltaba: el 2026-08-03 el dialogo se
+             abria (el log lo muestra tapando el toggle del intento
+             siguiente) y aun asi el paso 1 no encontraba nada, porque el
+             texto del portal no es caracter por caracter el nuestro.
+
+        Nunca elige por posicion: si el texto no identifica UNA sola
+        opcion, devuelve None. Entre "solo por hoy" e "indefinidamente" no
+        hay adivinanza posible que sea aceptable.
+        """
+        self.opciones_vistas: list[str] = []
+        buscado = plano(frase)
+        limite = time.monotonic() + timeout / 1000
+
+        while True:
+            exacto = self.visible(self.page.get_by_text(frase, exact=True))
+            if await exacto.count() > 0:
+                return exacto.first
+
+            opciones = self._opciones_abiertas()
+            cuantas = await opciones.count()
+            if cuantas:
+                textos = []
+                for i in range(cuantas):
+                    try:
+                        textos.append(await opciones.nth(i).inner_text())
+                    except Exception:
+                        textos.append("")
+                self.opciones_vistas = [" ".join(t.split()) for t in textos]
+
+                iguales = [i for i, t in enumerate(textos) if buscado in plano(t)]
+                if len(iguales) == 1:
+                    return opciones.nth(iguales[0])
+                if len(iguales) > 1:
+                    log.error("%s: '%s' matchea %s opciones del dialogo (%s). "
+                              "No elijo ninguna.", self.nombre, frase,
+                              len(iguales), self.opciones_vistas)
+                    return None
+
+            if time.monotonic() >= limite:
+                return None
+            await self.page.wait_for_timeout(250)
+
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
         # Va ANTES de leer: con un nombre que llega a dos productos, la
         # lectura tampoco vale (leer_estado usa el mismo `.first`).
@@ -269,27 +359,26 @@ class Rappi(PlataformaBase):
             log.info("'%s' ya estaba apagado, no toco nada", nombre_remoto)
             return True
 
+        # Un dialogo que quedo abierto de un intento anterior tapa el toggle
+        # de este. Se cierra ANTES de tocar nada.
+        await self.cerrar_dialogo()
+
         tarjeta = self._tarjeta(nombre_remoto)
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
 
-        # El dialogo ofrece 2 radios utiles (la 3ra, "Personalizar
+        # El dialogo ofrece 2 opciones utiles (la 3ra, "Personalizar
         # disponibilidad", no se usa: pide elegir una fecha).
-        #
-        # CONFIRMADO POR LOG (2026-08-03): aca habia un wait_for_timeout de
-        # 1500 ms y despues un get_by_text(...).first. Se encontraba UN
-        # match y era INVISIBLE: el dialogo todavia no habia montado el
-        # radio de verdad, asi que se clickeaba un fantasma y se perdian 8 s
-        # de timeout. Esperar a que aparezca el visible es lo que hace un
-        # usuario, y ademas sigue apenas esta listo.
         opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
-        radio = self.visible(self.page.get_by_text(opcion, exact=True)).first
-        try:
-            await radio.wait_for(state="visible", timeout=10000)
-        except Exception:
-            # Lo unico util no es "no encontre el texto" sino que decia el
-            # dialogo que si se abrio.
-            log.error("No aparecio '%s' en el dialogo. Lo que hay abierto "
-                      "dice: %s", opcion, await self.texto_overlay() or "(nada)")
+        radio = await self._opcion_del_dialogo(opcion)
+        if radio is None:
+            # Lo unico util no es "no encontre el texto" sino QUE decia el
+            # dialogo que si se abrio: si el portal cambio el texto de la
+            # opcion, esta linea lo dice y el arreglo es de una.
+            log.error("No aparecio '%s' en el dialogo. Opciones que vi: %s. "
+                      "Lo que hay abierto dice: %s", opcion,
+                      self.opciones_vistas or "(ninguna)",
+                      await self.texto_overlay() or "(nada)")
+            await self.cerrar_dialogo()
             return False
 
         await self.clickear(radio, que=f"radio '{opcion}'")
@@ -298,14 +387,43 @@ class Rappi(PlataformaBase):
         # CONFIRMADO POR CAPTURA (2026-07-27): cualquiera de las 2 opciones
         # abre un segundo modal "¿Desactivar producto?" con botones
         # "Cancelar" y "Sí, desactivar" (rojo). Hay que confirmar ahi.
-        for txt in ["Sí, desactivar", "Guardar", "Confirmar", "Aceptar", "Aplicar"]:
-            btn = self.visible(self.page.get_by_role("button", name=txt))
-            if await btn.count() > 0:
-                await self.clickear(btn, que=f"boton '{txt}'")
-                break
+        if not await self._confirmar_en_el_modal():
+            log.warning("%s: no encontre el boton de confirmar del modal. Lo "
+                        "que hay abierto dice: %s", self.nombre,
+                        await self.texto_overlay() or "(nada)")
 
         await self.page.wait_for_timeout(3000)
-        return await self._confirmar(nombre_remoto, esperado_disponible=False)
+        ok = await self._confirmar(nombre_remoto, esperado_disponible=False)
+        if not ok:
+            # Si termino mal, que no arrastre el dialogo al proximo intento.
+            await self.cerrar_dialogo()
+        return ok
+
+    # Los textos del boton de confirmar, por orden de preferencia. Se
+    # comparan sin tildes por lo mismo que las opciones: "Sí, desactivar" y
+    # "Si, desactivar" se ven iguales y no son el mismo string.
+    TXT_CONFIRMAR = ("Sí, desactivar", "Guardar", "Confirmar", "Aceptar", "Aplicar")
+
+    async def _confirmar_en_el_modal(self) -> bool:
+        botones = self.visible(self.page.get_by_role("button"))
+        try:
+            cuantos = await botones.count()
+        except Exception:
+            return False
+
+        textos = []
+        for i in range(cuantos):
+            try:
+                textos.append(plano(await botones.nth(i).inner_text()))
+            except Exception:
+                textos.append("")
+
+        for txt in self.TXT_CONFIRMAR:
+            for i, t in enumerate(textos):
+                if plano(txt) in t:
+                    await self.clickear(botones.nth(i), que=f"boton '{txt}'")
+                    return True
+        return False
 
     async def prender(self, nombre_remoto: str) -> bool:
         await self.revisar_ambiguedad(nombre_remoto)
@@ -320,6 +438,11 @@ class Rappi(PlataformaBase):
         # abre ningun dialogo. El click sobre el toggle apagado lo prende y
         # la relectura despues de recargar lo confirmo. Los dos modales
         # ("Sólo por hoy" y "¿Desactivar producto?") son solo de apagar.
+        #
+        # Igual se cierra lo que haya quedado abierto: un dialogo de otro
+        # producto tapa este toggle lo mismo que tapaba el de apagar().
+        await self.cerrar_dialogo()
+
         tarjeta = self._tarjeta(nombre_remoto)
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
         await self.page.wait_for_timeout(2500)
