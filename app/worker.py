@@ -81,6 +81,10 @@ SIN_SESION = "sin_sesion"
 # arregla reintentando: reintentar tres veces por producto solo llena la cola
 # de errores identicos.
 NO_ACTIVA = "no_activa"
+# El nombre del catalogo llega a mas de un producto del portal. Tampoco se
+# arregla reintentando: hay que corregir el alias en la pantalla Carta. Y
+# sobre todo, no hay que clickear ninguno de los dos (ver NombreAmbiguo).
+AMBIGUO = "ambiguo"
 
 # Lo que antes eran constantes hoy sale de Ajustes (app/config.py). Los
 # valores por defecto son estos mismos, asi que sin tocar nada la app se
@@ -334,8 +338,10 @@ class Worker:
 
             # Plataforma apagada en Ajustes (o base traida de otra
             # instalacion): la operacion no tiene a donde ir. Termina ahi,
-            # sin gastar los 3 intentos en el mismo error.
-            if motivo == NO_ACTIVA:
+            # sin gastar los 3 intentos en el mismo error. Lo mismo con un
+            # nombre que apunta a dos productos: eso se arregla en la
+            # pantalla Carta, no reintentando.
+            if motivo in (NO_ACTIVA, AMBIGUO):
                 op.estado = Operacion.ERROR
                 op.detalle = detalle
                 op.finalizada_en = datetime.now()
@@ -393,6 +399,8 @@ class Worker:
             return await self._ejecutar_sin_turno(plat, plataforma, accion, nombre_remoto)
 
     async def _ejecutar_sin_turno(self, plat, plataforma, accion, nombre_remoto):
+        from plataformas.base import NombreAmbiguo
+
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
         if not listo:
@@ -422,13 +430,23 @@ class Worker:
                     return False, "se cayo la sesion durante la operacion", SIN_SESION
 
             return ok, "" if ok else "no se pudo confirmar el cambio", ""
+        except NombreAmbiguo as e:
+            # No es un fallo del portal: es el catalogo apuntando a dos
+            # productos. Reintentar clickearia uno al azar tres veces.
+            return False, str(e), AMBIGUO
         except Exception as e:
             log.exception("Excepcion en %s.%s('%s')", plataforma, accion, nombre_remoto)
             return False, _resumen(e), ""
 
     async def _verificar_luego(self, producto_id: int, plataforma: str,
                                accion: str, demora: int):
-        """Espera y confirma que el item siga apagado. Si revivio, reencola."""
+        """Espera y confirma que el item siga apagado. Si revivio, reencola.
+
+        OJO: la `accion` con la que se lanza esto queda congelada hace 2
+        minutos. Entre medio el usuario pudo haber cambiado de idea, y
+        sostener una intencion vencida es apagarle algo que acaba de
+        prender a mano (ver la guarda de abajo).
+        """
         await asyncio.sleep(demora)
         if not self.corriendo or self.modo_simulado:
             return
@@ -441,6 +459,31 @@ class Worker:
 
             # Si lo pausaron entre el apagado y este chequeo, no lo sostenemos.
             if producto.pausado:
+                return
+
+            est = (db.query(EstadoItem)
+                   .filter_by(producto_id=producto_id, plataforma=plataforma)
+                   .first())
+
+            # EL BUG DEL 2026-08-03: el usuario apago 'Agua con gas', lo
+            # prendio de nuevo un minuto y medio despues, y a los 120s esta
+            # verificacion lo encontro "disponible" y lo volvio a apagar.
+            # Estaba disponible porque el usuario lo prendio.
+            #
+            # Es la misma regla que ya protege a la ronda de 15 min en
+            # _guardar_estados, y el motivo esta escrito en models.py
+            # (APAGADO_AJENO): la reverificacion sostiene lo que apago la
+            # app, y nada mas. Cubre los tres casos de una: el usuario lo
+            # prendio (PRENDIDO), hay una operacion nueva en vuelo
+            # (PRENDIENDO/APAGANDO) y el apagado paso a ser ajeno.
+            #
+            # Va ANTES del bloqueo de la pestaña a proposito: si la
+            # intencion cambio no hay nada que ir a mirar, y son ~20s de
+            # navegador que no se gastan.
+            if est is None or est.estado not in EstadoItem.APAGADOS_PROPIOS:
+                log.info("%s en %s ya no esta apagado por la app (%s): no lo "
+                         "sostengo", producto.nombre, plataforma,
+                         est.estado if est else "sin estado")
                 return
 
             plat = self.plataformas.get(plataforma)
@@ -472,11 +515,7 @@ class Worker:
                 log.error("Error verificando %s: %s", producto.nombre, e)
                 return
 
-            est = (db.query(EstadoItem)
-                   .filter_by(producto_id=producto_id, plataforma=plataforma)
-                   .first())
-            if est:
-                est.verificado_en = datetime.now()
+            est.verificado_en = datetime.now()
 
             if real is not None and real.disponible:
                 log.warning("%s revivio en %s a los %ss, reencolando",

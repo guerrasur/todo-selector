@@ -13,6 +13,16 @@ from typing import Optional
 log = logging.getLogger("plataformas")
 
 
+class NombreAmbiguo(Exception):
+    """El nombre del catalogo apunta a mas de un producto del portal.
+
+    No es un error de red ni algo que un reintento pueda arreglar: hay que
+    corregir el alias. Se distingue del resto para que la operacion termine
+    ahi, con un mensaje que diga que hacer, en vez de gastar 3 intentos
+    clickeando cualquiera de los dos.
+    """
+
+
 @dataclass
 class ResultadoEstado:
     """Lo que devuelve leer_estado()."""
@@ -134,6 +144,48 @@ class PlataformaBase(ABC):
                 return texto[:limite]
         return ""
 
+    # Lo que el portal deja flotando por encima y se come los clicks sin
+    # ser parte de la UI: overlays decorativos, franjas de hover. Cada
+    # plataforma declara los suyos; vacio = no hay nada que hacer.
+    SELECTORES_ESTORBO: tuple = ()
+
+    async def neutralizar_estorbos(self):
+        """Le saca los clicks de encima a los overlays decorativos.
+
+        No los oculta ni los borra: solo `pointer-events: none`, asi la
+        pagina se ve igual y el click llega al elemento de abajo.
+
+        ESTO NO PUEDE CAUSAR UN CLICK EQUIVOCADO. Playwright sigue
+        verificando que el que recibe el click sea nuestro elemento: si
+        despues de esto el destino sigue estando mal, el click falla igual
+        y se cae al fallback. Lo unico que cambia es que un adorno deja de
+        interceptar.
+
+        Hay que rehacerlo despues de cada navegacion (el <style> se va con
+        la pagina), por eso se llama desde asegurar_sesion().
+        """
+        if not self.SELECTORES_ESTORBO:
+            return
+        css = (", ".join(self.SELECTORES_ESTORBO) +
+               " { pointer-events: none !important; }")
+        try:
+            await self.page.add_style_tag(content=css)
+        except Exception as e:
+            # Un adorno que sigue estorbando no justifica romper la
+            # operacion: el camino viejo (fallback) sigue estando.
+            log.warning("%s: no pude neutralizar los estorbos: %s",
+                        self.nombre, " ".join(str(e).split())[:100])
+
+    def visible(self, locator):
+        """El mismo locator, quedandose solo con lo que se ve.
+
+        CONFIRMADO POR LOG (2026-08-03): el radio 'Solo por hoy' de Rappi
+        matcheaba UN elemento y era invisible —el dialogo todavia no habia
+        montado el de verdad—, asi que el `.first` de siempre clickeaba un
+        fantasma. Buscar entre lo visible es lo que hace un usuario.
+        """
+        return locator.locator("visible=true")
+
     # HTMLElement.click() sobre el elemento mismo. Alcanza cuando el que
     # escucha el click es ese elemento o alguno de sus padres.
     JS_CLICK = "el => el.click()"
@@ -183,12 +235,16 @@ class PlataformaBase(ABC):
     # Que elemento hay ARRIBA del centro del target. Si el click no entra
     # porque algo lo tapa, esto dice quien es el que tapa; si el que
     # contesta es el target mismo (o un hijo suyo), el problema es otro.
+    #
+    # Devuelve {desc, propio}: `propio` no es decoracion del log, decide si
+    # se puede reintentar con un click forzado (ver clickear()).
     JS_QUIEN_TAPA = """
         el => {
             const r = el.getBoundingClientRect();
             const x = r.left + r.width / 2, y = r.top + r.height / 2;
             const arriba = document.elementFromPoint(x, y);
-            if (!arriba) return "(nadie: el centro cae fuera de la ventana)";
+            if (!arriba) return {desc: "(nadie: el centro cae fuera de la ventana)",
+                                 propio: false};
             const desc = n => {
                 const t = n.tagName.toLowerCase();
                 const id = n.getAttribute('data-testid');
@@ -196,9 +252,7 @@ class PlataformaBase(ABC):
                 const c = (n.getAttribute('class') || '').trim().split(/\\s+/)[0];
                 return c ? `${t}.${c}` : t;
             };
-            const propio = el === arriba || el.contains(arriba);
-            return desc(arriba) + (propio ? " (es el target o un hijo suyo)"
-                                          : " (NO es el target: lo esta tapando)");
+            return {desc: desc(arriba), propio: el === arriba || el.contains(arriba)};
         }
     """
 
@@ -254,8 +308,12 @@ class PlataformaBase(ABC):
         # caracteres y se comia justo el motivo, que va al final.
         return f"{cabeza} | call log: " + " ; ".join(m[:130] for m in motivos[-4:])
 
-    async def _diagnosticar(self, locator) -> str:
-        """Como esta el elemento que no se pudo clickear. Solo para el log.
+    async def _diagnosticar(self, locator) -> tuple:
+        """Como esta el elemento que no se pudo clickear.
+
+        Devuelve (texto_para_el_log, despejado). `despejado` es True cuando
+        el elemento es visible y NADA lo tapa: es lo que habilita el
+        reintento forzado de clickear(), asi que no es solo para el log.
 
         Corre unicamente cuando el click ya fallo, asi que puede pagar unas
         consultas al DOM. Nunca puede tirar: un diagnostico que explota
@@ -264,9 +322,10 @@ class PlataformaBase(ABC):
         try:
             partes = [f"count={await locator.count()}"]
         except Exception as e:
-            return f"(no pude diagnosticar: {' '.join(str(e).split())[:80]})"
+            return f"(no pude diagnosticar: {' '.join(str(e).split())[:80]})", False
 
         objetivo = locator.first
+        es_visible, propio = False, False
         # Fabricas y no corrutinas ya creadas: si una falla, las que
         # quedaban sin await tirarian "coroutine was never awaited".
         for etiqueta, hacer in (
@@ -279,35 +338,92 @@ class PlataformaBase(ABC):
                 valor = await hacer()
             except Exception as e:
                 valor = f"? ({' '.join(str(e).split())[:60]})"
-            if etiqueta == "caja" and isinstance(valor, dict):
+            if etiqueta == "visible":
+                es_visible = valor is True
+            elif etiqueta == "caja" and isinstance(valor, dict):
                 valor = (f"{valor['width']:.0f}x{valor['height']:.0f}"
                          f"@{valor['x']:.0f},{valor['y']:.0f}")
+            elif etiqueta == "encima" and isinstance(valor, dict):
+                propio = bool(valor.get("propio"))
+                valor = valor["desc"] + (
+                    " (es el target o un hijo suyo)" if propio
+                    else " (NO es el target: lo esta tapando)")
             partes.append(f"{etiqueta}={valor}")
-        return ", ".join(partes)
+        return ", ".join(partes), (es_visible and propio)
 
-    async def avisar_si_ambiguo(self, nombre_remoto: str) -> int:
-        """Cuantos elementos matchean el nombre exacto. Avisa si hay mas de 1.
+    # Como se sube del texto del producto a su tarjeta/fila (XPATH_TARJETA),
+    # y que la identifica: un atributo de la tarjeta misma, o de algun
+    # elemento de adentro si el id no esta en la tarjeta (SELECTOR_ID_TARJETA
+    # vacio = la tarjeta misma). Lo declara cada plataforma; se usa para
+    # localizar (_tarjeta/_fila) y para detectar ambiguedad peligrosa.
+    XPATH_TARJETA: str = ""
+    SELECTOR_ID_TARJETA: str = ""
+    ATRIBUTO_ID_TARJETA: str = ""
 
-        Los localizadores de las dos plataformas arrancan con
-        `get_by_text(nombre, exact=True).first`. Si hay mas de un match, ese
-        `.first` puede estar agarrando el equivocado, y eso es exactamente
-        lo que produce un "apague X y se apago Y" (regla 3 del CLAUDE.md).
-        Es una pregunta que quedo abierta en TRASPASO.md y que solo se puede
-        contestar contra el portal de verdad.
+    def texto_exacto(self, nombre_remoto: str):
+        """Los elementos cuyo texto es exactamente el nombre del producto.
 
-        Devuelve el conteo (0 si no se pudo contar). No decide nada: solo
-        deja el dato en el log.
+        exact=True no es opcional: "Tarta de verdura" es prefijo de "Tarta
+        de verdura chica" y sin esto se apaga el plato equivocado (regla 3).
         """
+        return self.page.get_by_text(nombre_remoto, exact=True)
+
+    async def tarjetas_del_nombre(self, nombre_remoto: str) -> list:
+        """Los ids de las tarjetas distintas a las que llega ese nombre.
+
+        Dos matches del mismo texto NO son necesariamente un problema: el
+        nombre puede aparecer dos veces DENTRO de una tarjeta (titulo y
+        algun rotulo). Es un problema cuando caen en DOS tarjetas: ahi el
+        `.first` de siempre elige una al azar, y apagar la equivocada es
+        indistinguible de un bug (regla 3 del CLAUDE.md).
+
+        Devuelve la lista de ids distintos, en orden. Vacia si no se pudo
+        averiguar, que se trata como "no se puede afirmar que haya lio".
+        """
+        if not (self.XPATH_TARJETA and self.ATRIBUTO_ID_TARJETA):
+            return []
+
+        textos = self.texto_exacto(nombre_remoto)
         try:
-            cuantos = await self.page.get_by_text(nombre_remoto,
-                                                  exact=True).count()
+            cuantos = await textos.count()
         except Exception:
-            return 0
-        if cuantos > 1:
-            log.warning("%s: '%s' matchea %s elementos con exact=True; se usa "
-                        "el primero y puede no ser el que corresponde",
-                        self.nombre, nombre_remoto, cuantos)
-        return cuantos
+            return []
+
+        ids = []
+        for i in range(min(cuantos, 10)):
+            try:
+                quien = textos.nth(i).locator(self.XPATH_TARJETA).first
+                if self.SELECTOR_ID_TARJETA:
+                    quien = quien.locator(self.SELECTOR_ID_TARJETA).first
+                ident = await quien.get_attribute(self.ATRIBUTO_ID_TARJETA,
+                                                  timeout=1000)
+            except Exception:
+                continue
+            if ident and ident not in ids:
+                ids.append(ident)
+        return ids
+
+    async def revisar_ambiguedad(self, nombre_remoto: str):
+        """Tira NombreAmbiguo si el nombre llega a dos productos distintos.
+
+        CONFIRMADO EN VIVO (2026-08-03): en Rappi Comun 'Agua con gas'
+        matchea 2 elementos con exact=True. Si los dos caen en la misma
+        tarjeta da igual cual se agarre; si caen en dos, no hay forma de
+        saber cual quiso el usuario, y elegir a ciegas es exactamente el
+        bug que se esta tratando de evitar. Un apagado que no ocurre y se
+        ve en rojo es mejor que uno que cae en el plato equivocado.
+        """
+        ids = await self.tarjetas_del_nombre(nombre_remoto)
+        if len(ids) <= 1:
+            return
+
+        log.error("%s: '%s' aparece en %s productos distintos del portal "
+                  "(%s). No toco ninguno: no hay forma de saber cual es.",
+                  self.nombre, nombre_remoto, len(ids), ", ".join(ids[:4]))
+        raise NombreAmbiguo(
+            f"'{nombre_remoto}' aparece en {len(ids)} productos distintos de "
+            f"{self.nombre}. Corregí el nombre en la pantalla Carta para que "
+            f"apunte a uno solo.")
 
     async def clickear(self, locator, timeout: int = 8000, que: str = "elemento",
                        profundo: bool = False) -> bool:
@@ -318,25 +434,31 @@ class PlataformaBase(ABC):
         click. Playwright scrollea el elemento a la vista, algo le queda
         encima, y reintenta hasta agotar el timeout de 30s.
 
-        Dos defensas, en orden:
+        Tres defensas, en orden:
           1. Centrar el elemento en la pantalla (arriba esta el header,
              abajo la franja) y clickear normal, con timeout corto.
-          2. Si igual no entra, click por JS, que no mira que haya arriba.
-             Es menos fiel a un click real, por eso es el plan B.
+          2. Si no entra Y el diagnostico prueba que NADA lo tapa, clickear
+             forzado. Saltea los chequeos de accionabilidad de Playwright
+             pero sigue siendo un evento de mouse de verdad en la posicion
+             del elemento, asi que es fiel. Solo se usa cuando esta
+             despejado: si algo tapa, forzar seria clickear a ciegas lo que
+             haya encima, que es justo lo que no se quiere.
+          3. Recien ahi, click por JS, que no mira nada. Es el plan C.
 
         Se usa para TODOS los clicks (toggle, opciones del popup, boton de
         confirmar): cualquiera de ellos puede quedar tapado.
 
-        Devuelve True si entro el click normal y False si hubo que ir por
-        JS. Al que llama le importa la diferencia: el fallback JS no siempre
-        dispara lo mismo que un click de verdad, asi que un resultado
-        inesperado despues de un False todavia puede ser culpa del click.
+        Devuelve True si entro un click DE VERDAD (normal o forzado) y
+        False si hubo que ir por JS. Al que llama le importa la diferencia:
+        el fallback JS no siempre dispara lo mismo que un click real, asi
+        que un resultado inesperado despues de un False todavia puede ser
+        culpa del click. El forzado no tiene ese problema.
 
-        MEDIDO (2026-08-03): hoy el plan B se usa SIEMPRE, en las tres
-        pestañas, y son 8-10 s tirados por operacion. Por eso el camino de
-        falla loguea el motivo de Playwright y el estado del elemento (ver
-        _motivo_del_click y _diagnosticar): sin esos dos datos el arreglo
-        es adivinar.
+        POR QUE EL PELDAÑO 2 (log del 2026-08-03): en PedidosYa el toggle
+        fallaba con "element is not enabled" teniendo el camino libre —el
+        <input> de Angular Material es cdk-visually-hidden y Playwright lo
+        da por deshabilitado, pero el toggle anda—. Ahi el click forzado
+        entra y ahorra los 8-10 s del timeout, sin caer en el JS.
         """
         objetivo = locator.first
         await objetivo.evaluate(
@@ -349,13 +471,24 @@ class PlataformaBase(ABC):
             await objetivo.click(timeout=timeout)
             return True
         except Exception as e:
-            log.warning("%s: click normal sobre %s fallo. Voy por JS.\n"
-                        "    motivo: %s\n"
-                        "    estado: %s",
-                        self.nombre, que, self._motivo_del_click(e),
-                        await self._diagnosticar(objetivo))
-            await self.clickear_por_js(objetivo, profundo=profundo, timeout=timeout)
-            return False
+            estado, despejado = await self._diagnosticar(objetivo)
+            motivo = self._motivo_del_click(e)
+
+        if despejado:
+            try:
+                await objetivo.click(timeout=timeout, force=True)
+                log.warning("%s: click normal sobre %s fallo con el camino "
+                            "libre; entro forzado.\n    motivo: %s\n"
+                            "    estado: %s", self.nombre, que, motivo, estado)
+                return True
+            except Exception as e2:
+                motivo += f" || forzado: {self._motivo_del_click(e2)}"
+
+        log.warning("%s: click normal sobre %s fallo. Voy por JS.\n"
+                    "    motivo: %s\n"
+                    "    estado: %s", self.nombre, que, motivo, estado)
+        await self.clickear_por_js(objetivo, profundo=profundo, timeout=timeout)
+        return False
 
     async def _confirmar(self, nombre_remoto: str, esperado_disponible: bool,
                          asentar: int = 1500) -> bool:

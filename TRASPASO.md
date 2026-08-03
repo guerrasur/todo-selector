@@ -298,6 +298,35 @@ operaciones con su `detalle`; falta mostrarlo en pantalla (pendiente viejo).
 
 ---
 
+## La verificación de 2 minutos apagaba lo que el usuario prendía (2026-08-03)
+
+El mismo log destapó un bug que no tenía nada que ver con los clicks:
+
+```
+10:56:34  apagar_hoy 'Agua con gas' en rappi -> OK
+10:58:52  prender    'Agua con gas' en rappi -> OK    <- el usuario, a mano
+10:58:56  WARNING: Agua con gas revivio en rappi a los 120s, reencolando
+10:59:18  apagar_hoy 'Agua con gas' en rappi           <- lo volvió a apagar
+```
+
+`_verificar_luego()` se lanza con la acción congelada (`apagar_hoy`) y a los
+120 s solo preguntaba «¿está disponible?». Estaba disponible **porque el
+usuario lo prendió**. Y la doble lectura que existe para evitar falsos
+positivos acá confirmaba el error, porque el producto realmente estaba
+prendido.
+
+Lo llamativo es que la regla que faltaba **ya existía**: la ronda de 15
+minutos está protegida por `est.estado in EstadoItem.APAGADOS_PROPIOS`
+(`_guardar_estados`), y el motivo está escrito en `models.py` sobre
+`APAGADO_AJENO`. La verificación rápida se salteaba justo esa guarda, y no
+tenía ni una prueba.
+
+Ahora corta antes de tomar el bloqueo de la pestaña si el estado ya no es un
+apagado propio. Cubre tres casos de una: el usuario lo prendió (`PRENDIDO`),
+hay una operación nueva en vuelo (`PRENDIENDO`/`APAGANDO`) y el apagado pasó a
+ser ajeno. De paso ahorra ~20 s de navegador en el caso superado. Cubierto por
+`verificacion_rapida_no_pelea_con_el_usuario` en `pruebas/probar_estados.py`.
+
 ## Rendimiento medido en el log del 2026-07-28
 
 | | op#63 prender (PedidosYa) | op#64 prender (Rappi) |
@@ -326,39 +355,45 @@ Lo que hizo creer otra cosa fue el log: recortaba el error a 110 caracteres,
 que alcanzan justo para el `Timeout Xms exceeded` y el principio del locator.
 El motivo real viene más abajo, en el «Call log».
 
-### Cómo se lee ahora
+### RESUELTO (2026-08-03): eran tres causas distintas, no una
 
-El camino de falla de `clickear()` loguea dos líneas:
+La instrumentación contestó, y el log del usuario (apagar y prender «Agua con
+gas» en las tres plataformas) mostró que no había **una** causa sino tres:
 
-```
-pedidosya: click normal sobre toggle fallo. Voy por JS.
-    motivo: Locator.click: Timeout 10000ms exceeded. | call log: ... ;
-            <div class="cdk-overlay-backdrop"></div> intercepts pointer events
-    estado: count=1, visible=True, caja=36x14@241,238,
-            encima=div.cdk-overlay-backdrop (NO es el target: lo esta tapando)
-```
+| Dónde | Lo que dijo el log | Causa real |
+|---|---|---|
+| PedidosYa, toggle | `element is not enabled`, `encima=` el target mismo | **Nada lo tapa.** Playwright lo da por deshabilitado; el `<input>` de Angular Material es `cdk-visually-hidden`. El toggle anda: el click por JS entraba. |
+| Rappi, toggle | `div[data-testid=menu-categories-hoverable-gap-5] intercepts pointer events` | Una franja decorativa de hover encima de la lista. Centrar el elemento no alcanza: lo cubre igual. |
+| Rappi, radio «Sólo por hoy» | `count=1, visible=False`, `encima=div.portal6` | Un solo match y **invisible**: el modal todavía no había montado el radio de verdad. Antes había un `wait_for_timeout(1500)` fijo. |
 
-- `motivo` es el «Call log» de Playwright sin el ruido de reintentos
-  (`_motivo_del_click`).
-- `estado` dice si el elemento es visible, qué tamaño tiene, y **qué elemento
-  contesta `elementFromPoint` en su centro** (`_diagnosticar`). Con eso se
-  distingue de una vez «está tapado» de «es invisible».
-- Además, antes de cada `apagar()`/`prender()` corre `avisar_si_ambiguo()`,
-  que avisa si `get_by_text(nombre, exact=True)` matchea más de un elemento.
-  Esa era la otra pregunta abierta: si matchea más de uno, el `.first` puede
-  estar agarrando el equivocado, y eso es lo que produce un «apagué X y se
-  apagó Y».
+Los tres arreglos:
 
-**Lo que falta:** correr la app contra los portales de verdad y leer esas dos
-líneas. Según lo que digan, el arreglo es distinto (filtrar por visible en
-`_fila()`/`_tarjeta()`, cerrar lo que tapa, o cambiar el target), y por eso
-no se tocó todavía. Los 8-10 s por operación siguen ahí.
+1. **`clickear()` tiene tres peldaños**, no dos: click normal → **click
+   forzado** (`force=True`, que saltea los chequeos pero sigue siendo un
+   evento de mouse real) → click por JS. El forzado se usa **solo** cuando el
+   diagnóstico prueba que nada tapa el elemento; si algo tapa, forzar sería
+   clickear a ciegas lo que haya encima. Eso resuelve PedidosYa sin cambiar el
+   target.
+2. **`neutralizar_estorbos()`**: `pointer-events: none` sobre
+   `[data-testid^="menu-categories-hoverable-gap"]`, inyectado desde
+   `Rappi.asegurar_sesion()` (que es lo que se rehace después de cada recarga,
+   y el `<style>` no sobrevive a una navegación). No oculta nada. **No puede
+   provocar un click equivocado**: Playwright sigue verificando que el que
+   recibe el click sea nuestro elemento.
+3. **`visible()`**: los textos del modal se buscan entre lo que se ve, y se
+   espera a que aparezca (`wait_for(state="visible")`) en vez de dormir un
+   rato fijo.
 
-En la réplica local (`pruebas/probar_pedidosya.py`, escenario B) el
-diagnóstico ya contesta bien: `encima=div.cdk-overlay-backdrop (NO es el
-target: lo esta tapando)`. Ojo que eso es el backdrop simulado de la prueba,
-no prueba de qué pasa en producción.
+**Y la ambigüedad resultó real**: `avisar_si_ambiguo` pescó `'Agua con gas'
+matchea 2 elementos` en Rappi Común. Ahora `revisar_ambiguedad()` sube de cada
+match a su tarjeta y compara el id de producto: dos matches en **una** tarjeta
+son inofensivos, dos matches en **dos** tarjetas tiran `NombreAmbiguo` y la
+operación termina sin clickear nada, con un mensaje que manda a la pantalla
+Carta. Elegir a ciegas cuál de las dos era exactamente el «apagué X y se apagó
+Y» de la regla 3.
 
+Todo esto está cubierto sin portales por `pruebas/probar_rappi_menu.py` +
+`pruebas/portal_rappi_menu.html`, que reproduce las cuatro trampas.
 ---
 
 ## Decisiones del usuario (no volver a preguntar)

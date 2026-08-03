@@ -7,6 +7,7 @@ operacion en curso, no apropiarse de lo que apago el local por su cuenta, y
 respetar el tipo de apagado que eligio el usuario.
 """
 
+import asyncio
 import os
 import shutil
 import sys
@@ -24,8 +25,9 @@ os.environ["LOCALAPPDATA"] = TEMPORAL
 from app import catalogo, seed                                          # noqa: E402
 import catalogo_ejemplo                                   # noqa: E402
 from app.database import SessionLocal, init_db                # noqa: E402
-from app.models import Producto, EstadoItem                   # noqa: E402
+from app.models import Producto, EstadoItem, Operacion        # noqa: E402
 from app.worker import Worker                                 # noqa: E402
+from plataformas.base import ResultadoEstado                  # noqa: E402
 
 # app/seed.py viene VACIO a proposito: una instalacion nueva no arranca
 # con la carta de otro local. Las pruebas siembran una carta inventada.
@@ -200,6 +202,85 @@ def novedades(db):
     revisar(encontradas == [], "una vez ignorada, no vuelve a aparecer")
 
 
+def verificacion_rapida_no_pelea_con_el_usuario(db):
+    """EL BUG DEL 2026-08-03: le apago lo que acababa de prender.
+
+        10:56:34  apagar_hoy 'Agua con gas' en rappi -> OK
+        10:58:52  prender    'Agua con gas' en rappi -> OK   <- el usuario
+        10:58:56  WARNING: Agua con gas revivio a los 120s, reencolando
+        10:59:18  apagar_hoy 'Agua con gas' en rappi          <- lo apago de nuevo
+
+    _verificar_luego() se lanza con la accion congelada ("apagar_hoy") y a
+    los 2 minutos solo preguntaba "esta disponible?". Estaba disponible
+    PORQUE EL USUARIO LO PRENDIO. La ronda de 15 min ya estaba protegida
+    contra esto (sostener_y_pausa); esta verificacion se salteaba la guarda.
+    """
+    print("\n== La verificacion de 2 min no deshace lo que pidio el usuario ==")
+
+    class PaginaFalsa:
+        async def wait_for_timeout(self, ms):
+            pass
+
+    class PlataformaFalsa:
+        """Dice que el producto esta prendido, y cuenta cuantas veces la leyeron."""
+
+        def __init__(self):
+            self.lecturas = 0
+            self.page = PaginaFalsa()
+
+        async def leer_estado(self, nombre_remoto):
+            self.lecturas += 1
+            return ResultadoEstado(disponible=True, detalle="falsa")
+
+    def correr(estado_inicial):
+        poner(db, "Flan casero", estado_inicial)
+        db.query(Operacion).delete()
+        db.commit()
+
+        worker = Worker()
+        worker.corriendo = True
+        worker.modo_simulado = False
+        falsa = PlataformaFalsa()
+        worker.plataformas = {"rappi": falsa}
+
+        async def preparar_ok(plataforma):
+            return True, ""
+
+        worker._preparar = preparar_ok
+
+        producto = db.query(Producto).filter_by(nombre="Flan casero").first()
+        asyncio.run(worker._verificar_luego(producto.id, "rappi",
+                                            "apagar_hoy", demora=0))
+        db.expire_all()
+        encoladas = db.query(Operacion).count()
+        return encoladas, falsa.lecturas
+
+    # 1) Lo apago la app y sigue apagado por la app: es el caso para el que
+    #    esta hecha la verificacion. Tiene que seguir funcionando.
+    encoladas, lecturas = correr(EstadoItem.APAGADO_HOY)
+    revisar(encoladas == 1,
+            "lo que la app apago y el portal revivio se reencola (lo de siempre)")
+    revisar(lecturas == 2,
+            "y antes de acusar lo relee, que un falso 'revivio' lo PRENDERIA")
+
+    # 2) El caso del bug: el usuario lo prendio a proposito.
+    encoladas, lecturas = correr(EstadoItem.PRENDIDO)
+    revisar(encoladas == 0,
+            "lo que el usuario prendio NO se vuelve a apagar")
+    revisar(lecturas == 0,
+            "y ni siquiera va a mirar el portal: corta antes de tomar la pestaña")
+
+    # 3) Hay una operacion nueva en vuelo: lo que diga el portal es
+    #    transitorio y la operacion nueva ya va a dejar el estado que toca.
+    encoladas, _ = correr(EstadoItem.PRENDIENDO)
+    revisar(encoladas == 0, "con una operacion nueva en vuelo, tampoco se mete")
+
+    # 4) Lo apago el local desde el portal: es el motivo de que exista
+    #    APAGADO_AJENO, y vale para las dos reverificaciones.
+    encoladas, _ = correr(EstadoItem.APAGADO_AJENO)
+    revisar(encoladas == 0, "y no se apropia de lo que apago el local")
+
+
 def main():
     init_db()
     db = SessionLocal()
@@ -271,6 +352,7 @@ def main():
 
         sostener_y_pausa(db)
         apagado_que_no_se_puede_confirmar(db)
+        verificacion_rapida_no_pelea_con_el_usuario(db)
         novedades(db)
     finally:
         db.close()

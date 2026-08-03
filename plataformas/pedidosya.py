@@ -111,6 +111,13 @@ class PedidosYa(PlataformaBase):
     # apagados) y #toppings-category.
     SELECTOR_CATEGORIAS = "wk-menu-list wk-menu-list-category-item"
 
+    # Cada fila es el <label class="mat-slide-toggle-label"> de Angular
+    # Material, que envuelve nombre + toggle. Su `for` apunta al <input> de
+    # esa fila y nada mas, asi que identifica la fila sin ambiguedad.
+    XPATH_TARJETA = ("xpath=ancestor::label"
+                     "[contains(@class,'mat-slide-toggle-label')][1]")
+    ATRIBUTO_ID_TARJETA = "for"
+
     def __init__(self, page, menu_id: str = None):
         super().__init__(page)
         self.menu_id = menu_id or self.MENU_ID
@@ -317,10 +324,7 @@ class PedidosYa(PlataformaBase):
         otros: 'Tarta de verdura' vs 'Tarta de verdura chica') y subimos al
         label ancestro.
         """
-        texto = self.page.get_by_text(nombre_remoto, exact=True).first
-        return texto.locator(
-            "xpath=ancestor::label[contains(@class,'mat-slide-toggle-label')][1]"
-        )
+        return self.texto_exacto(nombre_remoto).first.locator(self.XPATH_TARJETA)
 
     async def listar_productos(self) -> list[str]:
         """Recorre todas las categorias: la carta entera, no solo la abierta."""
@@ -419,6 +423,9 @@ class PedidosYa(PlataformaBase):
             return ResultadoEstado(disponible=False, detalle=f"class={clases}")
 
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
+        # Va ANTES de leer: con un nombre que llega a dos productos, la
+        # lectura tampoco vale (leer_estado usa el mismo `.first`).
+        await self.revisar_ambiguedad(nombre_remoto)
         estado = await self.leer_estado(nombre_remoto)
         if estado is None:
             return False
@@ -427,7 +434,6 @@ class PedidosYa(PlataformaBase):
             return True
 
         fila = self._fila(nombre_remoto)
-        await self.avisar_si_ambiguo(nombre_remoto)
         await self._click_toggle(fila)
         await self.page.wait_for_timeout(1500)
 
@@ -448,6 +454,7 @@ class PedidosYa(PlataformaBase):
         return await self._confirmar(nombre_remoto, esperado_disponible=False)
 
     async def prender(self, nombre_remoto: str) -> bool:
+        await self.revisar_ambiguedad(nombre_remoto)
         estado = await self.leer_estado(nombre_remoto)
         if estado is None:
             return False
@@ -456,7 +463,6 @@ class PedidosYa(PlataformaBase):
             return True
 
         fila = self._fila(nombre_remoto)
-        await self.avisar_si_ambiguo(nombre_remoto)
         await self._click_toggle(fila)
         await self.page.wait_for_timeout(2000)
 
