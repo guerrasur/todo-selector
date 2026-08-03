@@ -234,7 +234,7 @@ cola).
     `expunge_all()`.
 12. **Nada que el usuario haya elegido puede vivir en una variable local del
     repintado.** La lista se repinta cada 3 s y se lo lleva puesto, sin que se
-    note. Pasó con los chips de plataforma. Ver `excluidas`, `filtro` y
+    note. Pasó con los chips de plataforma. Ver `elegidas`, `filtro` y
     `vista` en `index.html`.
 13. **No afirmar lo que no se está viendo.** Ver abajo.
 14. **Los títulos de la pantalla van en MAYÚSCULA por CSS.** `inner_text()`
@@ -408,8 +408,9 @@ Todo esto está cubierto sin portales por `pruebas/probar_rappi_menu.py` +
   prende con `rappi_comun_store_id` en Ajustes.
 - **Nada de espejos automáticos entre plataformas.** Lo que se apaga es lo que
   el usuario eligió con los chips y los botones, ni más ni menos. Que apagar
-  en Turbo apague en común sale de que sean el MISMO producto del catálogo
-  (los dos chips vienen puestos), no de una regla que propague por atrás.
+  en Turbo apague en común sale de que el usuario eligió los dos chips de un
+  producto que es el MISMO del catálogo, no de una regla que propague por
+  atrás. Los chips arrancan vacíos (2026-08-03): sin elegir no se apaga nada.
 - **Lo dudoso lo decide el usuario, una vez, en la pantalla Carta**, y queda
   guardado. La app no empareja sola entre las dos tiendas de Rappi si no es
   prácticamente el mismo nombre.

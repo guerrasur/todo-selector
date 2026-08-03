@@ -6,11 +6,27 @@ El worker no sabe nada de selectores: solo llama estos metodos.
 
 import logging
 import re
+import unicodedata
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
 log = logging.getLogger("plataformas")
+
+
+def plano(texto: str) -> str:
+    """Sin tildes, en minusculas y con los espacios colapsados.
+
+    Para COMPARAR textos del portal, nunca para buscarlos ni para guardarlos.
+    Existe porque un texto que se ve igual puede no ser el mismo string:
+    'Sólo por hoy' y 'Solo por hoy' se leen identicos en pantalla y un
+    match exacto falla con uno de los dos. Es el mismo criterio que usa el
+    buscador de la pantalla (`plano()` en static/index.html).
+    """
+    descompuesto = unicodedata.normalize("NFD", texto or "")
+    sin_tildes = "".join(c for c in descompuesto
+                         if unicodedata.category(c) != "Mn")
+    return " ".join(sin_tildes.split()).lower()
 
 
 class NombreAmbiguo(Exception):
@@ -125,15 +141,29 @@ class PlataformaBase(ABC):
             await self.page.goto(self.url_menu, wait_until="domcontentloaded")
             await self.page.wait_for_timeout(3000)
 
+    # Donde vive lo que el portal abre por encima. No alcanza con los dos
+    # primeros: el popup de disponibilidad de Rappi no es un <dialog> ni un
+    # overlay de Angular sino un portal de floating-ui, asi que este metodo
+    # contestaba "(nada)" con el popup abierto adelante (log del 2026-08-03).
+    # Un diagnostico que dice "no habia nada" cuando SI habia manda a buscar
+    # el problema al lugar equivocado.
+    SELECTORES_OVERLAY = (
+        ".cdk-overlay-container",
+        "[role='dialog']",
+        "[data-floating-ui-portal]",
+        "[role='menu']",
+        "[role='listbox']",
+    )
+
     async def texto_overlay(self, limite: int = 500) -> str:
         """Que dice el dialogo que hay abierto, si hay alguno.
 
         Cuando no encontramos un boton dentro de un popup, lo unico util es
         saber que decia el popup que si estaba abierto.
         """
-        for selector in (".cdk-overlay-container", "[role='dialog']"):
+        for selector in self.SELECTORES_OVERLAY:
             try:
-                cont = self.page.locator(selector)
+                cont = self.visible(self.page.locator(selector))
                 if await cont.count() == 0:
                     continue
                 texto = await cont.first.inner_text()

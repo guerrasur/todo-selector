@@ -43,7 +43,14 @@ y `?handler=hijo|host` (dónde vive el listener de la categoría).
   con retardo: ahí es donde el `.first` de antes clickeaba un fantasma;
 - dos nombres ambiguos, uno repetido dentro de **una** tarjeta (inofensivo) y
   otro que existe en **dos** tarjetas (ahí no se toca nada y se tira
-  `NombreAmbiguo`).
+  `NombreAmbiguo`);
+- y con `?dialogo=portal`, el diálogo de verdad: un portal de `floating-ui`
+  con las opciones en `menu-item-availability-switch-option-N` y el texto que
+  **no** es el nuestro carácter por carácter («Solo por hoy», sin tilde). Ahí
+  se prueba que la opción se encuentre igual comparando sin tildes, que no se
+  elija nunca por posición (la 3ª es "Personalizar", que no apaga nada), y que
+  un diálogo que no se pudo resolver no quede abierto tapando el intento
+  siguiente.
 
 Lo que prueba, además de que apagar y prender funcionen, es que el click
 normal **entra** — sin pasar por el fallback JS.

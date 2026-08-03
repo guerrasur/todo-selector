@@ -15,6 +15,10 @@ clase Rappi de verdad. Cubre lo que el log del 2026-08-03 dejo ver:
      tiene que operar normal.
   D) Un nombre que aparece en DOS tarjetas: peligroso. NO se toca ninguna,
      se tira NombreAmbiguo.
+  E) El dialogo de verdad (?dialogo=portal): portal de floating-ui, opciones
+     por data-testid y el texto SIN tilde. Buscar el texto exacto no
+     encuentra nada; hay que elegir la opcion comparando sin tildes, sin
+     elegir nunca por posicion, y no dejar el dialogo abierto.
 """
 
 import asyncio
@@ -191,6 +195,54 @@ async def nombres_ambiguos(navegador):
     await pagina.close()
 
 
+async def el_dialogo_de_floating_ui(navegador):
+    print("\n== E) El dialogo real: opciones por testid y texto sin tilde ==")
+    plat, pagina = await abrir_plataforma(navegador, "?dialogo=portal")
+    await plat.asegurar_sesion()
+
+    nombre = "Villavicencio con gas 500 ml"
+
+    # El texto que tenemos escrito NO esta en el dialogo: el unico match es
+    # el fantasma escondido. Asi se veia el 2026-08-03.
+    revisar(await plat.visible(
+        pagina.get_by_text(plat.TXT_POR_HOY, exact=True)).count() == 0,
+        "el texto exacto del radio no aparece en ningun lado visible")
+
+    revisar(await plat.apagar(nombre, por_hoy=True),
+            "apagar() igual encuentra la opcion (compara sin tildes)")
+
+    apagados = await pagina.evaluate("localStorage.getItem('apagados')")
+    revisar("582221" in (apagados or ""), "y el producto quedo apagado")
+
+    revisar(await plat._opciones_abiertas().count() == 0,
+            "el dialogo no quedo abierto tapando la pantalla")
+
+    # Que NO eligio por posicion: la 3ra opcion es "Personalizar", que pide
+    # una fecha y no apaga nada. Si la hubiera elegido, el producto seguiria
+    # prendido y esto no se distinguiria de un OK.
+    revisar(await plat.prender(nombre), "prender() lo vuelve a prender")
+
+    # Con una opcion que no existe, la operacion tiene que fallar EN ROJO y
+    # dejar la pantalla limpia, no quedarse con el dialogo abierto.
+    class SinOpcion(type(plat)):
+        TXT_POR_HOY = "Hasta el jueves que viene"
+
+    plat.__class__ = SinOpcion
+    revisar(not await plat.apagar(nombre, por_hoy=True),
+            "una opcion que el portal no tiene da False (no apaga a ciegas)")
+    revisar(plat.opciones_vistas and
+            any("Solo por hoy" in t for t in plat.opciones_vistas),
+            f"y el log puede decir que opciones habia ({plat.opciones_vistas})")
+    revisar(await plat._opciones_abiertas().count() == 0,
+            "y tampoco ahi queda el dialogo abierto para el intento siguiente")
+
+    estado = await plat.leer_estado(nombre)
+    revisar(estado is not None and estado.disponible,
+            "el producto sigue prendido: no se toco nada")
+
+    await pagina.close()
+
+
 async def main():
     servidor = servir()
     try:
@@ -200,6 +252,7 @@ async def main():
             await apagar_y_prender_de_verdad(navegador)
             await el_fantasma_del_radio(navegador)
             await nombres_ambiguos(navegador)
+            await el_dialogo_de_floating_ui(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()
