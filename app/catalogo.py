@@ -541,7 +541,7 @@ def detectar_novedades(db, plataforma: str, leidos) -> list:
 
 # ---------- Dos tiendas del mismo portal que quedaron distintas ----------
 
-def desparejos(db, activas) -> list:
+def desparejos(db, activas, desde=None) -> list:
     """Lo que quedo APAGADO en una tienda y PRENDIDO en la tienda hermana.
 
     Rappi Turbo y Rappi Común son dos tiendas del mismo local con dos
@@ -556,6 +556,19 @@ def desparejos(db, activas) -> list:
     de asociacion (y el aviso de novedad ya lo empuja). Un cartel fijo
     diciendo "esto podria estar en la otra tienda" para media carta se
     vuelve ruido, y el ruido termina en que no se lee ninguno.
+
+    `desde` es la frontera de lo que se puede afirmar: si alguno de los dos
+    estados no se verifico despues de ese momento, la familia se saltea.
+    Sin `desde` no se filtra nada (comportamiento viejo).
+
+    POR QUE (log del 2026-08-03): al arrancar, la app termino de leer Rappi
+    Comun dos minutos antes que Rappi. En esa ventana esta funcion cruzo lo
+    recien leido contra el estado del dia anterior y la pantalla afirmo que
+    11 productos se seguian vendiendo en la tienda hermana. Cuando Rappi
+    termino de leerse quedo 1: los otros 10 eran datos viejos. Comparar dos
+    estados es afirmar sobre los dos, y de uno no estabamos viendo nada
+    (regla 8). Lo viejo ya tiene su propio aviso, `sin_confirmar`, que dice
+    lo que corresponde ahi: hay que releer.
     """
     from .carta import TIENDAS_DEL_MISMO_PORTAL
 
@@ -581,6 +594,14 @@ def desparejos(db, activas) -> list:
             if any(e.estado in EstadoItem.EN_CURSO for e in estados.values()):
                 continue
 
+            # Un estado sin confirmar hace rato no sirve para comparar: no
+            # se puede decir "en la otra se sigue vendiendo" mirando lo que
+            # el portal decia ayer.
+            if desde is not None and any(
+                    e.verificado_en is None or e.verificado_en < desde
+                    for e in estados.values()):
+                continue
+
             apagadas = [plat for plat, e in estados.items()
                         if e.estado in EstadoItem.APAGADOS_PROPIOS
                         or e.estado == EstadoItem.APAGADO_AJENO]
@@ -598,11 +619,40 @@ def desparejos(db, activas) -> list:
                 "estado": estados[apagadas[0]].estado,
             })
 
+    _loguear_desparejos(salida)
+    return salida
+
+
+# Lo ultimo que se logueo, para no repetirlo. Es memoria de proceso y no de
+# base a proposito: si se reinicia la app, que lo diga una vez mas no
+# molesta, y asi no hay una tabla que mantener para un mensaje de log.
+_ultimos_desparejos: set = set()
+
+
+def _loguear_desparejos(salida: list) -> None:
+    """El aviso al log, pero solo cuando CAMBIA.
+
+    desparejos() es calculo puro y la pantalla la llama por /api/alertas
+    cada 3 segundos: con el log adentro, la misma linea salia 20 veces por
+    minuto y tapaba todo lo demas (log del 2026-08-03). Lo que importa es
+    la transicion, no el estado.
+    """
+    global _ultimos_desparejos
+
+    ahora = {s["producto_id"] for s in salida}
+    if ahora == _ultimos_desparejos:
+        return
+    _ultimos_desparejos = ahora
+
     if salida:
         log.info("%s producto(s) apagados en una tienda y prendidos en la "
                  "hermana: %s", len(salida),
                  ", ".join(s["producto"] for s in salida))
-    return salida
+    else:
+        # Esto antes no se veia nunca (el log estaba adentro de un `if
+        # salida`), asi que el aviso quedaba abierto en el log para siempre.
+        log.info("Ya no queda nada apagado en una tienda y prendido en la "
+                 "hermana")
 
 
 def separar(db, producto_id: int, plataforma: str,

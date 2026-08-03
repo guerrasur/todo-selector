@@ -244,6 +244,7 @@ class Rappi(PlataformaBase):
             return True
 
         tarjeta = self._tarjeta(nombre_remoto)
+        await self.avisar_si_ambiguo(nombre_remoto)
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
         await self.page.wait_for_timeout(1500)
 
@@ -282,6 +283,7 @@ class Rappi(PlataformaBase):
         # la relectura despues de recargar lo confirmo. Los dos modales
         # ("Sólo por hoy" y "¿Desactivar producto?") son solo de apagar.
         tarjeta = self._tarjeta(nombre_remoto)
+        await self.avisar_si_ambiguo(nombre_remoto)
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
         await self.page.wait_for_timeout(2500)
 

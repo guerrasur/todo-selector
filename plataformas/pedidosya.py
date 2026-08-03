@@ -427,6 +427,7 @@ class PedidosYa(PlataformaBase):
             return True
 
         fila = self._fila(nombre_remoto)
+        await self.avisar_si_ambiguo(nombre_remoto)
         await self._click_toggle(fila)
         await self.page.wait_for_timeout(1500)
 
@@ -455,6 +456,7 @@ class PedidosYa(PlataformaBase):
             return True
 
         fila = self._fila(nombre_remoto)
+        await self.avisar_si_ambiguo(nombre_remoto)
         await self._click_toggle(fila)
         await self.page.wait_for_timeout(2000)
 

@@ -5,6 +5,7 @@ El worker no sabe nada de selectores: solo llama estos metodos.
 """
 
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -179,6 +180,135 @@ class PlataformaBase(ABC):
         js = self.JS_CLICK_PROFUNDO if profundo else self.JS_CLICK
         return await locator.first.evaluate(js, timeout=timeout)
 
+    # Que elemento hay ARRIBA del centro del target. Si el click no entra
+    # porque algo lo tapa, esto dice quien es el que tapa; si el que
+    # contesta es el target mismo (o un hijo suyo), el problema es otro.
+    JS_QUIEN_TAPA = """
+        el => {
+            const r = el.getBoundingClientRect();
+            const x = r.left + r.width / 2, y = r.top + r.height / 2;
+            const arriba = document.elementFromPoint(x, y);
+            if (!arriba) return "(nadie: el centro cae fuera de la ventana)";
+            const desc = n => {
+                const t = n.tagName.toLowerCase();
+                const id = n.getAttribute('data-testid');
+                if (id) return `${t}[data-testid=${id}]`;
+                const c = (n.getAttribute('class') || '').trim().split(/\\s+/)[0];
+                return c ? `${t}.${c}` : t;
+            };
+            const propio = el === arriba || el.contains(arriba);
+            return desc(arriba) + (propio ? " (es el target o un hijo suyo)"
+                                          : " (NO es el target: lo esta tapando)");
+        }
+    """
+
+    # Lo que el call log repite en cada reintento y no explica nada.
+    RUIDO_DEL_CALL_LOG = re.compile(
+        r"(waiting \d+ms|retrying click action|attempting click action"
+        r"|waiting for element to be visible, enabled and stable"
+        r"|element is visible, enabled and stable"
+        r"|scrolling into view|done scrolling)")
+
+    @classmethod
+    def _motivo_del_click(cls, error: Exception) -> str:
+        """El motivo de accionabilidad que Playwright esconde en el call log.
+
+        HISTORIA: hasta el 2026-08-03 este error se recortaba a 110
+        caracteres, que alcanzan justo para el "Timeout Xms exceeded" y el
+        principio del locator, y se comian el motivo. Por eso `TRASPASO.md`
+        quedo escrito con la hipotesis de que el locator no resolvia, que
+        no puede ser: clickear() hace un evaluate() sobre el mismo locator
+        ANTES del click, y ese evaluate no falla.
+
+        El motivo real viene mas abajo, en las lineas del "Call log" que
+        arrancan con "-": "element is not visible", "element intercepts
+        pointer events", "element is not stable". Playwright repite la
+        misma linea en cada reintento, asi que se deduplica conservando el
+        orden; volcar el mensaje entero son decenas de lineas iguales.
+        """
+        crudo = str(error)
+        cabeza = " ".join(crudo.split("\n")[0].split())[:120]
+
+        vistas, motivos = set(), []
+        for linea in crudo.split("\n"):
+            linea = " ".join(linea.split())
+            if not linea.startswith("- "):
+                continue
+            linea = linea[2:]
+            if not linea or cls.RUIDO_DEL_CALL_LOG.match(linea):
+                # El final del call log son puros reintentos y esperas: si
+                # entran, empujan afuera justo la linea que dice por que.
+                continue
+            # Se deduplica ignorando los numeros: "retrying click action,
+            # attempt #2" y "#3" son la misma linea repitiendose.
+            clave = re.sub(r"\d+", "#", linea)
+            if clave not in vistas:
+                vistas.add(clave)
+                motivos.append(linea)
+
+        if not motivos:
+            return cabeza
+        # Las ultimas son las que explican por que se agoto el timeout; las
+        # primeras son el "waiting for locator" de siempre. Se recorta CADA
+        # linea y no el total: el locator de PedidosYa solo son 250
+        # caracteres y se comia justo el motivo, que va al final.
+        return f"{cabeza} | call log: " + " ; ".join(m[:130] for m in motivos[-4:])
+
+    async def _diagnosticar(self, locator) -> str:
+        """Como esta el elemento que no se pudo clickear. Solo para el log.
+
+        Corre unicamente cuando el click ya fallo, asi que puede pagar unas
+        consultas al DOM. Nunca puede tirar: un diagnostico que explota
+        romperia una operacion que igual va a seguir por el fallback JS.
+        """
+        try:
+            partes = [f"count={await locator.count()}"]
+        except Exception as e:
+            return f"(no pude diagnosticar: {' '.join(str(e).split())[:80]})"
+
+        objetivo = locator.first
+        # Fabricas y no corrutinas ya creadas: si una falla, las que
+        # quedaban sin await tirarian "coroutine was never awaited".
+        for etiqueta, hacer in (
+            ("visible", lambda: objetivo.is_visible(timeout=1000)),
+            ("caja", lambda: objetivo.bounding_box(timeout=1000)),
+            ("encima", lambda: objetivo.evaluate(self.JS_QUIEN_TAPA,
+                                                 timeout=1000)),
+        ):
+            try:
+                valor = await hacer()
+            except Exception as e:
+                valor = f"? ({' '.join(str(e).split())[:60]})"
+            if etiqueta == "caja" and isinstance(valor, dict):
+                valor = (f"{valor['width']:.0f}x{valor['height']:.0f}"
+                         f"@{valor['x']:.0f},{valor['y']:.0f}")
+            partes.append(f"{etiqueta}={valor}")
+        return ", ".join(partes)
+
+    async def avisar_si_ambiguo(self, nombre_remoto: str) -> int:
+        """Cuantos elementos matchean el nombre exacto. Avisa si hay mas de 1.
+
+        Los localizadores de las dos plataformas arrancan con
+        `get_by_text(nombre, exact=True).first`. Si hay mas de un match, ese
+        `.first` puede estar agarrando el equivocado, y eso es exactamente
+        lo que produce un "apague X y se apago Y" (regla 3 del CLAUDE.md).
+        Es una pregunta que quedo abierta en TRASPASO.md y que solo se puede
+        contestar contra el portal de verdad.
+
+        Devuelve el conteo (0 si no se pudo contar). No decide nada: solo
+        deja el dato en el log.
+        """
+        try:
+            cuantos = await self.page.get_by_text(nombre_remoto,
+                                                  exact=True).count()
+        except Exception:
+            return 0
+        if cuantos > 1:
+            log.warning("%s: '%s' matchea %s elementos con exact=True; se usa "
+                        "el primero y puede no ser el que corresponde",
+                        self.nombre, nombre_remoto, cuantos)
+        return cuantos
+
     async def clickear(self, locator, timeout: int = 8000, que: str = "elemento",
                        profundo: bool = False) -> bool:
         """Click que aguanta lo que los portales dejan flotando por encima.
@@ -201,6 +331,12 @@ class PlataformaBase(ABC):
         JS. Al que llama le importa la diferencia: el fallback JS no siempre
         dispara lo mismo que un click de verdad, asi que un resultado
         inesperado despues de un False todavia puede ser culpa del click.
+
+        MEDIDO (2026-08-03): hoy el plan B se usa SIEMPRE, en las tres
+        pestañas, y son 8-10 s tirados por operacion. Por eso el camino de
+        falla loguea el motivo de Playwright y el estado del elemento (ver
+        _motivo_del_click y _diagnosticar): sin esos dos datos el arreglo
+        es adivinar.
         """
         objetivo = locator.first
         await objetivo.evaluate(
@@ -213,8 +349,11 @@ class PlataformaBase(ABC):
             await objetivo.click(timeout=timeout)
             return True
         except Exception as e:
-            log.warning("%s: click normal sobre %s fallo (%s). Voy por JS.",
-                        self.nombre, que, " ".join(str(e).split())[:110])
+            log.warning("%s: click normal sobre %s fallo. Voy por JS.\n"
+                        "    motivo: %s\n"
+                        "    estado: %s",
+                        self.nombre, que, self._motivo_del_click(e),
+                        await self._diagnosticar(objetivo))
             await self.clickear_por_js(objetivo, profundo=profundo, timeout=timeout)
             return False
 
