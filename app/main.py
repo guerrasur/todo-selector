@@ -334,7 +334,13 @@ def alertas(db: Session = Depends(get_db)):
         # mismo tipo de problema que el de arriba —algo que se sigue
         # vendiendo cuando creias que no— pero por otro camino: acá la app
         # SÍ lo está viendo, y justamente por eso lo puede decir.
-        "sin_espejo": catalogo.desparejos(db, config.plataformas_activas()),
+        # El mismo `limite` que arriba, y no por casualidad: asi los dos
+        # avisos se complementan en vez de contradecirse. Lo que hace rato
+        # que nadie confirma sale como "sin_confirmar" (hay que releer);
+        # solo lo que SI se esta viendo puede salir como "sin_espejo"
+        # (esto se sigue vendiendo en la otra tienda).
+        "sin_espejo": catalogo.desparejos(db, config.plataformas_activas(),
+                                          desde=limite),
     }
 
 

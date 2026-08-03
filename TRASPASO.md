@@ -310,28 +310,54 @@ los dos portales. Son 8-10 segundos tirados por operación. Con "Apagar todo"
 son ~26 productos por portal, o sea **~13 minutos** para PedidosYa, de los
 cuales ~4 son puro timeout.
 
-**Pista del log:**
+Sigue pasando: en el log del **2026-08-03** falló 14 de 14 veces, y ahora en
+las tres pestañas (`pedidosya`, `rappi`, `rappi_comun`).
+
+### La hipótesis que estaba escrita acá era falsa (corregido 2026-08-03)
+
+Decía que el timeout era «esperando que el locator resuelva», y de ahí que
+`get_by_text(...).first` agarraba un elemento no visible. **No puede ser**:
+`clickear()` hace un `evaluate(scrollIntoView)` sobre ese mismo locator ANTES
+del click (`plataformas/base.py`), y ese evaluate no tira. O sea que el
+elemento resuelve y está en el DOM. Lo que falla es el chequeo de
+accionabilidad de Playwright.
+
+Lo que hizo creer otra cosa fue el log: recortaba el error a 110 caracteres,
+que alcanzan justo para el `Timeout Xms exceeded` y el principio del locator.
+El motivo real viene más abajo, en el «Call log».
+
+### Cómo se lee ahora
+
+El camino de falla de `clickear()` loguea dos líneas:
 
 ```
-click normal sobre toggle fallo (Locator.click: Timeout 10000ms exceeded.
-Call log: - waiting for get_by_text("...", exact=True).first.locat...)
+pedidosya: click normal sobre toggle fallo. Voy por JS.
+    motivo: Locator.click: Timeout 10000ms exceeded. | call log: ... ;
+            <div class="cdk-overlay-backdrop"></div> intercepts pointer events
+    estado: count=1, visible=True, caja=36x14@241,238,
+            encima=div.cdk-overlay-backdrop (NO es el target: lo esta tapando)
 ```
 
-El timeout es **esperando que el locator resuelva**, no "element is covered by
-another element" ni "not enabled". Eso apunta a que `get_by_text(...).first`
-está agarrando un elemento que **no es visible** (PedidosYa deja en el DOM
-elementos de categorías cerradas), y Playwright espera a que se vuelva
-accionable hasta agotar el timeout. El click por JS después funciona porque no
-mira visibilidad — pero eso significa que **puede estar clickeando el elemento
-equivocado**, y eso es exactamente el tipo de cosa que produce un "apagué X y
-se apagó Y".
+- `motivo` es el «Call log» de Playwright sin el ruido de reintentos
+  (`_motivo_del_click`).
+- `estado` dice si el elemento es visible, qué tamaño tiene, y **qué elemento
+  contesta `elementFromPoint` en su centro** (`_diagnosticar`). Con eso se
+  distingue de una vez «está tapado» de «es invisible».
+- Además, antes de cada `apagar()`/`prender()` corre `avisar_si_ambiguo()`,
+  que avisa si `get_by_text(nombre, exact=True)` matchea más de un elemento.
+  Esa era la otra pregunta abierta: si matchea más de uno, el `.first` puede
+  estar agarrando el equivocado, y eso es lo que produce un «apagué X y se
+  apagó Y».
 
-**Cómo investigarlo sin adivinar:** con la app corriendo,
-`/api/diagnostico?plataforma=pedidosya&nombre=<producto>` devuelve el HTML
-crudo de la fila, y `/api/esqueleto?plataforma=pedidosya` el árbol del DOM. Lo
-que hay que contestar es **cuántos elementos matchean `get_by_text(nombre,
-exact=True)` y cuáles son visibles**. Si hay más de uno, `_fila()` tiene que
-filtrar por visible antes del `.first`.
+**Lo que falta:** correr la app contra los portales de verdad y leer esas dos
+líneas. Según lo que digan, el arreglo es distinto (filtrar por visible en
+`_fila()`/`_tarjeta()`, cerrar lo que tapa, o cambiar el target), y por eso
+no se tocó todavía. Los 8-10 s por operación siguen ahí.
+
+En la réplica local (`pruebas/probar_pedidosya.py`, escenario B) el
+diagnóstico ya contesta bien: `encima=div.cdk-overlay-backdrop (NO es el
+target: lo esta tapando)`. Ojo que eso es el backdrop simulado de la prueba,
+no prueba de qué pasa en producción.
 
 ---
 

@@ -21,12 +21,20 @@ Lo que se prueba, en orden:
      encola, ni mas ni menos.
   5. Lo que no paso por la pantalla de asociacion no se apaga en la otra
      tienda — y eso se avisa en vez de quedar en silencio.
+  6. El aviso de "quedo apagado en una y prendido en la otra" solo sale si
+     las DOS tiendas se leyeron recien. Comparar contra un estado viejo es
+     afirmar sobre algo que no se esta viendo (log del 2026-08-03: llego a
+     decir 11 cuando era 1).
+  7. Y ese aviso va al log cuando CAMBIA, no en cada consulta de la
+     pantalla, que son 20 por minuto.
 """
 
 import asyncio
+import logging
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -268,6 +276,10 @@ def limpiar(db):
     db.query(Operacion).delete()
     for est in db.query(EstadoItem).all():
         est.estado = EstadoItem.PRENDIDO
+        # Recien leido. Sin esto los estados quedan con verificado_en en
+        # None, que es "nadie lo confirmo nunca", y las alertas que filtran
+        # por frescura no tienen de que hablar.
+        est.verificado_en = datetime.now()
     for p in db.query(Producto).all():
         p.pausado = False
     db.commit()
@@ -367,6 +379,104 @@ def avisa_si_quedo_apagado_en_una_sola(db):
             "y el que no existe en la otra tienda no genera ruido permanente")
 
 
+def no_avisa_sobre_lo_que_no_esta_viendo(db):
+    """El caso del log del 2026-08-03: una tienda leida y la otra vieja.
+
+    Al arrancar, la app termino de leer Rappi Comun dos minutos antes que
+    Rappi. En esa ventana la pantalla afirmo que 11 productos se seguian
+    vendiendo en la tienda hermana; cuando Rappi termino de leerse quedo 1.
+    Los otros 10 eran el estado del dia anterior.
+    """
+    from app.main import alertas
+
+    print("\n== No avisa comparando contra un estado que nadie confirmo ==")
+    limpiar(db)
+
+    producto = db.query(Producto).filter_by(nombre="Sopa del dia").first()
+    for est in producto.estados:
+        if est.plataforma == "rappi_comun":
+            est.estado = EstadoItem.APAGADO_HOY      # recien leido, apagado
+        if est.plataforma == "rappi":
+            # Prendido... segun lo que el portal decia ayer.
+            est.verificado_en = datetime.now() - timedelta(days=1)
+    db.commit()
+
+    revisar(not any(a["producto"] == "Sopa del dia"
+                    for a in alertas(db)["sin_espejo"]),
+            "con la tienda hermana sin leer hace un dia, no afirma nada")
+
+    # Ahora si: se leyo Rappi y sigue prendido. Ahi hay algo que decir.
+    for est in producto.estados:
+        if est.plataforma == "rappi":
+            est.verificado_en = datetime.now()
+    db.commit()
+
+    revisar(any(a["producto"] == "Sopa del dia"
+                for a in alertas(db)["sin_espejo"]),
+            "leidas las dos y una prendida, ahi si sale el aviso")
+
+
+def el_aviso_al_log_no_se_repite(db):
+    """El log de desparejos sale cuando cambia, no en cada poll.
+
+    La pantalla llama /api/alertas cada 3 segundos: con el log adentro del
+    calculo, la misma linea salia 20 veces por minuto y tapaba el resto.
+    """
+    from app.main import alertas
+
+    print("\n== El aviso al log sale cuando cambia, no en cada consulta ==")
+    limpiar(db)
+
+    class Cazador(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.lineas = []
+
+        def emit(self, record):
+            self.lineas.append(record.getMessage())
+
+    cazador = Cazador()
+    logging.getLogger("catalogo").addHandler(cazador)
+    # El memo es de proceso y viene con lo que dejo la prueba anterior.
+    # Arrancamos como una app recien levantada, para que esta prueba no
+    # dependa del orden en que corran las demas.
+    catalogo._ultimos_desparejos = set()
+    try:
+        producto = db.query(Producto).filter_by(nombre="Sopa del dia").first()
+        for est in producto.estados:
+            if est.plataforma == "rappi":
+                est.estado = EstadoItem.APAGADO_HOY
+        db.commit()
+
+        for _ in range(3):
+            alertas(db)
+        avisos = [l for l in cazador.lineas if "apagados en una tienda" in l]
+        revisar(len(avisos) == 1,
+                f"tres consultas seguidas, un solo aviso al log ({len(avisos)})")
+
+        # Cambia el conjunto: ahora si hay algo nuevo que contar.
+        otro = db.query(Producto).filter_by(nombre="Milanesa con pure").first()
+        for est in otro.estados:
+            if est.plataforma == "rappi":
+                est.estado = EstadoItem.APAGADO_HOY
+        db.commit()
+        alertas(db)
+        avisos = [l for l in cazador.lineas if "apagados en una tienda" in l]
+        revisar(len(avisos) == 2, "y cuando cambia el conjunto, vuelve a avisar")
+
+        # Y cuando se resuelve, lo dice: si no, el aviso queda abierto para
+        # siempre en el log.
+        for p in (producto, otro):
+            for est in p.estados:
+                est.estado = EstadoItem.PRENDIDO
+        db.commit()
+        alertas(db)
+        revisar(any("Ya no queda nada apagado" in l for l in cazador.lineas),
+                "y avisa tambien cuando ya no queda ninguno")
+    finally:
+        logging.getLogger("catalogo").removeHandler(cazador)
+
+
 async def apagar_todo_por_combinacion(db):
     print("\n== «Apagar todo» sobre las combinaciones que se pidieron ==")
 
@@ -442,6 +552,8 @@ def main():
         apagar_manda_la_seleccion(db)
         lo_no_vinculado_no_se_apaga_y_se_avisa(db)
         avisa_si_quedo_apagado_en_una_sola(db)
+        no_avisa_sobre_lo_que_no_esta_viendo(db)
+        el_aviso_al_log_no_se_repite(db)
         asyncio.run(apagar_todo_por_combinacion(db))
         previo_de_cada_combinacion()
     finally:

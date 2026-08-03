@@ -376,7 +376,14 @@ decidas vos.
 **Si algo queda apagado en una tienda y prendido en la otra**, sale un cartel
 rojo arriba de todo con el nombre y en cuál quedó prendido. Es el único caso
 que la app puede afirmar sin adivinar: las dos están vinculadas, las dos se
-leyeron, y no coinciden.
+leyeron **recién**, y no coinciden.
+
+Lo de «recién» es literal: si una de las dos tiendas no se confirma desde hace
+dos rondas, el cartel no sale, porque comparar contra un estado viejo es
+afirmar sobre algo que no se está viendo. Ese caso tiene su propio aviso, el de
+«hay que releer». Al arrancar la app pasó justo eso (2026-08-03): una tienda ya
+leída contra la otra del día anterior, y el cartel llegó a decir que 11
+productos se seguían vendiendo cuando en realidad era 1.
 
 ## La pantalla Carta
 
@@ -719,6 +726,12 @@ carta entera hay que recorrerlas (ver el punto 0).
 - [x] Sincronizar el estado real al arrancar. Hecho: al levantar, la app lee
       los dos portales y guarda cómo está cada producto. Ver más arriba.
 - [ ] Mostrar el historial en pantalla (la API ya lo devuelve).
+- [ ] **Los 8-10 segundos que cada operación tira en el click fallado.** El
+      click normal sobre el toggle falla siempre y termina yendo por el
+      fallback JS, en las tres pestañas. Desde el 2026-08-03 el log dice por
+      qué falla (`motivo:` y `estado:` debajo del aviso), pero eso hay que
+      leerlo **contra los portales de verdad**: según lo que diga, el arreglo
+      es distinto. Ver «Rendimiento medido» en `TRASPASO.md`.
 - [x] **Sacar del código los datos del local.** Hecho: el id de menú de
       PedidosYa y el `brandId`/`storeId` de Rappi salen de Ajustes (cambiarlos
       no pide reiniciar la app), y `app/seed.py` quedó vacío — una instalación
