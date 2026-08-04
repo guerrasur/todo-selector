@@ -165,6 +165,9 @@ clickeás de nuevo.
   de una sobre qué portales va a salir la acción.
 - **El botón lo dice**: con un chip marcado pasa a decir `Apagar hoy · solo
   PedidosYa`, y sin nada marcado (o con todos) dice `Apagar hoy` a secas.
+  Cuando lo que queda afuera es menos que lo que entra, lo dice al revés
+  (`Apagar hoy · sin Rappi Común`): con tres portales, «solo PedidosYa y Rappi
+  Turbo» es una etiqueta más ancha que la tarjeta.
 - Lo marcado **se queda puesto** hasta que lo sueltes: no se borra al apretar
   el botón, porque el botón siguiente saldría a todos los portales sin que se
   note. Y tampoco se pierde solo con el refresco de la pantalla, que es un bug

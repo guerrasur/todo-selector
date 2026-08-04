@@ -114,11 +114,13 @@
     /* Los tres botones se agrandan juntos cuando marcás un chip ("Apagar
        hoy · solo PedidosYa"), asi que la fila tiene que aguantar el cambio
        de ancho sin romperse: el nombre no baja de 160px (si no se partia en
-       tres lineas y la fila pegaba un salto) y la columna de botones puede
-       achicarse por debajo de su ancho natural para que envuelvan en dos
-       filas en vez de salirse de la tarjeta. */
+       tres lineas y la fila pegaba un salto), y las otras dos columnas
+       pueden achicarse por debajo de su ancho natural — los chips y los
+       botones envuelven en dos filas en vez de pisarse. Con `auto` en la
+       columna de los chips, los botones no tenian a donde achicarse y
+       terminaban DIBUJADOS ENCIMA de los chips. */
     display: grid;
-    grid-template-columns: minmax(160px, 1fr) auto minmax(0, auto);
+    grid-template-columns: minmax(160px, 1fr) minmax(0, auto) minmax(0, auto);
     gap: 14px;
     align-items: center; box-shadow: var(--sombra);
     transition: border-color .12s, background .12s;
@@ -127,7 +129,7 @@
   .nombre { font-weight: 550; letter-spacing: -.005em; }
   .nombre.editable { cursor: text; }
   .nombre.editable:hover { text-decoration: underline dotted var(--tenue); }
-  .plats { display: flex; gap: 8px; }
+  .plats { display: flex; gap: 8px; flex-wrap: wrap; }
   /* Un chip sin marcar NO esta apagado: es el estado normal, y ademas es
      donde se lee el estado del producto en ese portal. Va al 100% de
      opacidad y con el texto legible; lo que distingue al marcado es el
@@ -155,10 +157,13 @@
      sino algo que el usuario decidió, y llamar la atención sobre eso todo
      el día es ruido. El chip no se atenúa entero: el estado del producto se
      sigue leyendo y el apagado sigue andando. */
-  .marca-pausa {
-    font-size: 10px; color: var(--tenue); font-style: italic;
-    margin-left: 2px;
-  }
+  /* El chip de un portal en pausa se ve igual que el de un portal donde el
+     producto no existe: gris y en itálica. Es lo mismo para el que mira la
+     fila —de ahí no va a salir nada— y hace que el ojo salte directo a los
+     portales que sí están operando. */
+  .pill.tienda-pausada { opacity: .4; font-style: italic; }
+  .pill.tienda-pausada:hover { opacity: .7; }
+  .marca-pausa { font-size: 10px; margin-left: 2px; }
   .badge.pausada { color: var(--tenue); font-style: italic; }
   .pill.na { opacity: .4; cursor: default; font-style: italic; }
   .pill.na:hover { border-color: var(--borde); }
@@ -1433,9 +1438,14 @@ function fila(item) {
       const nombres = van.map(p => NOMBRE_PLAT[p]);
       // Cuando va a todos los portales que tiene el producto, aclararlo no
       // informa nada: es lo que el botón hace siempre. En cualquier otro
-      // caso el botón dice a dónde va.
-      const solo = van.length && van.length < donde.length
-        ? ' · solo ' + nombres.join(' y ') : '';
+      // caso el botón dice a dónde va — nombrando lo que ENTRA o lo que
+      // queda AFUERA, lo que sea más corto: con tres portales, "· solo
+      // PedidosYa y Rappi Turbo" es una etiqueta más ancha que la tarjeta.
+      const afuera = donde.filter(p => !van.includes(p));
+      const solo = !van.length || !afuera.length ? ''
+        : van.length <= afuera.length
+          ? ' · solo ' + nombres.join(' y ')
+          : ' · sin ' + afuera.map(p => NOMBRE_PLAT[p]).join(' ni ');
       // Lo que se cayó por estar en pausa se nombra: un botón que va a
       // menos portales de los que marcaste tiene que decir por qué.
       const caidas = elegidos().filter(p => !van.includes(p));
