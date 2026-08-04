@@ -19,6 +19,9 @@ Lo que NO hace, a propósito:
     operaciones duplicadas, y cada una vuelve a clickear el toggle.
   - No toca los pausados (salvo que lo pidas en Ajustes): son justamente los
     que el usuario se sacó de encima.
+  - No prende una tienda en pausa. Pausar la tienda entera es la forma de
+    decir "esta no va" (2026-08-04): apagarla se puede y hace falta, pero
+    "Prender todo" tiene que dejarla como está.
   - "Prender todo" no toca lo que figura `apagado (afuera)` salvo que lo
     pidas: si lo apagó alguien desde el portal, fue a propósito.
 
@@ -54,8 +57,19 @@ def _motivo_para_saltear(est: EstadoItem, accion: str,
 
     # Apagar. FALLO y DESCONOCIDO entran igual: no sabemos como esta, y
     # apagar() relee antes de clickear, asi que en el peor caso no hace nada.
-    if est.estado in EstadoItem.APAGADOS_PROPIOS:
-        return "ya figura apagado"
+    #
+    # OJO CON EL APAGADO POR HOY: "apagado" no es un solo estado. Si lo que
+    # se pidio es INDEFINIDO, lo que esta apagado *por hoy* NO esta como
+    # quiere quedar — el portal lo revive solo mañana a la mañana. Saltearlo
+    # era dejar media tienda prendida al otro dia justo cuando lo que se
+    # pidio fue desactivarla (pedido del 2026-08-04). Al reves si: lo
+    # indefinido ya cubre al "por hoy", y ahi no hay nada que hacer.
+    if est.estado == EstadoItem.APAGADO_INDEF:
+        return "ya figura apagado indefinido"
+    if est.estado == EstadoItem.APAGADO_HOY:
+        if accion == "apagar_hoy":
+            return "ya figura apagado hoy"
+        return None                  # hay que pasarlo a indefinido
     if est.estado == EstadoItem.APAGADO_AJENO:
         return "ya figura apagado (afuera)"
     return None
@@ -65,6 +79,14 @@ def planificar(db, plataforma: str, accion: str,
                incluir_pausados: bool, solo_propios: bool) -> dict:
     """Que productos habria que tocar en esa plataforma. No escribe nada."""
     encolar, salteados = [], []
+
+    # Una tienda en pausa no se prende: es todo el punto de la pausa. Se
+    # corta acá y no producto por producto para que la pantalla pueda decir
+    # el motivo una vez, y no treinta.
+    if accion == "prender" and config.tienda_pausada(plataforma):
+        return {"encolar": [],
+                "salteados": [{"producto": "(toda la tienda)",
+                               "motivo": "la tienda está en pausa"}]}
 
     productos = (db.query(Producto)
                  .filter(Producto.activo == True)      # noqa: E712

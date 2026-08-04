@@ -701,6 +701,90 @@ async def probar_falta_solo_la_sucursal(pagina):
     revisar(True, "y al completarlos el panel se va")
 
 
+async def probar_pausar_tienda(pagina):
+    """Pausar una TIENDA entera: se puede apagar, no se puede prender.
+
+    Pedido del 2026-08-04: "los jefes me piden desactivar Rappi Común".
+    Apagarla toda no alcanza — el portal revive lo apagado por hoy, y un
+    «Prender todo» de la mañana siguiente la vuelve a levantar entera.
+    """
+    print("\n== Pausar una tienda entera ==")
+    await pagina.click("#btn-cierre")
+    await pagina.wait_for_selector("#panel-cierre:visible", timeout=5000)
+    await pagina.wait_for_selector(".fila-cierre", timeout=5000)
+
+    fila_py = pagina.locator(".fila-cierre[data-destino='pedidosya']")
+    fila_ambas = pagina.locator(".fila-cierre[data-destino='ambas']")
+    revisar(await fila_py.locator("button", has_text="Pausar tienda").count() == 1,
+            "cada tienda tiene su boton de pausa")
+    revisar(await fila_ambas.locator("button", has_text="Pausar tienda")
+            .count() == 0,
+            "pero el combo no: pausar «los dos» de un boton son dos "
+            "decisiones metidas en una")
+    revisar(await fila_py.locator("button", has_text="Indefinido").count() == 1,
+            "y se puede apagar toda la tienda indefinidamente sin ir a Ajustes")
+
+    await fila_py.locator("button", has_text="Pausar tienda").click()
+    await pagina.wait_for_selector(
+        ".fila-cierre[data-destino='pedidosya'] button:has-text('Reactivar tienda')",
+        timeout=10000)
+
+    texto = await pagina.locator("#resultado-cierre").inner_text()
+    revisar("en pausa" in texto, f"dice que quedo en pausa ({texto[:50]})")
+
+    # Ahora «Prender todo» de esa tienda no tiene que hacer nada.
+    await fila_py.locator("button", has_text="Prender todo").click()
+    await pagina.wait_for_timeout(600)
+    texto = await pagina.locator("#resultado-cierre").inner_text()
+    revisar("en pausa" in texto,
+            f"«Prender todo» avisa que la tienda esta en pausa ({texto[:60]})")
+
+    # Y la pantalla principal lo tiene que decir, no solo este panel.
+    await pagina.click("#btn-cierre")
+    await pagina.wait_for_timeout(4000)
+    revisar("en pausa" in await pagina.locator("#tiendas").inner_text(),
+            "el badge de la tienda, arriba, dice que esta en pausa")
+
+    fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
+    revisar(await fila.locator(".pill[data-plat='pedidosya'] .marca-pausa")
+            .count() == 1,
+            "y el chip del producto tambien")
+    prender = fila.locator("button", has_text="Prender")
+    revisar("solo Rappi" in await prender.inner_text(),
+            f"«Prender» deja afuera la tienda en pausa "
+            f"({(await prender.inner_text()).strip()})")
+    revisar("solo" not in await fila.locator("button", has_text="Apagar hoy")
+            .inner_text(),
+            "pero apagar sigue yendo a las dos: es lo que hace falta")
+
+    # Que no sea solo la pantalla: el backend tambien tiene que negarse,
+    # porque un click puede salir con los datos de hace tres segundos.
+    r = await pagina.evaluate("""
+        fetch('/api/productos').then(r => r.json()).then(ps => {
+          const p = ps.find(p => p.estados.pedidosya);
+          return fetch('/api/accion', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({producto_id: p.id, accion: 'prender',
+                                  plataformas: ['pedidosya']}),
+          }).then(r => r.json());
+        })""")
+    revisar(r["encoladas"] == [] and
+            r["salteadas"][0]["motivo"] == "la tienda está en pausa",
+            f"la API rechaza prender en una tienda en pausa ({r})")
+
+    # Sacarla de la pausa.
+    await pagina.click("#btn-cierre")
+    await pagina.wait_for_selector(".fila-cierre", timeout=5000)
+    await fila_py.locator("button", has_text="Reactivar tienda").click()
+    await pagina.wait_for_selector(
+        ".fila-cierre[data-destino='pedidosya'] button:has-text('Pausar tienda')",
+        timeout=10000)
+    await pagina.click("#btn-cierre")
+    await pagina.wait_for_timeout(4000)
+    revisar("en pausa" not in await pagina.locator("#tiendas").inner_text(),
+            "y al reactivarla la pantalla vuelve a la normal")
+
+
 async def probar_apagar_todo(pagina):
     """Apagar la carta de UNA plataforma, que es lo que pidio el usuario."""
     print("\n== Apagar todo ==")
@@ -1015,6 +1099,7 @@ async def main():
         await probar_renombrar_y_deshacer(pagina)
         await probar_ajustes(pagina)
         await probar_plataforma_opcional(pagina)
+        await probar_pausar_tienda(pagina)
 
         # Al final: encola la carta entera, y en modo simulado cada operacion
         # tarda 2 segundos. Antes de las otras pruebas les dejaria el worker

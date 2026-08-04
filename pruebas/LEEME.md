@@ -77,6 +77,10 @@ operaciones por portal y cada una recarga la página, así que encolar de más e
 la diferencia entre un minuto y veinte. Cubre también que apagar una plataforma
 deje la otra intacta, que apretarlo dos veces no duplique la cola, y que los
 ajustes validen antes de guardar (una tanda con un valor malo no guarda ninguno).
+Desde el 2026-08-04 cubre además desactivar una tienda: que pedir *indefinido*
+sí reencole lo que estaba apagado **por hoy** (ese vuelve solo mañana), y que
+una tienda **en pausa** se pueda apagar pero no prender — ni con «Prender
+todo», ni de a un producto, ni asomándose en el aviso de la tienda hermana.
 
 **`probar_pantalla_carta.py`** levanta la app entera en modo simulado y la
 maneja con Playwright como lo haría una persona. En modo simulado `/api/carta`
