@@ -82,6 +82,12 @@ sí reencole lo que estaba apagado **por hoy** (ese vuelve solo mañana), y que
 una tienda **en pausa** se pueda apagar pero no prender — ni con «Prender
 todo», ni de a un producto, ni asomándose en el aviso de la tienda hermana.
 
+Desde el 2026-08-04 cubre también el reintento automático de lo que falló
+(`probar_estados.py`): que vuelva solo a la cola pasados los minutos, pero
+**no** si en el medio se pidió otra cosa para ese producto, si ya quedó como
+se pedía, si el producto está en pausa, o si ya agotó el tope — y que la misma
+fallida no se evalúe dos veces, que sería un reintento por minuto para siempre.
+
 **`probar_pantalla_carta.py`** levanta la app entera en modo simulado y la
 maneja con Playwright como lo haría una persona. En modo simulado `/api/carta`
 lee las cartas inventadas de `carta_ejemplo.json` y **las cruza con el

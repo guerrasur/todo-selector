@@ -149,16 +149,17 @@
     box-shadow: inset 0 0 0 1px var(--acento), 0 0 0 3px #5b9dff33;
   }
   .pill:hover { border-color: var(--acento); }
-  /* Tienda en pausa: la app no prende nada ahí. No se atenúa el chip (el
-     estado del producto se sigue leyendo y el apagado sigue andando): se
-     agrega una marca que se lee. */
-  .pill.tienda-pausada { border-style: dashed; }
+  /* Tienda en pausa: la app no prende nada ahí. Va en GRIS Y EN ITÁLICA,
+     igual que el «—» de un producto que no existe en un portal, y no en
+     amarillo de alerta: una tienda en pausa no es un problema que resolver
+     sino algo que el usuario decidió, y llamar la atención sobre eso todo
+     el día es ruido. El chip no se atenúa entero: el estado del producto se
+     sigue leyendo y el apagado sigue andando. */
   .marca-pausa {
-    font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase;
-    color: var(--curso); border: 1px solid currentColor; border-radius: 4px;
-    padding: 0 3px; margin-left: 2px;
+    font-size: 10px; color: var(--tenue); font-style: italic;
+    margin-left: 2px;
   }
-  .badge.pausada { border-color: var(--curso); color: var(--curso); }
+  .badge.pausada { color: var(--tenue); font-style: italic; }
   .pill.na { opacity: .4; cursor: default; font-style: italic; }
   .pill.na:hover { border-color: var(--borde); }
   /* Sin marcar no lleva ningun tratamiento propio: se ve entero, como
@@ -356,15 +357,20 @@
      que el texto de al lado y el usuario no lo encontraba: "no entiendo
      cómo poner una tienda en pausa" (2026-08-04). Acá no es un botón de
      los de todos los días, pero es EL botón de una función entera. */
+  /* Discreto, pero con forma de botón: gris y en itálica como el resto de
+     lo que tiene que ver con la pausa, con su contorno para que se
+     encuentre. Sin contorno ni fondo (como era al principio) se leía como
+     texto y directamente no se veía. */
   .fila-cierre .pausar-tienda {
-    background: var(--panel-2); border: 1px solid var(--borde);
-    color: var(--texto); margin-left: auto;
+    background: transparent; border: 1px solid var(--borde);
+    color: var(--tenue); font-style: italic; font-size: 12px;
+    margin-left: auto;
   }
-  .fila-cierre .pausar-tienda:hover { border-color: var(--curso); }
-  .fila-cierre.en-pausa { background: #2a220f40; }
-  .fila-cierre.en-pausa .quien-cierre { color: var(--curso); }
-  .fila-cierre.en-pausa .pausar-tienda {
-    border-color: var(--curso); color: var(--curso);
+  .fila-cierre .pausar-tienda:hover {
+    border-color: var(--acento); color: var(--texto);
+  }
+  .fila-cierre.en-pausa .quien-cierre {
+    color: var(--tenue); font-style: italic;
   }
   #resultado-cierre {
     font-size: 13px; margin-top: 14px; white-space: pre-line;
@@ -487,6 +493,10 @@ let PLATS = ['pedidosya', 'rappi'];
 // el corte de verdad está en el backend, porque esta pantalla se repinta
 // sola pero un click puede salir con los datos de hace tres segundos.
 let PAUSADAS = new Set();
+
+// Cada cuántos minutos vuelve sola una operación que falló (0 = no vuelve).
+// Sale de Ajustes; acá se usa solo para decirlo en el cartel del fallo.
+let REINTENTA_FALLIDAS = 0;
 const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi', rappi_comun: 'Rappi Común' };
 
 // Tiendas del MISMO portal, para poder apagarlas juntas con un botón. Es
@@ -1010,6 +1020,7 @@ function pintarSistema(s) {
   // esta lista.
   if (Array.isArray(s.plataformas) && s.plataformas.length) PLATS = s.plataformas;
   PAUSADAS = new Set(s.pausadas || []);
+  REINTENTA_FALLIDAS = s.reintenta_fallidas || 0;
   nombrarPlataformas();
 
   if (s.version) document.getElementById('version').textContent = 'v' + s.version;
@@ -1443,7 +1454,12 @@ function fila(item) {
     if (!est || est.estado !== 'fallo' || !est.detalle) continue;
     const err = document.createElement('div');
     err.className = 'detalle-fallo';
-    err.textContent = `${NOMBRE_PLAT[plat]}: ${est.detalle}`;
+    // Y que la app lo va a reintentar sola también: un «FALLÓ» a secas
+    // parece que se quedó esperando que el usuario haga algo.
+    err.textContent = `${NOMBRE_PLAT[plat]}: ${est.detalle}` +
+      (REINTENTA_FALLIDAS
+        ? `  ·  lo reintento solo dentro de ${REINTENTA_FALLIDAS} min`
+        : '');
     div.appendChild(err);
   }
 

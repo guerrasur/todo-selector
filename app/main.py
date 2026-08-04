@@ -392,6 +392,10 @@ def estado_sistema(db: Session = Depends(get_db)):
         # apagar), pero la app no las prende. La pantalla las marca y saca
         # el botón de prender; el corte de verdad está en el backend.
         "pausadas": config.tiendas_pausadas(),
+        # Cada cuántos minutos vuelve sola una operación que falló (0 = no
+        # vuelve). La pantalla lo dice en el cartel rojo del producto: si no,
+        # un "FALLÓ" parece que espera que el usuario haga algo.
+        "reintenta_fallidas": config.entero("reintentar_fallidas"),
         # Estado de la TIENDA entera (abierta/cerrada), no de un producto.
         # None de valor en el dict = todavia no se leyo o esta plataforma no
         # tiene el dato que hace falta (ver worker.estado_tienda). No

@@ -133,6 +133,15 @@ Las operaciones tardan 2 segundos y siempre dan OK. Sirve para ver la UI.
   programa un chequeo. Si a los 2 minutos PedidosYa lo revivió, se reencola solo.
 - **Ronda general cada 15 minutos** sobre todo lo que figura apagado, por si
   algo se revivió más tarde.
+- **Lo que falla vuelve solo a los 10 minutos.** Los 3 reintentos de arriba son
+  seguidos, de a 2 segundos: sirven para un click que no entró, no para un
+  portal que está teniendo un mal momento. Si la operación muere igual, la app
+  la vuelve a encolar sola un rato después, y el cartel rojo del producto lo
+  dice (`lo reintento solo dentro de 10 min`). **Solo si todavía corresponde**:
+  no vuelve si en el medio pediste otra cosa para ese producto, si ya quedó
+  como pedías, si el producto o la tienda están en pausa, o si ya reintentó
+  3 veces (ahí queda en rojo esperándote: si el portal cambió algo,
+  machacarlo no lo arregla). Los dos números se cambian en Ajustes → Ritmo.
 - **Refresco bajo demanda**: justo antes de cada operación, si la pestaña tiene
   más de 2 minutos, se recarga y se rechequea el login. No hay refresco
   periódico: el navegador se toca solo cuando hay trabajo. Esto cubre:
@@ -288,7 +297,7 @@ que sin tocar nada se comporta igual que siempre.
 |---|---|
 | **Apagar todo** | Si el cierre apaga *por hoy* o *indefinido*; si relee el portal antes; si incluye los pausados; si "Prender todo" toca lo apagado desde afuera. |
 | **Tiendas en pausa** | Qué tiendas están en pausa (la app no las prende). Es el mismo interruptor que el botón «Pausar tienda» de «Apagar todo»; acá se ven todas juntas. Solo salen las tiendas que esta instalación usa. |
-| **Ritmo** | Cada cuántos minutos se releen las cartas (0 = nunca); si se vuelve a apagar lo que el portal revive; a los cuántos segundos se confirma un apagado; cuándo se considera vieja la pestaña; reintentos por operación; cada cuánto se repinta la pantalla. |
+| **Ritmo** | Cada cuántos minutos se releen las cartas (0 = nunca); si se vuelve a apagar lo que el portal revive; a los cuántos segundos se confirma un apagado; cuándo se considera vieja la pestaña; reintentos por operación; **a los cuántos minutos vuelve sola una operación que falló (0 = nunca) y cuántas veces**; cada cuánto se repinta la pantalla. |
 | **Sucursal** | El **id de menú de PedidosYa** y el **storeId / brandId de Rappi**. Estaban clavados en el código: hasta que fueran configurables, "sirve para otro local" estaba a medias. |
 | **Rappi Común** | El **storeId de la segunda tienda de Rappi**, si tu local tiene una. Vacío (el default) = la app ni la nombra. Ver «Las dos tiendas de Rappi». |
 

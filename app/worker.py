@@ -144,6 +144,7 @@ class Worker:
 
         asyncio.create_task(self._loop_cola())
         asyncio.create_task(self._loop_reverificacion())
+        asyncio.create_task(self._loop_reintentos())
 
         # Arrancar sin saber que hay prendido era la queja mas directa que
         # se le podia hacer a la pantalla. Va en background para no demorar
@@ -1178,6 +1179,163 @@ class Worker:
         await self._refrescar_estado_tiendas()
 
         self.ultimo_chequeo = datetime.now()
+
+    # ---------- Lo que fallo se reintenta solo ----------
+
+    async def _loop_reintentos(self):
+        """Cada minuto mira si hay fallidas maduras para volver a encolar.
+
+        De a un minuto y no de una espera larga por lo mismo que la ronda:
+        cambiar el ajuste (o ponerlo en 0) tiene efecto enseguida.
+        """
+        while self.corriendo:
+            await asyncio.sleep(60)
+            try:
+                self._reencolar_fallidas()
+            except Exception as e:
+                log.exception("Error reencolando lo que fallo: %s", e)
+
+    def _reencolar_fallidas(self) -> list:
+        """Vuelve a encolar las operaciones que murieron en ERROR.
+
+        POR QUE (pedido del 2026-08-04): los 3 intentos de `max_intentos`
+        son seguidos y de a 2 segundos. Sirven para un click que no entro,
+        no para un portal que esta teniendo un mal momento (o para una
+        sesion que se acaba de renovar). Cuando la operacion moria igual,
+        quedaba en rojo esperando que el usuario se acordara de volver a
+        apretar — y lo que se pidio apagar seguia vendiendose.
+
+        NO ES "REINTENTAR TODO LO QUE FALLO". Una operacion fallida es una
+        intencion vieja, y entre medio el usuario pudo haber cambiado de
+        idea (regla 10 de CLAUDE.md: la app ya le apago una vez algo que
+        acababa de prender a mano). Por eso solo vuelve si TODAVIA hace
+        falta y nadie pidio otra cosa para ese producto en el medio.
+
+        Devuelve un dict por operacion nueva (y no el objeto de SQLAlchemy:
+        la sesion se cierra acá adentro y afuera quedaría detached).
+        """
+        minutos = config.entero("reintentar_fallidas")
+        if minutos <= 0:
+            return []
+
+        tope = config.entero("max_reintentos_automaticos")
+        limite = datetime.now() - timedelta(minutes=minutos)
+        activas = config.plataformas_activas()
+        copias = []
+
+        db = SessionLocal()
+        try:
+            fallidas = (db.query(Operacion)
+                        .filter(Operacion.estado == Operacion.ERROR,
+                                Operacion.reintentada.isnot(True))
+                        .order_by(Operacion.creada_en)
+                        .all())
+
+            for op in fallidas:
+                cuando = op.finalizada_en or op.creada_en
+                if cuando and cuando > limite:
+                    continue        # todavia esta fresca, dejala descansar
+
+                # Se marca SIEMPRE, se reencole o no: si no, una fallida que
+                # hoy no corresponde se vuelve a evaluar cada minuto para
+                # siempre.
+                op.reintentada = True
+
+                motivo = self._motivo_para_no_reintentar(db, op, tope, activas)
+                if motivo:
+                    log.info("op#%s no se reintenta sola: %s", op.id, motivo)
+                    continue
+
+                vuelta = (op.auto_reintentos or 0) + 1
+                copia = Operacion(
+                    producto_id=op.producto_id,
+                    plataforma=op.plataforma,
+                    accion=op.accion,
+                    auto_reintentos=vuelta,
+                    detalle=f"reintento automatico {vuelta}/{tope} de op#{op.id}",
+                )
+                db.add(copia)
+
+                # Igual que en /api/accion: que la pantalla muestre enseguida
+                # que ese producto volvio a estar en movimiento.
+                est = (db.query(EstadoItem)
+                       .filter_by(producto_id=op.producto_id,
+                                  plataforma=op.plataforma)
+                       .first())
+                if est is not None:
+                    est.estado = (EstadoItem.PRENDIENDO
+                                  if op.accion == "prender"
+                                  else EstadoItem.APAGANDO)
+
+                copias.append(copia)
+                log.info("op#%s fallo hace %s min: la reintento sola "
+                         "(%s '%s' en %s, vuelta %s/%s)",
+                         op.id, minutos, op.accion,
+                         op.producto.nombre if op.producto else "?",
+                         op.plataforma, vuelta, tope)
+
+            db.commit()
+            nuevas = [{"id": c.id, "producto_id": c.producto_id,
+                       "plataforma": c.plataforma, "accion": c.accion,
+                       "vuelta": c.auto_reintentos} for c in copias]
+        finally:
+            db.close()
+
+        return nuevas
+
+    @staticmethod
+    def _motivo_para_no_reintentar(db, op, tope: int, activas: list) -> str:
+        """Por que esta fallida NO se vuelve a encolar. '' = si se reencola."""
+        if (op.auto_reintentos or 0) >= tope:
+            return f"ya lleva {op.auto_reintentos} reintentos automaticos"
+
+        if op.plataforma not in activas:
+            return "esa plataforma no esta activa en esta instalacion"
+
+        # Pausar la tienda es decir "esta no va": no se la prende sola por
+        # una operacion de antes de la pausa.
+        if op.accion == "prender" and config.tienda_pausada(op.plataforma):
+            return "la tienda esta en pausa"
+
+        producto = db.query(Producto).get(op.producto_id)
+        if producto is None or not producto.activo:
+            return "el producto ya no existe"
+        if producto.pausado:
+            return "el producto esta en pausa"
+
+        # Lo que el usuario haya pedido DESPUES manda. Una fallida de hace
+        # media hora no puede pasarle por arriba a un click de recien, ni
+        # duplicar algo que ya esta en la cola.
+        posterior = (db.query(Operacion)
+                     .filter(Operacion.producto_id == op.producto_id,
+                             Operacion.plataforma == op.plataforma,
+                             Operacion.id != op.id,
+                             Operacion.creada_en >= op.creada_en)
+                     .first())
+        if posterior is not None:
+            return f"despues se pidio otra cosa (op#{posterior.id})"
+
+        est = next((e for e in producto.estados
+                    if e.plataforma == op.plataforma), None)
+        if est is None:
+            return "el producto no existe en ese portal"
+        if est.estado in EstadoItem.EN_CURSO:
+            return "ya hay algo en curso"
+
+        # Y si ya quedo como se pedia, no hay nada que reintentar. Pasa: el
+        # click entro y lo que fallo fue confirmarlo, o lo apago el local a
+        # mano mientras tanto.
+        if op.accion == "prender":
+            if est.estado == EstadoItem.PRENDIDO:
+                return "ya quedo prendido"
+        elif est.estado == EstadoItem.APAGADO_INDEF:
+            return "ya quedo apagado indefinido"
+        elif est.estado == EstadoItem.APAGADO_AJENO:
+            return "ya lo apagaron desde el portal"
+        elif est.estado == EstadoItem.APAGADO_HOY and op.accion == "apagar_hoy":
+            return "ya quedo apagado hoy"
+
+        return ""
 
     async def _reencolar_si_revivio(self, caso: dict):
         """Confirma con una segunda lectura antes de acusar que revivio.

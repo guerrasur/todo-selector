@@ -108,6 +108,16 @@ columna sigue sin estar cubierto.
    pantalla no puede seguir mostrándolo como un hecho de ahora. Ya costó
    un pedido de algo apagado (2026-07-28). Ver `/api/alertas`.
 
+12. **Lo que falla vuelve solo, pero solo si todavía corresponde**
+    (2026-08-04, `worker._reencolar_fallidas`). Los 3 intentos de
+    `max_intentos` son seguidos y de a 2 s: un ERROR definitivo quedaba
+    esperando que el usuario se acordara. Ahora se reencola a los 10 min,
+    con las mismas guardas que todo lo diferido (regla 10): no vuelve si
+    después se pidió otra cosa para ese producto, si ya quedó como se
+    pedía, si el producto o la tienda están en pausa, o si ya agotó
+    `max_reintentos_automaticos`. Cada fallida se evalúa **una sola vez**
+    (`Operacion.reintentada`): sin eso es un loop cada minuto.
+
 4. **Toda operación se confirma releyendo.** Los métodos `apagar()` y
    `prender()` devuelven True solo si el cambio se verificó recargando la
    página. No confiar en que el click alcanzó — PedidosYa a veces no guarda.

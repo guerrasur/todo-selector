@@ -281,6 +281,121 @@ def verificacion_rapida_no_pelea_con_el_usuario(db):
     revisar(encoladas == 0, "y no se apropia de lo que apago el local")
 
 
+def lo_que_fallo_vuelve_solo(db):
+    """Pedido del 2026-08-04: una operacion que fallo no espera al usuario.
+
+    Los 3 intentos de `max_intentos` son seguidos y de a 2 segundos: sirven
+    para un click que no entro, no para un portal que esta teniendo un mal
+    momento. Cuando la operacion moria igual quedaba en rojo hasta que el
+    usuario se acordara — y lo que se pidio apagar se seguia vendiendo.
+
+    Lo delicado NO es reintentar: es no pasarle por arriba a lo que el
+    usuario hizo despues (regla 10 de CLAUDE.md).
+    """
+    from datetime import datetime, timedelta
+    from app import config
+
+    print("\n== Lo que fallo se reintenta solo ==")
+    worker = Worker()
+
+    def fallar(nombre, accion="apagar_hoy", plataforma="rappi",
+               hace_minutos=30, auto=0):
+        """Deja una operacion muerta en ERROR, como la dejaria el worker."""
+        db.query(Operacion).delete()
+        db.expire_all()          # el worker borra/crea filas en OTRA sesion
+        p = db.query(Producto).filter_by(nombre=nombre).first()
+        op = Operacion(producto_id=p.id, plataforma=plataforma, accion=accion,
+                       estado=Operacion.ERROR, intentos=3,
+                       detalle="no se pudo confirmar el cambio",
+                       auto_reintentos=auto,
+                       creada_en=datetime.now() - timedelta(minutes=hace_minutos),
+                       finalizada_en=datetime.now() - timedelta(minutes=hace_minutos))
+        db.add(op)
+        db.commit()
+        return op
+
+    def reencoladas():
+        db.expire_all()
+        nuevas = worker._reencolar_fallidas()
+        db.expire_all()
+        return nuevas
+
+    # 1) El caso de todos los dias: fallo, sigue prendido, nadie pidio nada.
+    fallar("Flan casero")
+    poner(db, "Flan casero", EstadoItem.FALLO)
+    nuevas = reencoladas()
+    revisar(len(nuevas) == 1 and nuevas[0]["accion"] == "apagar_hoy",
+            "lo que fallo hace rato vuelve a la cola solo")
+    revisar(estado_de(db, "Flan casero") == EstadoItem.APAGANDO,
+            "y la pantalla lo muestra en movimiento enseguida")
+
+    # 2) Recien fallada: todavia no.
+    fallar("Flan casero", hace_minutos=1)
+    poner(db, "Flan casero", EstadoItem.FALLO)
+    revisar(reencoladas() == [], "una que acaba de fallar todavia no se toca")
+
+    # 3) La misma fallida no se evalua dos veces (si no, seria un loop).
+    op = fallar("Flan casero")
+    poner(db, "Flan casero", EstadoItem.FALLO)
+    revisar(len(reencoladas()) == 1, "la primera vuelta la reencola")
+    db.query(Operacion).filter(Operacion.id != op.id).delete()
+    db.commit()
+    revisar(reencoladas() == [], "pero la segunda no: ya se miro una vez")
+
+    # 4) EL CASO PELIGROSO: el usuario pidio otra cosa despues.
+    op = fallar("Flan casero")
+    poner(db, "Flan casero", EstadoItem.PRENDIDO)
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    db.add(Operacion(producto_id=p.id, plataforma="rappi", accion="prender",
+                     estado=Operacion.OK, creada_en=datetime.now(),
+                     finalizada_en=datetime.now()))
+    db.commit()
+    revisar(reencoladas() == [],
+            "si despues pediste otra cosa, la fallida NO se sostiene")
+
+    # 5) Ya quedo como se pedia (el click habia entrado y fallo confirmarlo).
+    fallar("Flan casero")
+    poner(db, "Flan casero", EstadoItem.APAGADO_HOY)
+    revisar(reencoladas() == [], "y si ya quedo apagado, no hay nada que hacer")
+
+    # 6) Un apagado por hoy NO alcanza cuando lo que fallo era indefinido:
+    #    ese vuelve solo mañana.
+    fallar("Flan casero", accion="apagar_indef")
+    poner(db, "Flan casero", EstadoItem.APAGADO_HOY)
+    revisar(len(reencoladas()) == 1,
+            "un «indefinido» que fallo vuelve aunque figure apagado por hoy")
+
+    # 7) El tope: si el portal cambio algo, machacarlo no lo arregla.
+    fallar("Flan casero", auto=config.entero("max_reintentos_automaticos"))
+    poner(db, "Flan casero", EstadoItem.FALLO)
+    revisar(reencoladas() == [],
+            "despues del tope de reintentos queda en rojo esperandote")
+
+    # 8) El producto en pausa es el que el usuario se saco de encima.
+    fallar("Flan casero")
+    poner(db, "Flan casero", EstadoItem.FALLO)
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    p.pausado = True
+    db.commit()
+    revisar(reencoladas() == [], "un producto en pausa no se reintenta solo")
+    p.pausado = False
+    db.commit()
+
+    # 9) Y se puede apagar del todo desde Ajustes.
+    fallar("Flan casero")
+    poner(db, "Flan casero", EstadoItem.FALLO)
+    config.guardar(db, {"reintentar_fallidas": 0})
+    db.commit()
+    config.recargar()
+    revisar(reencoladas() == [], "con el ajuste en 0 no reintenta nada")
+    config.guardar(db, {"reintentar_fallidas": 10})
+    db.commit()
+    config.recargar()
+
+    db.query(Operacion).delete()
+    db.commit()
+
+
 def main():
     init_db()
     db = SessionLocal()
@@ -353,6 +468,7 @@ def main():
         sostener_y_pausa(db)
         apagado_que_no_se_puede_confirmar(db)
         verificacion_rapida_no_pelea_con_el_usuario(db)
+        lo_que_fallo_vuelve_solo(db)
         novedades(db)
     finally:
         db.close()
