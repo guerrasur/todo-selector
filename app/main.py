@@ -184,11 +184,16 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
                               "motivo": "no está activa en esta instalación"})
             continue
 
-        # Tienda en pausa: se puede apagar (hace falta para dejarla apagada)
-        # pero no prender. Se corta acá y no solo en la pantalla porque la
-        # pantalla puede estar vieja, y el click de una pantalla vieja es
-        # justo el que revive lo que alguien acaba de desactivar.
-        if data.accion == "prender" and config.tienda_pausada(plat):
+        # Una tienda en pausa se toca SOLO cuando la nombrás, y prender no
+        # se toca nunca. Acá "nombrarla" es mandar esa sola plataforma, que
+        # es lo que hace la pantalla cuando marcás su chip: un botón que va
+        # a los tres portales no nombra a ninguno.
+        #
+        # Va en el backend y no solo en la pantalla porque la pantalla puede
+        # estar vieja, y el click de una pantalla vieja es justo el que
+        # revive lo que alguien acaba de desactivar.
+        if config.tienda_pausada(plat) and (data.accion == "prender"
+                                            or len(data.plataformas) > 1):
             salteadas.append({"plataforma": plat,
                               "motivo": "la tienda está en pausa"})
             continue

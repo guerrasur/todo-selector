@@ -198,7 +198,14 @@ async def apagar_toda_la_tienda_indefinido(db, worker):
 
 
 async def tienda_en_pausa(db, worker):
-    """Una tienda entera en pausa: se puede apagar, no se puede prender."""
+    """Una tienda en pausa se toca SOLO cuando la nombras. Prender, nunca.
+
+    La primera version frenaba solo el prender, y el usuario apreto «Apagar
+    hoy» de un producto y se puso a apagar tambien en la tienda pausada
+    (2026-08-04). Un boton que va a los tres portales no nombra a ninguno,
+    y ese apagado "por hoy" encima deja revivible mañana una tienda que
+    estaba apagada indefinidamente.
+    """
     print("\n== Pausar una tienda entera ==")
     todo_prendido(db)
     config.guardar(db, {"tienda_pausada_rappi": True})
@@ -211,11 +218,21 @@ async def tienda_en_pausa(db, worker):
         revisar("rappi" in config.plataformas_activas(),
                 "pero sigue ACTIVA: hay que poder leerla y apagarla")
 
-        # Apagar: tiene que andar igual, es como se la deja apagada.
+        # Apagar NOMBRANDOLA: tiene que andar, es como se la deja apagada.
         await cierre.ejecutar(worker, "apagar_indef", ["rappi"], releer=False)
         db.expire_all()
         revisar(len(cola(db, "rappi")) > 5,
-                "apagar toda la tienda sigue andando estando en pausa")
+                "el boton de SU fila la apaga igual: es como se la desactiva")
+
+        # Apagar sin nombrarla (el combo «Todas»): no la toca.
+        todo_prendido(db)
+        await cierre.ejecutar(worker, "apagar_hoy", ["rappi", "pedidosya"],
+                              releer=False)
+        db.expire_all()
+        revisar(cola(db, "rappi") == set(),
+                "pero un combo que no la nombra la deja afuera")
+        revisar(len(cola(db, "pedidosya")) > 5,
+                "y la otra tienda del combo se apaga normal")
 
         # Prender: no.
         todo_prendido(db)

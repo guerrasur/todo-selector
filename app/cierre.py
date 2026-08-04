@@ -76,14 +76,31 @@ def _motivo_para_saltear(est: EstadoItem, accion: str,
 
 
 def planificar(db, plataforma: str, accion: str,
-               incluir_pausados: bool, solo_propios: bool) -> dict:
-    """Que productos habria que tocar en esa plataforma. No escribe nada."""
+               incluir_pausados: bool, solo_propios: bool,
+               nombrada: bool = False) -> dict:
+    """Que productos habria que tocar en esa plataforma. No escribe nada.
+
+    `nombrada` = el pedido apunta a ESTA tienda y a ninguna otra (el botón de
+    su propia fila). Una tienda en pausa solo se toca cuando la nombrás: ver
+    el motivo abajo.
+    """
     encolar, salteados = [], []
 
-    # Una tienda en pausa no se prende: es todo el punto de la pausa. Se
-    # corta acá y no producto por producto para que la pantalla pueda decir
-    # el motivo una vez, y no treinta.
-    if accion == "prender" and config.tienda_pausada(plataforma):
+    # UNA TIENDA EN PAUSA SE TOCA SOLO CUANDO LA NOMBRAS, y prender no se
+    # toca nunca.
+    #
+    # Al principio la pausa frenaba solo el prender, y el usuario apretó
+    # «Apagar hoy» de un producto y se puso a apagar también en la tienda
+    # pausada (2026-08-04). Tenía razón en que eso está mal: el botón de un
+    # producto no nombra ninguna tienda, y un `apagar_hoy` ahí es peor que
+    # nada — la tienda está apagada indefinidamente y ese apagado "por hoy"
+    # la deja revivible mañana.
+    #
+    # Apagar SÍ tiene que poder entrar cuando la nombrás (el botón de la
+    # fila de esa tienda en «Apagar todo»), porque es como se la deja
+    # apagada. Si no, para desactivar una tienda habría que sacarla de la
+    # pausa primero, que es al revés de lo que se quiere.
+    if config.tienda_pausada(plataforma) and (accion == "prender" or not nombrada):
         return {"encolar": [],
                 "salteados": [{"producto": "(toda la tienda)",
                                "motivo": "la tienda está en pausa"}]}
@@ -183,8 +200,12 @@ async def ejecutar(worker, accion: str, plataformas: list[str],
 
         db = SessionLocal()
         try:
+            # Nombrada = apretaste el botón de la fila de ESA tienda. Los
+            # combos («Ambos Rappi», «Todas») no nombran a ninguna en
+            # particular, así que dejan afuera a la que está en pausa.
             plan = planificar(db, plataforma, accion,
-                              incluir_pausados, solo_propios)
+                              incluir_pausados, solo_propios,
+                              nombrada=len(objetivo) == 1)
             nombres = _encolar(db, plan["encolar"], plataforma, accion,
                                f"masivo {accion} "
                                f"{datetime.now().isoformat(timespec='seconds')}")
@@ -215,12 +236,16 @@ def previo(plataformas: list[str], accion: str) -> dict:
     solo_propios = config.activo("apertura_solo_propios")
     activas = config.plataformas_activas()
 
+    # Uno por plataforma y `nombrada=True`: es el número de la fila de esa
+    # tienda, que es la que sí la nombra. Los combos suman estos números
+    # sacando las tiendas en pausa (lo hace la pantalla, que es la que sabe
+    # qué fila está dibujando).
     db = SessionLocal()
     try:
         return {
             plataforma: len(planificar(db, plataforma, accion,
-                                       incluir_pausados,
-                                       solo_propios)["encolar"])
+                                       incluir_pausados, solo_propios,
+                                       nombrada=True)["encolar"])
             for plataforma in plataformas
             if plataforma in PLATAFORMAS and plataforma in activas
         }

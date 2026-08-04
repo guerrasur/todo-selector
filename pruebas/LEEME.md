@@ -78,9 +78,10 @@ la diferencia entre un minuto y veinte. Cubre también que apagar una plataforma
 deje la otra intacta, que apretarlo dos veces no duplique la cola, y que los
 ajustes validen antes de guardar (una tanda con un valor malo no guarda ninguno).
 Desde el 2026-08-04 cubre además desactivar una tienda: que pedir *indefinido*
-sí reencole lo que estaba apagado **por hoy** (ese vuelve solo mañana), y que
-una tienda **en pausa** se pueda apagar pero no prender — ni con «Prender
-todo», ni de a un producto, ni asomándose en el aviso de la tienda hermana.
+sí reencole lo que estaba apagado **por hoy** (ese vuelve solo mañana), y la
+regla de la tienda **en pausa** — se toca solo cuando la nombrás (el botón de
+su propia fila la apaga; un combo que no la nombra la deja afuera) y prender
+no se toca nunca, ni asomándose en el aviso de la tienda hermana.
 
 Desde el 2026-08-04 cubre también el reintento automático de lo que falló
 (`probar_estados.py`): que vuelva solo a la cola pasados los minutos, pero
