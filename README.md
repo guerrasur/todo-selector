@@ -255,20 +255,25 @@ pidieron desactivar Rappi Común, 2026-08-04):
   reencola como indefinido: saltearlo dejaba media tienda prendida al otro día.
   (Si en Ajustes ya elegiste *indefinido*, el botón no aparece: sería el de al
   lado repetido.)
-- **Pausar tienda** hace que la app **deje de prenderla**: ni con `Prender
-  todo`, ni con el botón `Prender` de un producto. Apagar sigue andando —es lo
-  que hace falta para dejarla apagada— y la tienda se sigue leyendo, así que
-  ves cómo quedó. Mientras está en pausa:
-  - el badge de arriba dice `· en pausa` y el chip del producto queda marcado;
-  - el botón `Prender` de un producto la deja afuera y lo dice
-    (`Prender · solo PedidosYa`);
-  - **no aparece el aviso** de «apagado en una tienda y prendido en la
-    hermana»: si vos desactivaste esa tienda, que la otra siga vendiendo no es
-    un problema que avisar.
+- **Pausar tienda**. La regla es una sola: **una tienda en pausa se toca solo
+  cuando la nombrás, y prender no se toca nunca.**
+  - *Nombrarla* es marcar su chip en un producto, o usar los botones de su
+    propia fila acá en «Apagar todo». Ahí sí la apaga: es como se la deja
+    apagada.
+  - Un botón que va a todos los portales de un producto **no** la nombra, y el
+    combo «Todas» tampoco: la dejan afuera y lo dicen (`Apagar hoy · solo
+    PedidosYa y Rappi Turbo`). Sin esto, apretar `Apagar hoy` de un producto
+    apagaba también en la tienda pausada — que encima ya estaba apagada
+    *indefinidamente*, así que ese «por hoy» la dejaba revivible al otro día.
+  - `Prender` no entra ni nombrándola: para eso está **Reactivar tienda**.
 
-  Se saca con **Reactivar tienda**, en el mismo lugar. El corte está en el
-  backend y no solo en la pantalla: la lista se repinta sola, y un click puede
-  salir con los datos de hace tres segundos.
+  Mientras está en pausa, el badge de arriba dice `· en pausa`, el chip del
+  producto queda marcado, y **no aparece el aviso** de «apagado en una tienda y
+  prendido en la hermana»: si vos desactivaste esa tienda, que la otra siga
+  vendiendo no es un problema que avisar.
+
+  El corte está en el backend y no solo en la pantalla: la lista se repinta
+  sola, y un click puede salir con los datos de hace tres segundos.
 
 **No encola de más**, que es lo que hace que esto sea usable:
 

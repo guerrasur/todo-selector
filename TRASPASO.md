@@ -415,11 +415,12 @@ Todo esto está cubierto sin portales por `pruebas/probar_rappi_menu.py` +
 - **Lo dudoso lo decide el usuario, una vez, en la pantalla Carta**, y queda
   guardado. La app no empareja sola entre las dos tiendas de Rappi si no es
   prácticamente el mismo nombre.
-- **Una tienda se puede pausar entera** (2026-08-04, `cfg_tienda_pausada_*`):
-  la app deja de prenderla, pero la sigue leyendo y la puede apagar. Pausada
+- **Una tienda se puede pausar entera** (2026-08-04, `cfg_tienda_pausada_*`).
+  Una tienda en pausa **se toca solo cuando la nombrás** (su chip, o los
+  botones de su fila en «Apagar todo») y **prender no se toca nunca**. Pausada
   NO es lo mismo que inactiva: sacarla de `plataformas_activas()` la volvería
   invisible y no habría ni cómo apagarla. El corte va en el backend
-  (`cierre.planificar`, `/api/accion`), no solo en la pantalla.
+  (`cierre.planificar` con `nombrada`, `/api/accion`), no solo en la pantalla.
 
 ## Próximos pasos
 

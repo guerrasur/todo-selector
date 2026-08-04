@@ -753,9 +753,28 @@ async def probar_pausar_tienda(pagina):
     revisar("solo Rappi" in await prender.inner_text(),
             f"«Prender» deja afuera la tienda en pausa "
             f"({(await prender.inner_text()).strip()})")
-    revisar("solo" not in await fila.locator("button", has_text="Apagar hoy")
-            .inner_text(),
-            "pero apagar sigue yendo a las dos: es lo que hace falta")
+
+    # Y apagar TAMPOCO va solo: el botón de un producto no nombra ninguna
+    # tienda. Es el pedido del 2026-08-04 — apretó «Apagar hoy» y se puso a
+    # apagar en la tienda pausada, que ya estaba apagada indefinidamente.
+    apagar = fila.locator("button", has_text="Apagar hoy")
+    revisar("solo Rappi" in await apagar.inner_text(),
+            f"«Apagar hoy» tampoco toca la tienda en pausa "
+            f"({(await apagar.inner_text()).strip()})")
+
+    # Salvo que la NOMBRES con su chip: ahí sí, que es como se apaga algo
+    # suelto en una tienda desactivada.
+    await fila.locator(".pill[data-plat='pedidosya']").click()
+    await pagina.wait_for_timeout(300)
+    fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
+    apagar = fila.locator("button", has_text="Apagar hoy")
+    revisar("solo PedidosYa" in await apagar.inner_text(),
+            f"marcando su chip, apagar SÍ va a la tienda en pausa "
+            f"({(await apagar.inner_text()).strip()})")
+    revisar(await fila.locator("button", has_text="Prender").is_disabled(),
+            "pero prender no: ni nombrándola")
+    await fila.locator(".pill[data-plat='pedidosya']").click()
+    await pagina.wait_for_timeout(300)
 
     # Que no sea solo la pantalla: el backend tambien tiene que negarse,
     # porque un click puede salir con los datos de hace tres segundos.

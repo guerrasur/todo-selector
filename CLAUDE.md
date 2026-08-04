@@ -30,16 +30,23 @@ es un solo estado**: lo que está apagado *por hoy* SÍ se reencola cuando lo
 que se pide es indefinido — el portal lo revive solo mañana, y saltearlo
 dejaba media tienda prendida justo cuando se la quería desactivar.
 
-**Una tienda entera se puede pausar** (2026-08-04, `cfg_tienda_pausada_*`):
-la app deja de **prenderla** —ni de a un producto ni con «Prender todo»—
-hasta que la reactives. Sigue **activa**: se lee, se puede apagar (que es lo
-que hace falta para dejarla apagada) y se ve en la pantalla; sacarla de
-`plataformas_activas()` la volvería invisible y entonces no habría ni cómo
-apagarla. El corte va en el backend (`cierre.planificar` y `/api/accion`),
-no solo en la pantalla: la pantalla se repinta sola, pero un click puede
-salir con los datos de hace tres segundos. Una tienda en pausa tampoco
-entra en el aviso de «apagado acá y prendido en la hermana»: el usuario ya
-dijo que esa no va.
+**Una tienda entera se puede pausar** (2026-08-04, `cfg_tienda_pausada_*`).
+La regla es una sola: **una tienda en pausa se toca solo cuando la nombrás,
+y prender no se toca nunca.** Nombrarla es marcar su chip en un producto, o
+usar los botones de su propia fila en «Apagar todo»; un botón que va a
+todos los portales (o el combo «Todas») no nombra a ninguno y la deja
+afuera. Sin esa parte, apretar «Apagar hoy» de un producto apagaba también
+en la tienda pausada — que encima ya estaba apagada indefinidamente, así
+que ese «por hoy» la dejaba revivible al otro día.
+
+Sigue **activa**: se lee, se puede apagar (que es lo que hace falta para
+dejarla apagada) y se ve en la pantalla; sacarla de `plataformas_activas()`
+la volvería invisible y entonces no habría ni cómo apagarla. El corte va en
+el backend (`cierre.planificar` con `nombrada`, y `/api/accion`), no solo
+en la pantalla: la pantalla se repinta sola, pero un click puede salir con
+los datos de hace tres segundos. Una tienda en pausa tampoco entra en el
+aviso de «apagado acá y prendido en la hermana»: el usuario ya dijo que esa
+no va.
 
 **Lo que se apaga es lo que elegiste, y nada más.** No hay espejos ni
 propagación automática entre plataformas: si un producto está en las dos
