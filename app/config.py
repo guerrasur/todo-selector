@@ -184,6 +184,34 @@ OPCIONES = (
         minimo=1,
         maximo=10,
     ),
+    # Los 3 reintentos de arriba son seguidos, de a 2 segundos: sirven para
+    # un click que no entro, no para un portal que esta teniendo un mal
+    # momento. Cuando la operacion muere igual, el usuario tenia que
+    # acordarse de volver a apretar (pedido del 2026-08-04). Ahora vuelve
+    # sola un rato despues.
+    Opcion(
+        clave="reintentar_fallidas",
+        titulo="Reintentar solo lo que falló, a los",
+        defecto=10,
+        tipo="entero",
+        grupo="Ritmo",
+        minimo=0,
+        maximo=240,
+        unidad="minutos",
+        ayuda="0 = no reintentar. Solo si en el medio no pediste otra cosa "
+              "para ese producto y sigue haciendo falta.",
+    ),
+    Opcion(
+        clave="max_reintentos_automaticos",
+        titulo="Cuántas veces reintentar solo",
+        defecto=3,
+        tipo="entero",
+        grupo="Ritmo",
+        minimo=1,
+        maximo=10,
+        ayuda="Si el portal cambió algo, reintentar para siempre no lo "
+              "arregla: después de estas veces queda en rojo esperándote.",
+    ),
     Opcion(
         clave="refresco_pantalla",
         titulo="La pantalla se actualiza cada",

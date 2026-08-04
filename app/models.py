@@ -154,6 +154,23 @@ class Operacion(Base):
     intentos = Column(Integer, default=0)
     detalle = Column(Text, default="")
 
+    # Un ERROR definitivo no se queda esperando a que el usuario se acuerde:
+    # unos minutos despues la app lo reintenta sola (ver worker._reencolar_
+    # fallidas). Estas dos columnas son las que evitan que eso sea un loop:
+    #
+    #   reintentada  -> esta fallida ya se miro una vez. Se marca SIEMPRE,
+    #                   se haya reencolado o no, asi que ninguna se evalua
+    #                   dos veces.
+    #   auto_reintentos -> cuantos reintentos automaticos lleva la cadena.
+    #                   La copia hereda el numero + 1 y hay un tope: si el
+    #                   portal cambio un selector, reintentar cada 10 min
+    #                   para siempre es machacarlo sin arreglar nada.
+    #
+    # Las bases viejas las reciben por ALTER TABLE (ver database.py), con
+    # NULL en las filas que ya existian: se leen como 0 / False.
+    reintentada = Column(Boolean, default=False)
+    auto_reintentos = Column(Integer, default=0)
+
     creada_en = Column(DateTime, default=datetime.now)
     finalizada_en = Column(DateTime, nullable=True)
 
