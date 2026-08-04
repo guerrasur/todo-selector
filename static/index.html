@@ -111,10 +111,14 @@
   .item {
     background: var(--panel); border: 1px solid var(--borde);
     border-radius: var(--radio); padding: 13px 16px; margin-bottom: 8px;
-    /* El nombre no baja de 200px: los botones cambian de ancho cuando
-       elegís un portal ("Apagar hoy · solo PedidosYa"), y sin el minimo el
-       nombre se partia en tres lineas y la fila pegaba un salto. */
-    display: grid; grid-template-columns: minmax(200px, 1fr) auto auto;
+    /* Los tres botones se agrandan juntos cuando marcás un chip ("Apagar
+       hoy · solo PedidosYa"), asi que la fila tiene que aguantar el cambio
+       de ancho sin romperse: el nombre no baja de 160px (si no se partia en
+       tres lineas y la fila pegaba un salto) y la columna de botones puede
+       achicarse por debajo de su ancho natural para que envuelvan en dos
+       filas en vez de salirse de la tarjeta. */
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) auto minmax(0, auto);
     gap: 14px;
     align-items: center; box-shadow: var(--sombra);
     transition: border-color .12s, background .12s;
@@ -132,13 +136,14 @@
     letter-spacing: .01em;
     transition: opacity .12s, border-color .12s, background .12s;
   }
-  /* Elegida con un click. Ahora los chips arrancan TODOS sin elegir y se
-     van eligiendo, asi que el que esta elegido es la excepcion y tiene que
-     cantar: no alcanza con "un poco menos tenue que el otro", porque de
-     eso depende saber a donde va a ir el boton. */
+  /* Elegida con un click. El chip marcado es la EXCEPCION (sin marcar nada
+     el boton va a todos), asi que tiene que cantar: contorno de acento,
+     fondo propio y un brillo alrededor. No alcanza con "un poco menos tenue
+     que el otro", porque de eso depende saber a donde va a ir el boton. */
   .pill.sel {
     opacity: 1; color: var(--texto); border-color: var(--acento);
-    background: #1d3557; box-shadow: inset 0 0 0 1px var(--acento);
+    background: #1d3557;
+    box-shadow: inset 0 0 0 1px var(--acento), 0 0 0 3px #5b9dff33;
   }
   .pill:hover { border-color: var(--acento); }
   .pill.na { opacity: .25; cursor: default; font-style: italic; }
@@ -156,7 +161,8 @@
   .p-fallo { background: var(--error); box-shadow: 0 0 0 3px #fb718530; }
   .p-desconocido { background: #4a566d; }
   @keyframes late { 50% { opacity: .3; } }
-  .acciones { display: flex; gap: 6px; }
+  .acciones { display: flex; gap: 6px; flex-wrap: wrap;
+              justify-content: flex-end; }
 
   /* ---- Botones ---- */
   button {
@@ -426,10 +432,11 @@
     <span id="cuenta-prendidos"></span>
   </div>
   <div id="pista-chips" class="pista solo-dashboard">
-    Clickeá los chips <b>PedidosYa</b> / <b>Rappi</b> de un producto para
-    elegir en qué portales actuar: los botones se prenden con el primero que
-    elijas y dicen a dónde van. Elegí los dos y apaga en los dos; elegí uno y
-    el otro no se toca.
+    Sin tocar nada, el botón de un producto actúa sobre <b>todos</b> sus
+    portales. Clickeá el chip <b>PedidosYa</b> o <b>Rappi</b> para acotarlo a
+    ese solo (el chip queda marcado y el botón lo dice); volvé a clickearlo
+    para soltarlo. Sirve cuando hay que apagar en un portal antes que en el
+    otro.
   </div>
   <div id="panel-inicio" class="carta solo-dashboard" style="display:none"></div>
   <div id="panel-alertas" class="solo-dashboard" style="display:none"></div>
@@ -1025,13 +1032,14 @@ function hora(iso) {
 
 let filtro = '';
 
-// producto_id -> Set de plataformas que ELEGISTE clickeando su chip. Nada
-// viene elegido de arranque: el botón no hace nada hasta que digas dónde.
+// producto_id -> Set de plataformas que ELEGISTE clickeando su chip.
 //
-// Al revés de como era hasta el 2026-08-03, que arrancaba con todo elegido y
-// el click SACABA. Lo que se apaga es lo que elegiste, y con el default
-// puesto bastaba no mirar los chips para mandar la acción a los tres
-// portales sin haberlo pedido.
+// Un producto que no está acá no es un producto sin destino: es el caso
+// normal, y el botón va a TODOS los portales donde el producto existe. Los
+// chips ACOTAN. Antes venían los tres puestos y el click sacaba; se dio
+// vuelta el 2026-08-03 porque marcar de arranque lo que iba a pasar igual no
+// informa, y porque así el chip marcado significa siempre lo mismo: "de acá
+// no sale".
 //
 // Vive acá afuera para que el repintado automático no te la borre: ver el
 // comentario largo en fila().
@@ -1257,8 +1265,15 @@ function fila(item) {
   };
   div.appendChild(nombre);
 
-  // Cada plataforma es un chip clickeable: define sobre cuales actuar.
-  // Clickeás para IR ELIGIENDO, y arranca sin nada elegido.
+  // Cada plataforma es un chip clickeable: ACOTA sobre cuáles actuar.
+  // Clickeás para ir eligiendo, y el chip elegido se marca.
+  //
+  // SIN NINGUNO ELEGIDO EL BOTÓN VA A TODOS LOS PORTALES DEL PRODUCTO, que
+  // es lo de siempre y lo que se usa el 90% de las veces (apagar algo que
+  // se acabó, prender a la mañana). Elegir chips es para el caso raro: hay
+  // que tocar un portal solo, o uno antes que el otro. Por eso no se
+  // arranca con todos marcados —marcar tres chips que ya iban a entrar
+  // igual no dice nada— ni con el botón apagado hasta que elijas.
   //
   // La selección vive en `elegidas` (afuera de esta función) y NO en una
   // variable local. Tiene que ser así porque la lista se repinta sola cada
@@ -1294,8 +1309,8 @@ function fila(item) {
     pill.className = 'pill' + (elegido ? ' sel' : '') + (duda ? ' dudoso' : '');
     pill.dataset.plat = plat;
     pill.title = (est.detalle || '') +
-      (elegido ? '  (click para sacarlo de la acción)'
-               : '  (click para elegir este portal)');
+      (elegido ? '  (click para soltarlo: vuelve a actuar sobre todos)'
+               : '  (click para actuar SOLO acá)');
     pill.innerHTML =
       `<span class="punto p-${est.estado}"></span>` +
       `${NOMBRE_PLAT[plat]}: ${etiqueta(est.estado)}` +
@@ -1307,8 +1322,8 @@ function fila(item) {
       const ahora = seleccion.has(plat);
       pill.classList.toggle('sel', ahora);
       pill.title = (est.detalle || '') +
-        (ahora ? '  (click para sacarlo de la acción)'
-               : '  (click para elegir este portal)');
+        (ahora ? '  (click para soltarlo: vuelve a actuar sobre todos)'
+               : '  (click para actuar SOLO acá)');
 
       // Solo se recuerdan las filas donde elegiste algo: sin nada elegido no
       // hay nada que guardar y el mapa no crece al pedo.
@@ -1322,32 +1337,39 @@ function fila(item) {
   }
   div.appendChild(plats);
 
-  // Cuántas plataformas tiene este producto: si tiene una sola, aclarar
+  // Los portales donde este producto existe. Si tiene uno solo, aclarar
   // "solo Rappi" en el botón no informa nada, es ruido.
-  const enCuantas = PLATS.filter(p => item.estados[p]).length;
+  const donde = PLATS.filter(p => item.estados[p]);
 
-  // El botón dice sobre qué portal va a actuar. Antes solo decía "Apagar
+  // A dónde va la acción: a lo que elegiste, y si no elegiste nada, a todos
+  // los portales del producto. Se calcula en el momento del click y no
+  // antes: entre que se pintó la fila y que apretaste el botón pudiste
+  // haber tocado un chip.
+  function destino() {
+    return seleccion.size ? donde.filter(p => seleccion.has(p)) : donde;
+  }
+
+  // El botón DICE sobre qué portal va a actuar. Antes solo decía "Apagar
   // hoy" y para saber a dónde iba había que interpretar la opacidad de los
   // chips: el usuario no tenía forma de saber que se podía apagar en un
   // solo portal, y esa era justamente la función que pedía.
-  //
-  // Sin nada elegido el botón está apagado: no hay a dónde mandar la acción
-  // y adivinar sería apagar en portales que el usuario no eligió.
   function refrescarBotones() {
-    const vacio = seleccion.size === 0;
-    const nombres = PLATS.filter(p => seleccion.has(p)).map(p => NOMBRE_PLAT[p]);
-    // Cuando elegiste TODOS los portales que tiene el producto, aclararlo no
-    // informa nada. En cualquier otro caso el botón dice a dónde va.
-    const solo = (!vacio && seleccion.size < enCuantas)
+    const van = destino();
+    const nombres = van.map(p => NOMBRE_PLAT[p]);
+    // Cuando va a todos los portales que tiene el producto, aclararlo no
+    // informa nada: es lo que el botón hace siempre. En cualquier otro caso
+    // el botón dice a dónde va.
+    const solo = van.length < donde.length
       ? ' · solo ' + nombres.join(' y ') : '';
 
     for (const b of div.querySelectorAll('.acciones button:not(.pausa)')) {
-      b.disabled = vacio;
+      b.disabled = van.length === 0;
       b.textContent = b.dataset.etiqueta + solo;
-      b.title = vacio
-        ? 'Elegí primero en qué portal: clickeá el chip de ' +
-          PLATS.filter(p => item.estados[p]).map(p => NOMBRE_PLAT[p]).join(' o ')
-        : 'Actúa sobre ' + nombres.join(' y ');
+      b.title = seleccion.size
+        ? 'Actúa sobre ' + nombres.join(' y ') +
+          ' (volvé a clickear el chip para soltarlo)'
+        : 'Actúa sobre ' + nombres.join(' y ') +
+          '. Clickeá un chip si querés uno solo.';
     }
   }
 
@@ -1403,17 +1425,17 @@ function fila(item) {
   const bHoy = document.createElement('button');
   bHoy.className = 'off';
   bHoy.dataset.etiqueta = 'Apagar hoy';
-  bHoy.onclick = () => accion(item.id, 'apagar_hoy', [...seleccion]);
+  bHoy.onclick = () => accion(item.id, 'apagar_hoy', destino());
 
   const bIndef = document.createElement('button');
   bIndef.className = 'off';
   bIndef.dataset.etiqueta = 'Indefinido';
-  bIndef.onclick = () => accion(item.id, 'apagar_indef', [...seleccion]);
+  bIndef.onclick = () => accion(item.id, 'apagar_indef', destino());
 
   const bOn = document.createElement('button');
   bOn.className = 'on';
   bOn.dataset.etiqueta = 'Prender';
-  bOn.onclick = () => accion(item.id, 'prender', [...seleccion]);
+  bOn.onclick = () => accion(item.id, 'prender', destino());
 
   acc.append(bHoy, bIndef, bOn);
   div.appendChild(acc);
@@ -1442,10 +1464,10 @@ function etiqueta(e) {
 
 async function accion(producto_id, accion, plataformas) {
   if (!plataformas || !plataformas.length) return;
-  // La elección se consume con la acción: la próxima vuelve a arrancar
-  // vacía. Si quedara puesta, un rato después el chip elegido es una
-  // intención vieja que el usuario ya no está mirando.
-  elegidas.delete(producto_id);
+  // Lo que elegiste NO se borra al mandar la acción: sin chips elegidos el
+  // botón va a los tres portales, así que soltarte la selección sola
+  // convertiría el "Indefinido" que apretás después en un apagado en
+  // portales que no habías pedido. Se suelta clickeando el chip de nuevo.
   await fetch('/api/accion', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
