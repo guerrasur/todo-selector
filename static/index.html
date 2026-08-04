@@ -149,6 +149,16 @@
     box-shadow: inset 0 0 0 1px var(--acento), 0 0 0 3px #5b9dff33;
   }
   .pill:hover { border-color: var(--acento); }
+  /* Tienda en pausa: la app no prende nada ahí. No se atenúa el chip (el
+     estado del producto se sigue leyendo y el apagado sigue andando): se
+     agrega una marca que se lee. */
+  .pill.tienda-pausada { border-style: dashed; }
+  .marca-pausa {
+    font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--curso); border: 1px solid currentColor; border-radius: 4px;
+    padding: 0 3px; margin-left: 2px;
+  }
+  .badge.pausada { border-color: var(--curso); color: var(--curso); }
   .pill.na { opacity: .4; cursor: default; font-style: italic; }
   .pill.na:hover { border-color: var(--borde); }
   /* Sin marcar no lleva ningun tratamiento propio: se ve entero, como
@@ -455,6 +465,13 @@
 // Rappi Común igual veía un chip de más en cada producto y una fila de más
 // en «Apagar todo».
 let PLATS = ['pedidosya', 'rappi'];
+
+// Las tiendas en pausa (/api/estado-sistema → pausadas). Siguen activas: se
+// leen y se pueden apagar. Lo único que no pasa es que la app las prenda,
+// ni de a un producto ni con «Prender todo». Acá se usa para MOSTRARLO —
+// el corte de verdad está en el backend, porque esta pantalla se repinta
+// sola pero un click puede salir con los datos de hace tres segundos.
+let PAUSADAS = new Set();
 const NOMBRE_PLAT = { pedidosya: 'PedidosYa', rappi: 'Rappi', rappi_comun: 'Rappi Común' };
 
 // Tiendas del MISMO portal, para poder apagarlas juntas con un botón. Es
@@ -950,7 +967,13 @@ function pintarTiendas(tiendas) {
     } else if (info && !info.error && info.abierta === false) {
       punto = '🔴'; texto = 'cerrada';
     }
-    span.textContent = `${punto} ${NOMBRE_PLAT[plat] || plat}`;
+    // Una tienda en pausa se dice acá arriba, al lado de si está abierta:
+    // es un estado que dura días y que explica por qué «Prender todo» no
+    // hace nada ahí. Sin esto, el botón que no reacciona parece un bug.
+    const enPausa = PAUSADAS.has(plat);
+    if (enPausa) span.classList.add('pausada');
+    span.textContent = `${punto} ${NOMBRE_PLAT[plat] || plat}` +
+                       (enPausa ? ' · en pausa' : '');
     // El tooltip de un "sin datos" tiene que decir POR QUE: casi siempre es
     // un dato que falta en Ajustes, y sin el motivo el usuario no tiene de
     // dónde agarrarse (pasó con las dos tiendas de Rappi, 2026-07-30).
@@ -958,6 +981,10 @@ function pintarTiendas(tiendas) {
     else if (info && info.error) span.title = info.error;
     else if (info && info.motivo) span.title = info.motivo;
     else span.title = 'Todavía no se pudo leer el estado de esta tienda';
+    if (enPausa) {
+      span.title = 'Tienda en pausa: la app no prende nada acá. Apagar sí. ' +
+                   'Se saca desde «Apagar todo».\n' + span.title;
+    }
     cont.appendChild(span);
   }
 }
@@ -967,6 +994,7 @@ function pintarSistema(s) {
   // todo lo que se pinta abajo (chips, avisos, «Apagar todo») se arma con
   // esta lista.
   if (Array.isArray(s.plataformas) && s.plataformas.length) PLATS = s.plataformas;
+  PAUSADAS = new Set(s.pausadas || []);
   nombrarPlataformas();
 
   if (s.version) document.getElementById('version').textContent = 'v' + s.version;
@@ -1306,15 +1334,18 @@ function fila(item) {
 
     const elegido = seleccion.has(plat);
     const pill = document.createElement('button');
-    pill.className = 'pill' + (elegido ? ' sel' : '') + (duda ? ' dudoso' : '');
+    pill.className = 'pill' + (elegido ? ' sel' : '') + (duda ? ' dudoso' : '') +
+                     (PAUSADAS.has(plat) ? ' tienda-pausada' : '');
     pill.dataset.plat = plat;
     pill.title = (est.detalle || '') +
+      (PAUSADAS.has(plat) ? '  [tienda en pausa: no se prende]' : '') +
       (elegido ? '  (click para soltarlo: vuelve a actuar sobre todos)'
                : '  (click para actuar SOLO acá)');
     pill.innerHTML =
       `<span class="punto p-${est.estado}"></span>` +
       `${NOMBRE_PLAT[plat]}: ${etiqueta(est.estado)}` +
-      (duda ? ' <span style="color:#fca5a5">(?)</span>' : '');
+      (duda ? ' <span style="color:#fca5a5">(?)</span>' : '') +
+      (PAUSADAS.has(plat) ? ' <span class="marca-pausa">pausa</span>' : '');
 
     pill.onclick = () => {
       if (seleccion.has(plat)) seleccion.delete(plat);
@@ -1345,8 +1376,14 @@ function fila(item) {
   // los portales del producto. Se calcula en el momento del click y no
   // antes: entre que se pintó la fila y que apretaste el botón pudiste
   // haber tocado un chip.
-  function destino() {
-    return seleccion.size ? donde.filter(p => seleccion.has(p)) : donde;
+  //
+  // PRENDER es el único que además saca las tiendas en pausa: pausar una
+  // tienda es decir "esta no va", y un «Prender» que la revive convierte
+  // esa decisión en un click descuidado. Apagar sí sale igual — es lo que
+  // hace falta para dejarla apagada.
+  function destino(accion) {
+    const base = seleccion.size ? donde.filter(p => seleccion.has(p)) : donde;
+    return accion === 'prender' ? base.filter(p => !PAUSADAS.has(p)) : base;
   }
 
   // El botón DICE sobre qué portal va a actuar. Antes solo decía "Apagar
@@ -1354,22 +1391,34 @@ function fila(item) {
   // chips: el usuario no tenía forma de saber que se podía apagar en un
   // solo portal, y esa era justamente la función que pedía.
   function refrescarBotones() {
-    const van = destino();
-    const nombres = van.map(p => NOMBRE_PLAT[p]);
-    // Cuando va a todos los portales que tiene el producto, aclararlo no
-    // informa nada: es lo que el botón hace siempre. En cualquier otro caso
-    // el botón dice a dónde va.
-    const solo = van.length < donde.length
-      ? ' · solo ' + nombres.join(' y ') : '';
-
     for (const b of div.querySelectorAll('.acciones button:not(.pausa)')) {
+      const van = destino(b.dataset.accion);
+      const nombres = van.map(p => NOMBRE_PLAT[p]);
+      // Cuando va a todos los portales que tiene el producto, aclararlo no
+      // informa nada: es lo que el botón hace siempre. En cualquier otro
+      // caso el botón dice a dónde va.
+      const solo = van.length && van.length < donde.length
+        ? ' · solo ' + nombres.join(' y ') : '';
+      // Lo que se cayó por estar en pausa se nombra: un botón que va a
+      // menos portales de los que marcaste tiene que decir por qué.
+      const caidas = destino(null).filter(p => !van.includes(p));
+
       b.disabled = van.length === 0;
       b.textContent = b.dataset.etiqueta + solo;
-      b.title = seleccion.size
-        ? 'Actúa sobre ' + nombres.join(' y ') +
-          ' (volvé a clickear el chip para soltarlo)'
-        : 'Actúa sobre ' + nombres.join(' y ') +
-          '. Clickeá un chip si querés uno solo.';
+      if (!van.length) {
+        b.title = caidas.length
+          ? 'No lo prendo: ' + caidas.map(p => NOMBRE_PLAT[p]).join(' y ') +
+            ' está en pausa. Se saca desde «Apagar todo».'
+          : 'No hay ningún portal elegido.';
+      } else {
+        b.title = 'Actúa sobre ' + nombres.join(' y ') +
+          (caidas.length
+            ? '. No prendo ' + caidas.map(p => NOMBRE_PLAT[p]).join(' ni ') +
+              ': está en pausa.'
+            : seleccion.size
+              ? ' (volvé a clickear el chip para soltarlo)'
+              : '. Clickeá un chip si querés uno solo.');
+      }
     }
   }
 
@@ -1425,17 +1474,20 @@ function fila(item) {
   const bHoy = document.createElement('button');
   bHoy.className = 'off';
   bHoy.dataset.etiqueta = 'Apagar hoy';
-  bHoy.onclick = () => accion(item.id, 'apagar_hoy', destino());
+  bHoy.dataset.accion = 'apagar_hoy';
+  bHoy.onclick = () => accion(item.id, 'apagar_hoy', destino('apagar_hoy'));
 
   const bIndef = document.createElement('button');
   bIndef.className = 'off';
   bIndef.dataset.etiqueta = 'Indefinido';
-  bIndef.onclick = () => accion(item.id, 'apagar_indef', destino());
+  bIndef.dataset.accion = 'apagar_indef';
+  bIndef.onclick = () => accion(item.id, 'apagar_indef', destino('apagar_indef'));
 
   const bOn = document.createElement('button');
   bOn.className = 'on';
   bOn.dataset.etiqueta = 'Prender';
-  bOn.onclick = () => accion(item.id, 'prender', destino());
+  bOn.dataset.accion = 'prender';
+  bOn.onclick = () => accion(item.id, 'prender', destino('prender'));
 
   acc.append(bHoy, bIndef, bOn);
   div.appendChild(acc);
@@ -1484,6 +1536,42 @@ async function accion(producto_id, accion, plataformas) {
 
 function panelCierre() { return document.getElementById('panel-cierre'); }
 
+// plataforma -> ajuste que la pone en pausa. Es el espejo de
+// config.PAUSA_POR_PLATAFORMA; el que decide sigue siendo el backend.
+const CLAVE_PAUSA = {
+  pedidosya: 'tienda_pausada_pedidosya',
+  rappi: 'tienda_pausada_rappi',
+  rappi_comun: 'tienda_pausada_rappi_comun',
+};
+
+// Los ajustes como {clave: valor}. Varias pantallas necesitan un par de
+// valores sueltos y no la definición entera de cada opción.
+async function leerConfig() {
+  try {
+    const { opciones } = await fetch('/api/config').then(r => r.json());
+    const cfg = {};
+    for (const o of opciones) cfg[o.clave] = o.valor;
+    return cfg;
+  } catch (e) {
+    return {};
+  }
+}
+
+async function guardarConfig(cambios) {
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cambios }),
+    });
+    if (r.ok) return { ok: true };
+    const err = await r.json().catch(() => ({}));
+    return { ok: false, detalle: err.detail || r.status };
+  } catch (e) {
+    return { ok: false, detalle: String(e) };
+  }
+}
+
 async function abrirCierre() {
   const panel = panelCierre();
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
@@ -1518,14 +1606,19 @@ async function pintarCierre(mensaje = '') {
       que apagarse antes que Rappi, apretá PedidosYa y después Rappi.
       <br>Salteo lo que ya está como quiere quedar, lo que está en pausa y
       lo que ya está en la cola. Se puede cambiar en Ajustes.
+      <br><b>Indefinido</b> apaga la carta entera hasta que la prendas vos
+      (el apagado por hoy vuelve solo mañana). <b>Pausar tienda</b> es para
+      cuando una tienda se desactiva unos días: la app deja de prenderla —
+      ni de a un producto ni con «Prender todo»— hasta que la reactives.
     </div>
     <div id="filas-cierre"></div>
     <div id="resultado-cierre"></div>`;
   document.getElementById('resultado-cierre').textContent = mensaje;
 
   const cont = document.getElementById('filas-cierre');
-  const [paraApagar, paraPrender] = await Promise.all([
-    contarCierre('apagar_hoy'), contarCierre('prender'),
+  const [paraApagar, paraIndef, paraPrender, cfg] = await Promise.all([
+    contarCierre('apagar_hoy'), contarCierre('apagar_indef'),
+    contarCierre('prender'), leerConfig(),
   ]);
 
   // Una fila por plataforma activa, una por cada grupo de tiendas del
@@ -1567,42 +1660,108 @@ async function pintarCierre(mensaje = '') {
     bApagar.className = 'off grande';
     bApagar.textContent = 'Apagar todo';
     bApagar.onclick = () => correrMasivo('apagar', plats, titulo, bApagar);
+    fila.appendChild(bApagar);
+
+    // Apagar TODA la tienda indefinidamente, sin pasar por Ajustes. Es lo
+    // que hace falta cuando la tienda se desactiva por unos días: el
+    // «apagado por hoy» del cierre lo revive el portal solo a la mañana.
+    // Si el ajuste ya dice «indefinido», este botón sería el de al lado
+    // repetido y no se dibuja.
+    if (cfg.cierre_accion !== 'apagar_indef') {
+      const bIndef = document.createElement('button');
+      bIndef.className = 'off';
+      bIndef.textContent = 'Indefinido';
+      bIndef.title = 'Apagar toda la carta de ' + titulo + ' hasta que la ' +
+                     'prendas vos. No vuelve sola mañana.';
+      bIndef.onclick = () =>
+        correrMasivo('apagar_indef', plats, titulo, bIndef);
+      fila.appendChild(bIndef);
+    }
 
     const bPrender = document.createElement('button');
     bPrender.className = 'on grande';
     bPrender.textContent = 'Prender todo';
     bPrender.onclick = () => correrMasivo('prender', plats, titulo, bPrender);
+    fila.appendChild(bPrender);
+
+    // Pausar la TIENDA entera. Solo en las filas de una sola tienda:
+    // pausar «Todas» de un botón son tres decisiones distintas metidas en
+    // una, y la de salir de la pausa también.
+    if (plats.length === 1) {
+      const plat = plats[0];
+      const enPausa = PAUSADAS.has(plat);
+      const bPausar = document.createElement('button');
+      bPausar.className = 'pausa';
+      bPausar.textContent = enPausa ? 'Reactivar tienda' : 'Pausar tienda';
+      bPausar.title = enPausa
+        ? 'Volver a dejar que la app prenda en ' + titulo
+        : 'La app deja de prender en ' + titulo + ' (apagar sigue andando). ' +
+          'Para cuando la tienda se desactiva por unos días.';
+      bPausar.onclick = async () => {
+        bPausar.disabled = true;
+        const r = await guardarConfig({
+          [CLAVE_PAUSA[plat]]: !enPausa,
+        });
+        if (!r.ok) {
+          document.getElementById('resultado-cierre').textContent =
+            'No se pudo: ' + r.detalle;
+          bPausar.disabled = false;
+          return;
+        }
+        await cargar();
+        await pintarCierre(enPausa
+          ? `${titulo} vuelve a prenderse con «Prender todo».`
+          : `${titulo} queda en pausa: la app no la prende hasta que la ` +
+            `reactives. Apagarla sí se puede.`);
+      };
+      fila.appendChild(bPausar);
+    }
 
     const cuenta = document.createElement('span');
     cuenta.className = 'cuantos';
+    const enPausa = plats.filter(p => PAUSADAS.has(p));
     cuenta.textContent =
-      `${suma(paraApagar)} para apagar · ${suma(paraPrender)} para prender`;
+      `${suma(paraApagar)} para apagar · ${suma(paraIndef)} para indefinido · ` +
+      `${suma(paraPrender)} para prender` +
+      (enPausa.length
+        ? ` · en pausa: ${enPausa.map(p => NOMBRE_PLAT[p]).join(', ')}`
+        : '');
 
-    fila.append(bApagar, bPrender, cuenta);
+    fila.appendChild(cuenta);
     cont.appendChild(fila);
   }
 }
 
-// `que` es 'apagar' o 'prender'. El tipo de apagado (por hoy / indefinido)
-// sale de Ajustes: al cierre siempre se usa el mismo y preguntarlo cada vez
-// es una decisión de más en el momento en que menos ganas hay de decidir.
+// `que` es 'apagar', 'apagar_indef' o 'prender'. El tipo del «Apagar todo»
+// de siempre sale de Ajustes: al cierre siempre se usa el mismo y
+// preguntarlo cada vez es una decisión de más en el momento en que menos
+// ganas hay de decidir. 'apagar_indef' es el botón aparte, para cuando la
+// tienda se desactiva unos días y no puede volver sola mañana.
 async function correrMasivo(que, plats, titulo, boton) {
-  const opciones = await fetch('/api/config').then(r => r.json());
-  const cfg = {};
-  for (const o of opciones.opciones) cfg[o.clave] = o.valor;
+  const cfg = await leerConfig();
 
-  const accion = que === 'prender' ? 'prender' : cfg.cierre_accion;
+  const accion = que === 'prender' ? 'prender'
+               : que === 'apagar_indef' ? 'apagar_indef'
+               : cfg.cierre_accion;
+  const verbo = que === 'prender' ? 'prender' : 'apagar';
   const cuentas = await contarCierre(accion);
   const total = plats.reduce((t, p) => t + (cuentas[p] || 0), 0);
 
   if (!total) {
+    // Un cero puede ser "ya está todo como querés" o "esa tienda está en
+    // pausa", que no son lo mismo: en el segundo caso el botón no va a
+    // hacer nada nunca hasta que la reactives, y eso hay que decirlo.
+    const pausadas = plats.filter(p => PAUSADAS.has(p));
     document.getElementById('resultado-cierre').textContent =
-      `No hay nada para ${que} en ${titulo}: ya está todo como querés.`;
+      (que === 'prender' && pausadas.length === plats.length)
+        ? `${titulo} está en pausa: no la prendo. Sacala de la pausa con ` +
+          `«Reactivar tienda».`
+        : `No hay nada para ${verbo} en ${titulo}: ya está todo como querés.`;
     return;
   }
 
   const comoApaga = accion === 'apagar_indef'
-    ? 'apagado indefinido' : 'apagado por hoy';
+    ? 'apagado indefinido: no vuelve solo mañana' : 'apagado por hoy';
   const detalle = que === 'prender'
     ? `Prender ${total} producto(s) en ${titulo}.`
     : `Apagar ${total} producto(s) en ${titulo} (${comoApaga}).`;

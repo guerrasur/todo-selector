@@ -207,8 +207,8 @@ destino**:
 
 | | |
 |---|---|
-| **PedidosYa** | Apagar todo · Prender todo |
-| **Rappi** | Apagar todo · Prender todo |
+| **PedidosYa** | Apagar todo · Indefinido · Prender todo · Pausar tienda |
+| **Rappi** | Apagar todo · Indefinido · Prender todo · Pausar tienda |
 | **Los dos** | Apagar todo · Prender todo |
 
 Que estén separados es el punto: a veces **PedidosYa tiene que apagarse antes
@@ -220,9 +220,9 @@ tres tiendas y no dos:
 
 | | |
 |---|---|
-| **PedidosYa** | Apagar todo · Prender todo |
-| **Rappi Turbo** | Apagar todo · Prender todo |
-| **Rappi Común** | Apagar todo · Prender todo |
+| **PedidosYa** | Apagar todo · Indefinido · Prender todo · Pausar tienda |
+| **Rappi Turbo** | Apagar todo · Indefinido · Prender todo · Pausar tienda |
+| **Rappi Común** | Apagar todo · Indefinido · Prender todo · Pausar tienda |
 | **Ambos Rappi** | Apagar todo · Prender todo |
 | **Todas** | Apagar todo · Prender todo |
 
@@ -234,10 +234,39 @@ Antes de encolar nada dice cuántos productos va a tocar cada portal, y pide
 confirmación: apagar la carta entera es de las pocas cosas de esta app que no se
 deshacen con un click.
 
+### Desactivar una tienda unos días
+
+Dos botones para cuando una tienda deja de operar por un tiempo (los jefes
+pidieron desactivar Rappi Común, 2026-08-04):
+
+- **Indefinido** apaga la carta entera **hasta que la prendas vos**. El
+  `Apagar todo` de siempre usa lo que diga Ajustes, que casi siempre es *por
+  hoy* — y el apagado por hoy lo revive el portal solo a la mañana siguiente,
+  que es justo lo que no querés acá. Lo que ya estaba apagado *por hoy* se
+  reencola como indefinido: saltearlo dejaba media tienda prendida al otro día.
+  (Si en Ajustes ya elegiste *indefinido*, el botón no aparece: sería el de al
+  lado repetido.)
+- **Pausar tienda** hace que la app **deje de prenderla**: ni con `Prender
+  todo`, ni con el botón `Prender` de un producto. Apagar sigue andando —es lo
+  que hace falta para dejarla apagada— y la tienda se sigue leyendo, así que
+  ves cómo quedó. Mientras está en pausa:
+  - el badge de arriba dice `· en pausa` y el chip del producto queda marcado;
+  - el botón `Prender` de un producto la deja afuera y lo dice
+    (`Prender · solo PedidosYa`);
+  - **no aparece el aviso** de «apagado en una tienda y prendido en la
+    hermana»: si vos desactivaste esa tienda, que la otra siga vendiendo no es
+    un problema que avisar.
+
+  Se saca con **Reactivar tienda**, en el mismo lugar. El corte está en el
+  backend y no solo en la pantalla: la lista se repinta sola, y un click puede
+  salir con los datos de hace tres segundos.
+
 **No encola de más**, que es lo que hace que esto sea usable:
 
 - lo que **ya figura como querés que quede** no se toca (apagar toda la carta son
-  ~30 operaciones por portal y cada una recarga la página);
+  ~30 operaciones por portal y cada una recarga la página) — con una excepción:
+  pedir *indefinido* sobre algo apagado *por hoy* sí lo reencola, porque ese
+  vuelve solo mañana;
 - lo que **está en pausa** tampoco;
 - lo que **ya está en la cola** tampoco, así que apretarlo dos veces no duplica
   nada;
@@ -258,6 +287,7 @@ que sin tocar nada se comporta igual que siempre.
 | Grupo | Qué se puede cambiar |
 |---|---|
 | **Apagar todo** | Si el cierre apaga *por hoy* o *indefinido*; si relee el portal antes; si incluye los pausados; si "Prender todo" toca lo apagado desde afuera. |
+| **Tiendas en pausa** | Qué tiendas están en pausa (la app no las prende). Es el mismo interruptor que el botón «Pausar tienda» de «Apagar todo»; acá se ven todas juntas. Solo salen las tiendas que esta instalación usa. |
 | **Ritmo** | Cada cuántos minutos se releen las cartas (0 = nunca); si se vuelve a apagar lo que el portal revive; a los cuántos segundos se confirma un apagado; cuándo se considera vieja la pestaña; reintentos por operación; cada cuánto se repinta la pantalla. |
 | **Sucursal** | El **id de menú de PedidosYa** y el **storeId / brandId de Rappi**. Estaban clavados en el código: hasta que fueran configurables, "sirve para otro local" estaba a medias. |
 | **Rappi Común** | El **storeId de la segunda tienda de Rappi**, si tu local tiene una. Vacío (el default) = la app ni la nombra. Ver «Las dos tiendas de Rappi». |

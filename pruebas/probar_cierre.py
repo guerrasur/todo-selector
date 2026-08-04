@@ -161,6 +161,98 @@ async def prender_todo(db, worker):
             "y con la opcion en off prende tambien lo apagado desde afuera")
 
 
+async def apagar_toda_la_tienda_indefinido(db, worker):
+    """Apagar TODA una tienda indefinidamente (pedido del 2026-08-04).
+
+    La trampa: "apagado" no es un solo estado. Lo que quedo apagado POR HOY
+    el portal lo revive solo mañana a la mañana, asi que saltearlo por "ya
+    figura apagado" dejaba media tienda prendida al otro dia justo cuando lo
+    que se pidio fue desactivarla unos dias.
+    """
+    print("\n== Apagar toda una tienda, indefinido ==")
+    todo_prendido(db)
+    poner(db, "Flan casero", EstadoItem.APAGADO_HOY, "rappi")
+    poner(db, "Budín de pan", EstadoItem.APAGADO_INDEF, "rappi")
+
+    await cierre.ejecutar(worker, "apagar_indef", ["rappi"], releer=False)
+    db.expire_all()
+    encolados = cola(db, "rappi")
+
+    revisar("Flan casero" in encolados,
+            "lo que estaba apagado POR HOY se vuelve a encolar como indefinido")
+    revisar("Budín de pan" not in encolados,
+            "lo que ya estaba indefinido no se toca")
+    revisar("Milanesa con pure" in encolados, "y lo prendido tambien va")
+    revisar(all(op.accion == "apagar_indef"
+                for op in db.query(Operacion).all()),
+            "todas las operaciones son de apagado indefinido")
+
+    # Y al reves NO: pedir "por hoy" sobre algo ya apagado indefinido seria
+    # aflojar un apagado mas fuerte.
+    todo_prendido(db)
+    poner(db, "Flan casero", EstadoItem.APAGADO_INDEF, "rappi")
+    await cierre.ejecutar(worker, "apagar_hoy", ["rappi"], releer=False)
+    db.expire_all()
+    revisar("Flan casero" not in cola(db, "rappi"),
+            "«apagar por hoy» no toca lo que ya esta apagado indefinido")
+
+
+async def tienda_en_pausa(db, worker):
+    """Una tienda entera en pausa: se puede apagar, no se puede prender."""
+    print("\n== Pausar una tienda entera ==")
+    todo_prendido(db)
+    config.guardar(db, {"tienda_pausada_rappi": True})
+    db.commit()
+    config.recargar()
+
+    try:
+        revisar(config.tiendas_pausadas() == ["rappi"],
+                "la tienda queda marcada como en pausa")
+        revisar("rappi" in config.plataformas_activas(),
+                "pero sigue ACTIVA: hay que poder leerla y apagarla")
+
+        # Apagar: tiene que andar igual, es como se la deja apagada.
+        await cierre.ejecutar(worker, "apagar_indef", ["rappi"], releer=False)
+        db.expire_all()
+        revisar(len(cola(db, "rappi")) > 5,
+                "apagar toda la tienda sigue andando estando en pausa")
+
+        # Prender: no.
+        todo_prendido(db)
+        poner(db, "Flan casero", EstadoItem.APAGADO_HOY, "rappi")
+        poner(db, "Flan casero", EstadoItem.APAGADO_HOY, "pedidosya")
+        resultado = await cierre.ejecutar(worker, "prender",
+                                          ["rappi", "pedidosya"], releer=False)
+        db.expire_all()
+        revisar(cola(db, "rappi") == set(),
+                "«Prender todo» no encola NADA en la tienda en pausa")
+        revisar(resultado["rappi"]["salteados"][0]["motivo"]
+                == "la tienda está en pausa",
+                "y dice por que, en vez de no hacer nada calladito")
+        revisar(cola(db, "pedidosya") == {"Flan casero"},
+                "la otra tienda del mismo click se prende normal")
+        revisar(cierre.previo(["rappi"], "prender")["rappi"] == 0,
+                "el numero de «para prender» tambien da cero")
+
+        # Y el aviso de "apagado en una tienda y prendido en la hermana" no
+        # puede salir por una tienda que el usuario desactivo a proposito.
+        from app.catalogo import desparejos
+        todo_prendido(db)
+        poner(db, "Milanesa con pure", EstadoItem.APAGADO_HOY, "rappi")
+        sin_pausadas = [p for p in config.plataformas_activas()
+                        if not config.tienda_pausada(p)]
+        revisar(desparejos(db, sin_pausadas) == [],
+                "no avisa que se vende en la hermana si una esta en pausa")
+    finally:
+        config.guardar(db, {"tienda_pausada_rappi": False})
+        db.commit()
+        config.recargar()
+
+    revisar(config.tiendas_pausadas() == [], "y se puede sacar de la pausa")
+    revisar(cierre.previo(["rappi"], "prender")["rappi"] > 0,
+            "ahi «Prender todo» vuelve a tener trabajo")
+
+
 async def estado_transitorio(db, worker):
     print("\n== La pantalla se entera enseguida ==")
     todo_prendido(db)
@@ -499,6 +591,8 @@ async def main():
         await una_sola_plataforma(db, worker)
         await no_encola_de_mas(db, worker)
         await prender_todo(db, worker)
+        await apagar_toda_la_tienda_indefinido(db, worker)
+        await tienda_en_pausa(db, worker)
         await estado_transitorio(db, worker)
         await releer_antes(db, worker)
         await previo(db, worker)

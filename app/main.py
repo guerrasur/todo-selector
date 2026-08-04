@@ -184,6 +184,15 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
                               "motivo": "no está activa en esta instalación"})
             continue
 
+        # Tienda en pausa: se puede apagar (hace falta para dejarla apagada)
+        # pero no prender. Se corta acá y no solo en la pantalla porque la
+        # pantalla puede estar vieja, y el click de una pantalla vieja es
+        # justo el que revive lo que alguien acaba de desactivar.
+        if data.accion == "prender" and config.tienda_pausada(plat):
+            salteadas.append({"plataforma": plat,
+                              "motivo": "la tienda está en pausa"})
+            continue
+
         # El EstadoItem es lo que dice "este producto existe en esta
         # plataforma". Sin el, la operacion buscaria el nombre canonico en un
         # portal donde el producto no esta y fallaria tres veces antes de
@@ -339,8 +348,15 @@ def alertas(db: Session = Depends(get_db)):
         # que nadie confirma sale como "sin_confirmar" (hay que releer);
         # solo lo que SI se esta viendo puede salir como "sin_espejo"
         # (esto se sigue vendiendo en la otra tienda).
-        "sin_espejo": catalogo.desparejos(db, config.plataformas_activas(),
-                                          desde=limite),
+        # Una tienda en pausa queda AFUERA de la comparación: el usuario ya
+        # dijo que esa no va, así que "está apagado acá y prendido allá" no
+        # es un problema que avisar sino exactamente lo que pidió (pedido
+        # del 2026-08-04). Es el mismo criterio que con un producto pausado.
+        "sin_espejo": catalogo.desparejos(
+            db,
+            [p for p in config.plataformas_activas()
+             if not config.tienda_pausada(p)],
+            desde=limite),
     }
 
 
@@ -372,6 +388,10 @@ def estado_sistema(db: Session = Depends(get_db)):
         # fija: una plataforma opcional que nadie configuró no tiene por qué
         # aparecerle a nadie.
         "plataformas": config.plataformas_activas(),
+        # Las que están en pausa: siguen activas (se leen y se pueden
+        # apagar), pero la app no las prende. La pantalla las marca y saca
+        # el botón de prender; el corte de verdad está en el backend.
+        "pausadas": config.tiendas_pausadas(),
         # Estado de la TIENDA entera (abierta/cerrada), no de un producto.
         # None de valor en el dict = todavia no se leyo o esta plataforma no
         # tiene el dato que hace falta (ver worker.estado_tienda). No

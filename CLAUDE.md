@@ -25,7 +25,21 @@ tienen default. Las pruebas traen su propia carta inventada, en
 plataformas que elijas**, con un botón por destino: a veces PedidosYa tiene
 que apagarse antes que Rappi. Con las dos tiendas de Rappi los destinos son
 cinco (cada una sola, «Ambos Rappi» y «Todas»). Nunca encola lo que ya está
-como quiere quedar, lo pausado, ni lo que ya está en la cola.
+como quiere quedar, lo pausado, ni lo que ya está en la cola. **«Apagado» no
+es un solo estado**: lo que está apagado *por hoy* SÍ se reencola cuando lo
+que se pide es indefinido — el portal lo revive solo mañana, y saltearlo
+dejaba media tienda prendida justo cuando se la quería desactivar.
+
+**Una tienda entera se puede pausar** (2026-08-04, `cfg_tienda_pausada_*`):
+la app deja de **prenderla** —ni de a un producto ni con «Prender todo»—
+hasta que la reactives. Sigue **activa**: se lee, se puede apagar (que es lo
+que hace falta para dejarla apagada) y se ve en la pantalla; sacarla de
+`plataformas_activas()` la volvería invisible y entonces no habría ni cómo
+apagarla. El corte va en el backend (`cierre.planificar` y `/api/accion`),
+no solo en la pantalla: la pantalla se repinta sola, pero un click puede
+salir con los datos de hace tres segundos. Una tienda en pausa tampoco
+entra en el aviso de «apagado acá y prendido en la hermana»: el usuario ya
+dijo que esa no va.
 
 **Lo que se apaga es lo que elegiste, y nada más.** No hay espejos ni
 propagación automática entre plataformas: si un producto está en las dos

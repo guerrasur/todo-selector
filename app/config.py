@@ -92,6 +92,45 @@ OPCIONES = (
               "está: si alguien lo apagó desde el portal, fue a propósito.",
     ),
 
+    # ---------------- Tiendas en pausa ----------------
+    #
+    # Una tienda entera "desactivada": la app NO la prende (ni de a un
+    # producto ni con «Prender todo») hasta que la saques de pausa. Sigue
+    # leyéndose y se puede apagar, que es justo lo que hace falta para
+    # dejarla apagada: lo que no puede pasar es que un click de más la
+    # reviva. Es el mismo concepto que pausar un producto, pero de la
+    # tienda entera (pedido del usuario, 2026-08-04: "los jefes me piden
+    # desactivar Rappi Común").
+    #
+    # Van una por plataforma y escritas a mano (no generadas) para que
+    # `OPCIONES` siga siendo la lista completa y la pantalla de Ajustes las
+    # dibuje sola. La que no está activa en esta instalación no se muestra
+    # (ver para_la_pantalla).
+    Opcion(
+        clave="tienda_pausada_pedidosya",
+        titulo="PedidosYa en pausa",
+        defecto=False,
+        grupo="Tiendas en pausa",
+        ayuda="Con esto prendido, la app no prende nada en PedidosYa. "
+              "Apagar sí se puede.",
+    ),
+    Opcion(
+        clave="tienda_pausada_rappi",
+        titulo="Rappi (Turbo) en pausa",
+        defecto=False,
+        grupo="Tiendas en pausa",
+        ayuda="Con esto prendido, la app no prende nada en Rappi Turbo. "
+              "Apagar sí se puede.",
+    ),
+    Opcion(
+        clave="tienda_pausada_rappi_comun",
+        titulo="Rappi Común en pausa",
+        defecto=False,
+        grupo="Tiendas en pausa",
+        ayuda="Con esto prendido, la app no prende nada en Rappi Común. "
+              "Apagar sí se puede.",
+    ),
+
     # ---------------- Ritmo del worker ----------------
     Opcion(
         clave="minutos_ronda",
@@ -392,6 +431,28 @@ def plataformas_activas() -> list[str]:
     return activas
 
 
+# plataforma -> ajuste que la pone en pausa. OJO: una tienda en pausa SIGUE
+# activa. Se le abre pestaña, se lee y se puede apagar; lo unico que no pasa
+# es que la app la prenda. Sacarla de plataformas_activas() la volveria
+# invisible y entonces no habria ni como apagarla ni como ver como quedo.
+PAUSA_POR_PLATAFORMA = {
+    "pedidosya": "tienda_pausada_pedidosya",
+    "rappi": "tienda_pausada_rappi",
+    "rappi_comun": "tienda_pausada_rappi_comun",
+}
+
+
+def tienda_pausada(plataforma: str) -> bool:
+    """True si esa tienda esta en pausa: la app no la prende."""
+    clave = PAUSA_POR_PLATAFORMA.get(plataforma)
+    return bool(clave) and activo(clave)
+
+
+def tiendas_pausadas() -> list[str]:
+    """Las tiendas activas que estan en pausa, en el orden de siempre."""
+    return [p for p in plataformas_activas() if tienda_pausada(p)]
+
+
 # ---------- Escribir ----------
 
 def _validar(opcion: Opcion, valor: Any) -> Any:
@@ -485,8 +546,16 @@ def para_la_pantalla() -> list[dict]:
 
     La pantalla no sabe que ajustes existen: los dibuja de esto. Agregar uno
     nuevo es agregarlo a OPCIONES y nada mas.
+
+    Lo unico que se filtra es la pausa de una tienda que esta instalacion no
+    usa: "Rappi Común en pausa" en un local que no vende por ahi no es un
+    ajuste, es una pregunta sin sentido (regla 9: que plataformas hay lo
+    dice plataformas_activas(), no una lista escrita a mano).
     """
     valores = todo()
+    activas = plataformas_activas()
+    escondidas = {clave for plat, clave in PAUSA_POR_PLATAFORMA.items()
+                  if plat not in activas}
     return [{
         "clave": o.clave,
         "titulo": o.titulo,
@@ -499,4 +568,4 @@ def para_la_pantalla() -> list[dict]:
         "opciones": [{"valor": v, "etiqueta": e} for v, e in o.opciones],
         "defecto": o.defecto,
         "valor": valores[o.clave],
-    } for o in OPCIONES]
+    } for o in OPCIONES if o.clave not in escondidas]
