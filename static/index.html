@@ -128,31 +128,31 @@
   .nombre.editable { cursor: text; }
   .nombre.editable:hover { text-decoration: underline dotted var(--tenue); }
   .plats { display: flex; gap: 8px; }
+  /* Un chip sin marcar NO esta apagado: es el estado normal, y ademas es
+     donde se lee el estado del producto en ese portal. Va al 100% de
+     opacidad y con el texto legible; lo que distingue al marcado es el
+     contorno y el brillo, no que el otro este atenuado. */
   .pill {
     font-size: 11px; padding: 5px 11px; border-radius: 999px;
     background: var(--panel-2); border: 1px solid var(--borde);
     display: flex; align-items: center; gap: 7px; min-width: 112px;
-    color: var(--tenue); cursor: pointer; opacity: .45;
+    color: var(--texto); cursor: pointer;
     letter-spacing: .01em;
-    transition: opacity .12s, border-color .12s, background .12s;
+    transition: box-shadow .12s, border-color .12s, background .12s;
   }
-  /* Elegida con un click. El chip marcado es la EXCEPCION (sin marcar nada
-     el boton va a todos), asi que tiene que cantar: contorno de acento,
-     fondo propio y un brillo alrededor. No alcanza con "un poco menos tenue
-     que el otro", porque de eso depende saber a donde va a ir el boton. */
+  /* Marcada con un click. Es la EXCEPCION (sin marcar nada el boton va a
+     todos), asi que tiene que cantar: contorno de acento, fondo propio y un
+     brillo alrededor. De eso depende saber a donde va a ir el boton. */
   .pill.sel {
-    opacity: 1; color: var(--texto); border-color: var(--acento);
+    color: var(--texto); border-color: var(--acento);
     background: #1d3557;
     box-shadow: inset 0 0 0 1px var(--acento), 0 0 0 3px #5b9dff33;
   }
   .pill:hover { border-color: var(--acento); }
-  .pill.na { opacity: .25; cursor: default; font-style: italic; }
+  .pill.na { opacity: .4; cursor: default; font-style: italic; }
   .pill.na:hover { border-color: var(--borde); }
-  /* Sin elegir: es el estado normal, no un error. Se ve tenue pero legible
-     (el estado del producto se sigue leyendo ahi), sin el tachado de antes,
-     que ahora estaria tachando todo. */
-  .pill:not(.sel):not(.na) { opacity: .6; background: transparent; }
-  .pill:not(.sel):not(.na) .punto { opacity: .55; }
+  /* Sin marcar no lleva ningun tratamiento propio: se ve entero, como
+     cualquier otra etiqueta de la fila. */
   .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .p-prendido { background: var(--on); box-shadow: 0 0 0 3px #4ade8025; }
   .p-apagado_hoy, .p-apagado_indefinido, .p-apagado_ajeno { background: var(--off); }
