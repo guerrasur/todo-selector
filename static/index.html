@@ -351,6 +351,21 @@
   .fila-cierre:first-of-type { border-top: none; }
   .fila-cierre .quien-cierre { min-width: 104px; font-weight: 600; }
   .fila-cierre .cuantos { color: var(--tenue); font-size: 12px; }
+  /* El botón de pausa de la TIENDA tiene que verse como un botón. Con el
+     estilo discreto de `button.pausa` (sin fondo ni borde) quedaba igual
+     que el texto de al lado y el usuario no lo encontraba: "no entiendo
+     cómo poner una tienda en pausa" (2026-08-04). Acá no es un botón de
+     los de todos los días, pero es EL botón de una función entera. */
+  .fila-cierre .pausar-tienda {
+    background: var(--panel-2); border: 1px solid var(--borde);
+    color: var(--texto); margin-left: auto;
+  }
+  .fila-cierre .pausar-tienda:hover { border-color: var(--curso); }
+  .fila-cierre.en-pausa { background: #2a220f40; }
+  .fila-cierre.en-pausa .quien-cierre { color: var(--curso); }
+  .fila-cierre.en-pausa .pausar-tienda {
+    border-color: var(--curso); color: var(--curso);
+  }
   #resultado-cierre {
     font-size: 13px; margin-top: 14px; white-space: pre-line;
     color: var(--tenue);
@@ -1648,9 +1663,14 @@ async function pintarCierre(mensaje = '') {
     fila.className = 'fila-cierre';
     fila.dataset.destino = clave;
 
+    // Una tienda en pausa se dice en el título de su fila: es el estado de
+    // la fila entera, no un detalle del botón.
+    const filaEnPausa = plats.length === 1 && PAUSADAS.has(plats[0]);
+    if (filaEnPausa) fila.classList.add('en-pausa');
+
     const quien = document.createElement('div');
     quien.className = 'quien-cierre';
-    quien.textContent = titulo;
+    quien.textContent = titulo + (filaEnPausa ? ' · en pausa' : '');
     fila.appendChild(quien);
 
     const suma = (cuentas) =>
@@ -1684,14 +1704,30 @@ async function pintarCierre(mensaje = '') {
     bPrender.onclick = () => correrMasivo('prender', plats, titulo, bPrender);
     fila.appendChild(bPrender);
 
+    const cuenta = document.createElement('span');
+    cuenta.className = 'cuantos';
+    const pausadasAca = plats.filter(p => PAUSADAS.has(p));
+    cuenta.textContent =
+      `${suma(paraApagar)} para apagar · ${suma(paraIndef)} para indefinido · ` +
+      `${suma(paraPrender)} para prender` +
+      (pausadasAca.length && plats.length > 1
+        ? ` · en pausa: ${pausadasAca.map(p => NOMBRE_PLAT[p]).join(', ')}`
+        : '');
+    fila.appendChild(cuenta);
+
     // Pausar la TIENDA entera. Solo en las filas de una sola tienda:
     // pausar «Todas» de un botón son tres decisiones distintas metidas en
-    // una, y la de salir de la pausa también.
+    // una, y la de salir de la pausa también. Va al final de la fila, con
+    // cara de botón: antes usaba el estilo discreto del «Pausar» de un
+    // producto y quedaba igual que el texto de al lado, así que no se
+    // encontraba (2026-08-04).
     if (plats.length === 1) {
       const plat = plats[0];
-      const enPausa = PAUSADAS.has(plat);
+      const enPausa = filaEnPausa;
       const bPausar = document.createElement('button');
-      bPausar.className = 'pausa';
+      bPausar.className = 'pausar-tienda';
+      // Sin emoji: no todas las PCs tienen el glifo y ahí sale un
+      // cuadradito, que en un botón parece un error de la app.
       bPausar.textContent = enPausa ? 'Reactivar tienda' : 'Pausar tienda';
       bPausar.title = enPausa
         ? 'Volver a dejar que la app prenda en ' + titulo
@@ -1717,17 +1753,6 @@ async function pintarCierre(mensaje = '') {
       fila.appendChild(bPausar);
     }
 
-    const cuenta = document.createElement('span');
-    cuenta.className = 'cuantos';
-    const enPausa = plats.filter(p => PAUSADAS.has(p));
-    cuenta.textContent =
-      `${suma(paraApagar)} para apagar · ${suma(paraIndef)} para indefinido · ` +
-      `${suma(paraPrender)} para prender` +
-      (enPausa.length
-        ? ` · en pausa: ${enPausa.map(p => NOMBRE_PLAT[p]).join(', ')}`
-        : '');
-
-    fila.appendChild(cuenta);
     cont.appendChild(fila);
   }
 }
