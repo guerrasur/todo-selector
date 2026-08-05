@@ -24,6 +24,26 @@
   una segunda linea de aclaracion. Con eso, buscar el texto exacto no
   encuentra nada, el dialogo queda abierto y el intento siguiente arranca
   con el popup tapando el toggle.
+
+  Con ?tapa=ancestro, las tres del 2026-08-05, que son otras y juntas
+  explican el "no apaga y se queda trabada":
+
+    6. El que tapa el toggle es un ANCESTRO suyo: el
+       <ul data-testid="menu-categories"> con un ::after que cubre la lista.
+       elementFromPoint contesta el <ul> (los pseudo-elementos se reportan
+       como el elemento que los origina), que es exactamente el
+       "encima=ul[data-testid=menu-categories]" del log. La franja del punto
+       1 es un HERMANO y se resuelve distinto: a un ancestro no se le pueden
+       sacar los clicks de una, porque pointer-events se hereda y el toggle
+       se quedaria sin ellos.
+    7. El popup de disponibilidad se abre SOLO con pointerdown sobre el
+       <span> de adentro del <label>. Un .click() disparado en el label no
+       lo abre: por eso prender andaba (lo dispara el `change` del <input>)
+       y apagar no abria el dialogo nunca.
+    8. El <label> trae for="switch-hidden-input" y TODOS los productos tienen
+       un input con ese mismo id. El for= resuelve al PRIMERO del documento,
+       asi que activar el label por JS puede terminar tocando el switch de
+       otro producto. Apagar el plato equivocado es el peor error posible.
 -->
 <style>
   body { font-family: sans-serif; margin: 0; }
@@ -81,6 +101,35 @@
   .portal-flotante [data-testid^="menu-item-availability-switch-option"] {
     padding: 10px 8px; cursor: pointer;
   }
+
+  /* ---- ?tapa=ancestro: los dos que tapan siendo ANCESTROS del toggle ----
+     Los dos son pseudo-elementos, que es de donde salia el estorbo real:
+     elementFromPoint los reporta como el elemento que los origina, y por eso
+     el log decia "encima=ul[data-testid=menu-categories]" — un ancestro del
+     propio toggle.
+
+     Son dos a proposito, con z-index distintos, porque cada uno prueba una
+     defensa:
+       - el del <ul>, que esta en SELECTORES_ESTORBO: lo apaga
+         neutralizar_estorbos() al preparar la pagina;
+       - el de .cat-cuerpo, que NO esta en ninguna lista: ese lo tiene que
+         resolver el peldaño de "destapar" de base.clickear(), que es el que
+         sirve cuando el portal cambia el DOM otra vez. */
+  ul[data-testid="menu-categories"] {
+    list-style: none; margin: 0; padding: 0; position: relative;
+  }
+  ul[data-testid="menu-categories"]::after {
+    content: ''; position: absolute; inset: 0; z-index: 45;
+  }
+  .cat-cuerpo { position: relative; }
+  .cat-cuerpo::before {
+    content: ''; position: absolute; inset: 0; z-index: 40;
+  }
+
+  /* La perilla del switch: en el portal real el handler vive ACA ADENTRO,
+     no en el <label>. Tiene que cubrir el label entero para que un click de
+     verdad en el centro le pegue a ella. */
+  .perilla { position: absolute; inset: 0; border-radius: 12px; }
 </style>
 
 <div data-testid="collapsible-panel-header" role="button">Bebidas</div>
@@ -97,9 +146,14 @@
 // ?gap=no          saca la franja, para poder comparar con y sin ella.
 // ?dialogo=portal  el dialogo del 2026-08-03: portal de floating-ui, con
 //                  opciones por data-testid y el texto SIN tilde.
+// ?tapa=ancestro   lo del 2026-08-05: el que tapa el toggle es un ANCESTRO
+//                  suyo, y el popup se abre solo con pointerdown sobre la
+//                  perilla de adentro del <label>. Implica ?dialogo=portal,
+//                  que es el dialogo que tiene el portal de verdad.
 const params = new URLSearchParams(location.search);
 const CON_GAP = params.get("gap") !== "no";
-const DIALOGO_PORTAL = params.get("dialogo") === "portal";
+const TAPA_ANCESTRO = params.get("tapa") === "ancestro";
+const DIALOGO_PORTAL = params.get("dialogo") === "portal" || TAPA_ANCESTRO;
 if (!CON_GAP) {
   document.querySelector('[data-testid^="menu-categories-hoverable-gap"]').remove();
 }
@@ -121,9 +175,29 @@ const apagados = new Set(JSON.parse(localStorage.getItem("apagados") || "[]"));
 const guardar = () =>
   localStorage.setItem("apagados", JSON.stringify([...apagados]));
 
-function pintar() {
+// Donde van las tarjetas. Con ?tapa=ancestro se envuelven en el
+// <ul data-testid="menu-categories"> / <li data-testid="menu-category"> del
+// portal real, que son ANCESTROS del toggle: sin esa jerarquia no hay forma
+// de reproducir el "encima=ul[data-testid=menu-categories]" del log.
+function contenedor() {
   const lista = document.getElementById("lista");
   lista.innerHTML = "";
+  if (!TAPA_ANCESTRO) return lista;
+
+  const ul = document.createElement("ul");
+  ul.setAttribute("data-testid", "menu-categories");
+  const li = document.createElement("li");
+  li.setAttribute("data-testid", "menu-category");
+  const cuerpo = document.createElement("div");
+  cuerpo.className = "cat-cuerpo";
+  li.appendChild(cuerpo);
+  ul.appendChild(li);
+  lista.appendChild(ul);
+  return cuerpo;
+}
+
+function pintar() {
+  const lista = contenedor();
   PRODUCTOS.forEach(([nombre, pid, extra], i) => {
     const apagado = apagados.has(pid);
     const tarjeta = document.createElement("div");
@@ -158,6 +232,11 @@ function pintar() {
     const label = document.createElement("label");
     label.setAttribute(
       "data-testid", `menu-category-101536-product-${pid}-availability-switch-control`);
+    // CONFIRMADO POR LOG (2026-08-05): el label del portal trae este for= y
+    // TODOS los productos tienen un input con ese mismo id. El for= resuelve
+    // al primero del documento, asi que activar el label por JS puede tocar
+    // el switch de OTRO producto. Esta aca para que la prueba lo cubra.
+    label.setAttribute("for", "switch-hidden-input");
     label.className = "sc-iYsgxs" + (apagado ? "" : " on");
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -165,15 +244,27 @@ function pintar() {
     input.checked = !apagado;
     input.readOnly = true;
     label.appendChild(input);
+
     // preventDefault: el estado del switch lo maneja el portal (React), no
     // la activacion nativa del <input>. Sin esto, abrir el dialogo y
     // cancelar dejaba el checkbox tildado al reves de lo que el portal
     // cree, y leer_estado() contestaba "apagado" un producto que seguia
     // prendido: un bug de la replica que no existe en el portal real.
-    label.addEventListener("click", (e) => {
-      e.preventDefault();
-      togglear(pid, nombre);
-    });
+    // Es tambien lo que evita que el for= de arriba active el input ajeno.
+    label.addEventListener("click", (e) => e.preventDefault());
+
+    if (TAPA_ANCESTRO) {
+      // EL BUG DEL 2026-08-05: el handler vive en la perilla de ADENTRO y
+      // escucha pointerdown, no click. Un .click() disparado sobre el
+      // <label> no lo despierta (los eventos suben, no bajan) y ademas no
+      // manda pointerdown: por eso el popup no se abria NUNCA.
+      const perilla = document.createElement("span");
+      perilla.className = "perilla";
+      perilla.addEventListener("pointerdown", () => togglear(pid, nombre));
+      label.appendChild(perilla);
+    } else {
+      label.addEventListener("click", () => togglear(pid, nombre));
+    }
     tarjeta.appendChild(label);
 
     lista.appendChild(tarjeta);

@@ -52,8 +52,24 @@ y `?handler=hijo|host` (dónde vive el listener de la categoría).
   un diálogo que no se pudo resolver no quede abierto tapando el intento
   siguiente.
 
+Y con `?tapa=ancestro`, las tres trampas del 2026-08-05, que son las que
+explicaban el «Rappi Turbo no apaga y se queda trabada»:
+
+- lo que tapa el toggle es un **ancestro** suyo (un `::after` del
+  `<ul data-testid="menu-categories">`, más otro de un contenedor que **no**
+  está en `SELECTORES_ESTORBO`): el primero lo resuelve
+  `neutralizar_estorbos()` y el segundo el peldaño de *destapar* de
+  `clickear()`, que es el que sigue sirviendo cuando el portal cambia el DOM
+  otra vez;
+- el popup se abre **solo con `pointerdown`** sobre la perilla de adentro del
+  `<label>`: un `.click()` disparado en el label lo prende pero no abre nada;
+- el `for="switch-hidden-input"` del label, con ese `id` repetido en toda la
+  carta — activar el label por la vía nativa apagaría el **primer** producto
+  del documento, no el que pediste.
+
 Lo que prueba, además de que apagar y prender funcionen, es que el click
-normal **entra** — sin pasar por el fallback JS.
+normal **entra** — sin pasar por el fallback JS — y que los `pointer-events`
+que se tocaron para destapar quedan restaurados.
 
 **`probar_catalogo.py`** cubre el mapeo de nombres: que una base vieja se
 corrija al arrancar, que vincular fusione y separar desarme, que el estado y
@@ -88,6 +104,15 @@ Desde el 2026-08-04 cubre también el reintento automático de lo que falló
 **no** si en el medio se pidió otra cosa para ese producto, si ya quedó como
 se pedía, si el producto está en pausa, o si ya agotó el tope — y que la misma
 fallida no se evalúe dos veces, que sería un reintento por minuto para siempre.
+
+Desde el 2026-08-05 cubre además la **cola**: que se pueda ver entera y en
+orden, que cancelar una saque esa y no las demás, que la que **ya está
+corriendo** quede cancelada sin volver a `PENDIENTE` (el intento en vuelo
+termina, pero no hay intento 2) y sin que el reintento automático la traiga de
+vuelta, que un producto cancelado quede en `DESCONOCIDO` y no en un estado
+inventado, que una operación que falla **deje pasar a la de atrás** en vez de
+quedarse con el turno, y que una `EN_CURSO` de una corrida anterior vuelva a
+la cola al arrancar en vez de quedar colgada para siempre.
 
 **`probar_pantalla_carta.py`** levanta la app entera en modo simulado y la
 maneja con Playwright como lo haría una persona. En modo simulado `/api/carta`

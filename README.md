@@ -818,6 +818,46 @@ carta entera hay que recorrerlas (ver el punto 0).
       tienen su propia URL (`/ajustes`, `/carta`, vía `history.pushState`),
       con un botón "← Volver". "Apagar todo" no se tocó, sigue como panel
       de siempre.
+- [x] **Rappi Turbo no apagaba y la cola se quedaba trabada.** Hecho
+      (2026-08-05). El log mostró que era una cadena, no una causa:
+
+      1. El click real fallaba con `encima=ul[data-testid=menu-categories]`,
+         que es un **ancestro** del propio toggle. Un ancestro que gana
+         `elementFromPoint` sobre el centro de su descendiente solo puede ser
+         decoración (un pseudo-elemento), nunca UI de verdad: `clickear()`
+         ahora lo destapa (`pointer-events: none` en el ancestro, `auto` en
+         el target) y **restaura siempre**. Lo que tapa y NO es ancestro
+         (el header pegajoso) no se toca: ahí se baja el elemento y se
+         reintenta, que es lo que hace el usuario a mano.
+      2. Al caer al fallback JS, Rappi mandaba `label.click()`. Eso prendía
+         (lo dispara el `change` del `<input>`) pero **no abría nunca** el
+         popup de "hasta cuándo", que lo abre un handler de floating-ui
+         adentro del `<label>` atado a `pointerdown`. Ahora Rappi usa
+         `profundo=True` (regla 6) y el fallback manda la secuencia entera
+         (pointerdown/mousedown/mouseup/click).
+      3. `cerrar_dialogo()` miraba solo las opciones del popup, y el
+         **contenedor** del portal se monta ~1 s antes y ya tapa la pantalla
+         entera: daba "no hay nada que cerrar" con el popup adelante.
+      4. Los 3 intentos corrían a 2 s de distancia **sin recargar**, contra
+         el mismo DOM que ya había fallado. Ahora un fallo recarga y rehace
+         la preparación, que es el "recargar la página" que al usuario le
+         funciona.
+      5. La cola se ordena por `creada_en`, así que la que fallaba ganaba el
+         turno de nuevo a los 2 s y las de atrás no avanzaban. Ahora vuelve
+         con `reintentar_en` a 30 s: conserva sus intentos, pero al final de
+         la fila.
+
+      Cubierto por `pruebas/probar_rappi_menu.py` (escenario F, con la
+      réplica `?tapa=ancestro`) y `pruebas/probar_estados.py`.
+- [x] **Poder cancelar lo que está en la cola.** Hecho (2026-08-05). El badge
+      de "N en cola" abre un panel con lo que falta hacer, en orden, con una
+      ✕ por operación y "Cancelar todo". La que **ya está corriendo** no se
+      corta a la mitad (dejaría el portal con un diálogo abierto): termina el
+      intento que está en el navegador y no se reintenta. Un producto
+      cancelado queda en `DESCONOCIDO`, no en un estado inventado: nadie miró
+      el portal (regla 8). De paso, las operaciones que quedaban `EN_CURSO`
+      al cerrarse la app vuelven a la cola al arrancar, en vez de quedar
+      colgadas para siempre contando en el badge.
 - [ ] **Rediseñar la estética de la aplicación.** Pedido del usuario
       (2026-07-30), para más adelante: **recién cuando lo funcional esté
       terminado**. No tocar esto todavía.

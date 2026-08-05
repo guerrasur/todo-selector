@@ -281,6 +281,144 @@ def verificacion_rapida_no_pelea_con_el_usuario(db):
     revisar(encoladas == 0, "y no se apropia de lo que apago el local")
 
 
+def la_cola_se_ve_y_se_cancela(db):
+    """Pedido del 2026-08-05: «a veces se encadenan acciones que no queria».
+
+    Hasta ahora la cola era un numero en el header: no se podia ver que
+    habia adentro ni sacar nada. Y una operacion que fallaba ganaba el turno
+    de nuevo a los 2 segundos, asi que con «Apagar todo» las otras 29
+    esperaban a la unica que no entraba.
+    """
+    from datetime import datetime, timedelta
+    from app.main import (CancelarIn, cancelar, ver_cola,
+                          _destrabar_operaciones_colgadas)
+
+    print("\n== La cola se ve, se cancela, y una que falla no la traba ==")
+
+    def limpiar():
+        db.query(Operacion).delete()
+        db.commit()
+        db.expire_all()
+
+    def encolar(nombre, accion="apagar_hoy"):
+        p = db.query(Producto).filter_by(nombre=nombre).first()
+        op = Operacion(producto_id=p.id, plataforma="rappi", accion=accion)
+        db.add(op)
+        db.commit()
+        return op
+
+    # 1) Se ve, y en el orden en que se va a hacer.
+    limpiar()
+    a, b = encolar("Flan casero"), encolar("Budín de pan")
+    cola = ver_cola(db)["operaciones"]
+    revisar([o["producto"] for o in cola] == ["Flan casero", "Budín de pan"],
+            f"la cola se ve entera y en orden ({[o['producto'] for o in cola]})")
+    revisar(cola[0]["etiqueta"] == "apagar hoy",
+            "y dice que accion es, no el nombre interno")
+
+    # 2) Cancelar UNA saca esa y deja la otra.
+    poner(db, "Flan casero", EstadoItem.APAGANDO)
+    revisar(cancelar(CancelarIn(ids=[a.id]), db)["canceladas"] == [a.id],
+            "cancelar una la saca de la cola")
+    db.expire_all()
+    revisar([o["producto"] for o in ver_cola(db)["operaciones"]] == ["Budín de pan"],
+            "y no se lleva puesta la otra")
+    # No se inventa como quedo el producto: nadie miro el portal (regla 8).
+    revisar(estado_de(db, "Flan casero") == EstadoItem.DESCONOCIDO,
+            "el producto deja de decir «apagando…» sin afirmar como quedo")
+
+    # 3) Cancelar todo.
+    encolar("Tarta de choclo")
+    revisar(len(cancelar(CancelarIn(todo=True), db)["canceladas"]) == 2,
+            "«cancelar todo» se lleva lo que quedaba")
+    db.expire_all()
+    revisar(ver_cola(db)["operaciones"] == [], "y la cola queda vacia")
+
+    # ---- Lo que necesita al worker ----
+
+    class PaginaFalsa:
+        async def wait_for_timeout(self, ms):
+            pass
+
+    class PlataformaFalsa:
+        """Falla siempre. Anota a quien le pidieron apagar, y en que orden."""
+        configurado = True
+
+        def __init__(self):
+            self.page = PaginaFalsa()
+            self.pedidos = []
+            self.cancelar_mientras_corre = False
+
+        async def apagar(self, nombre_remoto, por_hoy=True):
+            self.pedidos.append(nombre_remoto)
+            if self.cancelar_mientras_corre:
+                # El usuario aprieta la ✕ con el intento ya en el navegador.
+                db.expire_all()
+                cancelar(CancelarIn(todo=True), db)
+            return False
+
+        async def asegurar_sesion(self):
+            return True
+
+    def worker_con(falsa):
+        w = Worker()
+        w.corriendo = True
+        w.modo_simulado = False
+        w.plataformas = {"rappi": falsa}
+
+        async def preparar_ok(plataforma):
+            return True, ""
+
+        w._preparar = preparar_ok
+        return w
+
+    # 4) Cancelar la que YA esta corriendo: el intento que esta en el
+    #    navegador termina, pero no hay intento 2 ni 3.
+    limpiar()
+    op = encolar("Flan casero")
+    falsa = PlataformaFalsa()
+    falsa.cancelar_mientras_corre = True
+    asyncio.run(worker_con(falsa)._procesar_pendientes())
+    db.expire_all()
+    op = db.query(Operacion).get(op.id)
+    revisar(op.estado == Operacion.CANCELADA,
+            f"la que corria queda cancelada y no vuelve a PENDIENTE ({op.estado})")
+    revisar(op.intentos == 1, f"con un solo intento, no tres ({op.intentos})")
+
+    # Y tampoco la levanta el reintento automatico: cancelada no es ERROR.
+    revisar(worker_con(PlataformaFalsa())._reencolar_fallidas() == [],
+            "y el reintento automatico tampoco la trae de vuelta")
+
+    # 5) EL BUG DE LA COLA TRABADA: la que falla no puede quedarse el turno.
+    limpiar()
+    encolar("Flan casero")
+    encolar("Budín de pan")
+    falsa = PlataformaFalsa()
+    w = worker_con(falsa)
+    asyncio.run(w._procesar_pendientes())
+    asyncio.run(w._procesar_pendientes())
+    db.expire_all()
+    revisar(falsa.pedidos == ["Flan casero", "Budín de pan"],
+            f"la que fallo deja pasar a la de atras ({falsa.pedidos})")
+
+    primera = (db.query(Operacion).order_by(Operacion.creada_en).first())
+    revisar(primera.estado == Operacion.PENDIENTE
+            and primera.reintentar_en is not None
+            and primera.reintentar_en > datetime.now(),
+            "pero sigue en la cola, con su turno mas adelante")
+
+    # 6) Una que quedo a medias porque se cerro la app vuelve a la cola.
+    limpiar()
+    op = encolar("Flan casero")
+    op.estado = Operacion.EN_CURSO
+    db.commit()
+    _destrabar_operaciones_colgadas()
+    db.expire_all()
+    revisar(db.query(Operacion).get(op.id).estado == Operacion.PENDIENTE,
+            "y una EN_CURSO de una corrida anterior no queda colgada")
+    limpiar()
+
+
 def lo_que_fallo_vuelve_solo(db):
     """Pedido del 2026-08-04: una operacion que fallo no espera al usuario.
 
@@ -469,6 +607,7 @@ def main():
         apagado_que_no_se_puede_confirmar(db)
         verificacion_rapida_no_pelea_con_el_usuario(db)
         lo_que_fallo_vuelve_solo(db)
+        la_cola_se_ve_y_se_cancela(db)
         novedades(db)
     finally:
         db.close()

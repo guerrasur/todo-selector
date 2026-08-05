@@ -29,6 +29,11 @@ def plano(texto: str) -> str:
     return " ".join(sin_tildes.split()).lower()
 
 
+def _resumen(e: Exception, limite: int = 90) -> str:
+    """El error en una linea, para meterlo en un log sin volcar el call log."""
+    return " ".join(str(e).split())[:limite]
+
+
 class NombreAmbiguo(Exception):
     """El nombre del catalogo apunta a mas de un producto del portal.
 
@@ -51,6 +56,18 @@ class ResultadoTienda:
     """Lo que devuelve leer_estado_tienda(): la TIENDA entera, no un producto."""
     abierta: bool             # True = esta tomando pedidos ahora
     detalle: str = ""         # texto crudo del portal ("open", "Suspendida", ...)
+
+
+@dataclass
+class Diagnostico:
+    """Como quedo el elemento que no se pudo clickear.
+
+    Los dos booleanos NO son decoracion del log: cada uno habilita un
+    peldaño distinto de clickear(), y son excluyentes entre si.
+    """
+    texto: str = ""             # lo que se escribe en el log
+    despejado: bool = False     # visible y NADA lo tapa -> se puede forzar
+    tapa_un_ancestro: bool = False   # lo tapa un ancestro SUYO -> destapar
 
 
 class PlataformaBase(ABC):
@@ -229,6 +246,14 @@ class PlataformaBase(ABC):
     # en un hijo de <wk-menu-list-category-item>, un click disparado sobre
     # el custom element no lo despierta. Clickeando el hijo mas profundo el
     # evento sube por todos los niveles, asi que cubre las dos formas.
+    #
+    # Y NO ALCANZA CON .click() (log del 2026-08-05): el toggle de Rappi se
+    # prendia por este camino pero el popup de "hasta cuando" no se abria
+    # nunca ("Opciones que vi: (ninguna)"). Prender lo dispara el `change`
+    # del <input>, que la activacion nativa del <label> si propaga; el popup
+    # lo abre un handler de floating-ui atado a pointerdown/mousedown, que
+    # un .click() pelado no despierta. Por eso se manda la secuencia
+    # completa: es lo que hace un mouse de verdad.
     JS_CLICK_PROFUNDO = """
         el => {
             const r = el.getBoundingClientRect();
@@ -245,6 +270,22 @@ class PlataformaBase(ABC):
                 for (const h of nodo.children) mirar(h, prof + 1);
             };
             mirar(el, 0);
+
+            const comun = {bubbles: true, cancelable: true, composed: true,
+                           clientX: x, clientY: y, button: 0, buttons: 1};
+            const tirar = (Clase, tipo, extra) => {
+                try {
+                    objetivo.dispatchEvent(new Clase(tipo, {...comun, ...extra}));
+                } catch (e) { /* el navegador no conoce ese constructor */ }
+            };
+            tirar(PointerEvent, 'pointerdown', {pointerId: 1, isPrimary: true,
+                                                pointerType: 'mouse'});
+            tirar(MouseEvent, 'mousedown', {});
+            tirar(PointerEvent, 'pointerup', {pointerId: 1, isPrimary: true,
+                                              pointerType: 'mouse', buttons: 0});
+            tirar(MouseEvent, 'mouseup', {buttons: 0});
+            // El .click() nativo va ultimo y se deja tal cual: es el que
+            // dispara la activacion del <label> y lo que ya venia andando.
             objetivo.click();
             return objetivo.tagName.toLowerCase();
         }
@@ -266,15 +307,17 @@ class PlataformaBase(ABC):
     # porque algo lo tapa, esto dice quien es el que tapa; si el que
     # contesta es el target mismo (o un hijo suyo), el problema es otro.
     #
-    # Devuelve {desc, propio}: `propio` no es decoracion del log, decide si
-    # se puede reintentar con un click forzado (ver clickear()).
+    # Devuelve {desc, propio, ancestro}. Los dos booleanos deciden por que
+    # peldaño sigue clickear(), asi que no son para el log:
+    #   propio   -> nada lo tapa, se puede forzar.
+    #   ancestro -> lo tapa un ANCESTRO suyo (ver JS_DESTAPAR).
     JS_QUIEN_TAPA = """
         el => {
             const r = el.getBoundingClientRect();
             const x = r.left + r.width / 2, y = r.top + r.height / 2;
             const arriba = document.elementFromPoint(x, y);
             if (!arriba) return {desc: "(nadie: el centro cae fuera de la ventana)",
-                                 propio: false};
+                                 propio: false, ancestro: false};
             const desc = n => {
                 const t = n.tagName.toLowerCase();
                 const id = n.getAttribute('data-testid');
@@ -282,7 +325,86 @@ class PlataformaBase(ABC):
                 const c = (n.getAttribute('class') || '').trim().split(/\\s+/)[0];
                 return c ? `${t}.${c}` : t;
             };
-            return {desc: desc(arriba), propio: el === arriba || el.contains(arriba)};
+            return {desc: desc(arriba),
+                    propio: el === arriba || el.contains(arriba),
+                    ancestro: arriba !== el && arriba.contains(el)};
+        }
+    """
+
+    # Le saca los clicks de encima al ANCESTRO que esta tapando al target.
+    #
+    # POR QUE ES SEGURO (log del 2026-08-05): el click sobre el toggle de
+    # Rappi fallaba con "encima=ul[data-testid=menu-categories]", y ese <ul>
+    # es un ANCESTRO del toggle. Que un ancestro gane elementFromPoint sobre
+    # el centro de su propio descendiente solo puede pasar por decoracion:
+    # un pseudo-elemento (::before/::after se reportan como el elemento que
+    # los origina) o un fondo pintado por encima. UI de verdad "arriba" no
+    # puede ser: estaria adentro del target. Por eso este caso se destapa y
+    # el del header pegajoso (que NO es ancestro) no se toca.
+    #
+    # Se guarda lo que habia para devolverlo tal cual, y el target se vuelve
+    # a habilitar a mano: pointer-events se HEREDA, asi que apagarlo en el
+    # ancestro apagaria tambien el toggle que queremos clickear.
+    JS_DESTAPAR = """
+        el => {
+            const r = el.getBoundingClientRect();
+            const x = r.left + r.width / 2, y = r.top + r.height / 2;
+            const arriba = document.elementFromPoint(x, y);
+            if (!arriba || arriba === el || !arriba.contains(el)) return null;
+
+            const guardar = n => ({
+                nodo: n,
+                valor: n.style.getPropertyValue('pointer-events'),
+                prioridad: n.style.getPropertyPriority('pointer-events'),
+            });
+            window.__tsDestapado = window.__tsDestapado || [];
+            window.__tsDestapado.push(guardar(arriba), guardar(el));
+
+            arriba.style.setProperty('pointer-events', 'none', 'important');
+            el.style.setProperty('pointer-events', 'auto', 'important');
+
+            const id = arriba.getAttribute('data-testid');
+            const c = (arriba.getAttribute('class') || '').trim().split(/\\s+/)[0];
+            return arriba.tagName.toLowerCase() +
+                   (id ? `[data-testid=${id}]` : (c ? `.${c}` : ''));
+        }
+    """
+
+    # Deja todo como estaba. Corre SIEMPRE (finally): dejar media pagina sin
+    # pointer-events seria rompersela al usuario, que mira esta misma ventana.
+    JS_DESTAPAR_DESHACER = """
+        () => {
+            const guardados = window.__tsDestapado || [];
+            for (const g of guardados.reverse()) {
+                if (g.valor) {
+                    g.nodo.style.setProperty('pointer-events', g.valor, g.prioridad);
+                } else {
+                    g.nodo.style.removeProperty('pointer-events');
+                }
+            }
+            window.__tsDestapado = [];
+            return guardados.length;
+        }
+    """
+
+    # Corre el elemento hacia abajo dentro del contenedor que scrollea, para
+    # sacarlo de atras de un header pegajoso. Es el "scrolleá un poco y
+    # volve a intentar" que al usuario le funciona a mano: scrollIntoView
+    # con block:'center' centra dentro del contenedor interno, y ese centro
+    # puede caer igual debajo del header (caja@1210,340 en el log).
+    JS_BAJAR_UN_POCO = """
+        (el, pixeles) => {
+            let cont = el.parentElement;
+            while (cont && cont !== document.body) {
+                const s = getComputedStyle(cont);
+                if ((s.overflowY === 'auto' || s.overflowY === 'scroll') &&
+                    cont.scrollHeight > cont.clientHeight) break;
+                cont = cont.parentElement;
+            }
+            const antes = el.getBoundingClientRect().top;
+            if (cont && cont !== document.body) cont.scrollTop -= pixeles;
+            else window.scrollBy(0, -pixeles);
+            return Math.round(el.getBoundingClientRect().top - antes);
         }
     """
 
@@ -338,12 +460,14 @@ class PlataformaBase(ABC):
         # caracteres y se comia justo el motivo, que va al final.
         return f"{cabeza} | call log: " + " ; ".join(m[:130] for m in motivos[-4:])
 
-    async def _diagnosticar(self, locator) -> tuple:
+    async def _diagnosticar(self, locator) -> Diagnostico:
         """Como esta el elemento que no se pudo clickear.
 
-        Devuelve (texto_para_el_log, despejado). `despejado` es True cuando
-        el elemento es visible y NADA lo tapa: es lo que habilita el
-        reintento forzado de clickear(), asi que no es solo para el log.
+        Ademas del texto para el log, contesta las dos preguntas que deciden
+        como sigue clickear(): si esta despejado (visible y sin nada encima,
+        se puede forzar) y si lo tapa un ancestro suyo (es decoracion, se
+        puede destapar). No son excluyentes en el codigo pero si en la
+        practica: si nada lo tapa, ningun ancestro lo esta tapando.
 
         Corre unicamente cuando el click ya fallo, asi que puede pagar unas
         consultas al DOM. Nunca puede tirar: un diagnostico que explota
@@ -352,10 +476,11 @@ class PlataformaBase(ABC):
         try:
             partes = [f"count={await locator.count()}"]
         except Exception as e:
-            return f"(no pude diagnosticar: {' '.join(str(e).split())[:80]})", False
+            return Diagnostico(
+                texto=f"(no pude diagnosticar: {' '.join(str(e).split())[:80]})")
 
         objetivo = locator.first
-        es_visible, propio = False, False
+        es_visible, propio, ancestro = False, False, False
         # Fabricas y no corrutinas ya creadas: si una falla, las que
         # quedaban sin await tirarian "coroutine was never awaited".
         for etiqueta, hacer in (
@@ -375,11 +500,15 @@ class PlataformaBase(ABC):
                          f"@{valor['x']:.0f},{valor['y']:.0f}")
             elif etiqueta == "encima" and isinstance(valor, dict):
                 propio = bool(valor.get("propio"))
+                ancestro = bool(valor.get("ancestro"))
                 valor = valor["desc"] + (
                     " (es el target o un hijo suyo)" if propio
-                    else " (NO es el target: lo esta tapando)")
+                    else " (NO es el target: lo esta tapando"
+                         + (", y es un ancestro suyo)" if ancestro else ")"))
             partes.append(f"{etiqueta}={valor}")
-        return ", ".join(partes), (es_visible and propio)
+        return Diagnostico(texto=", ".join(partes),
+                           despejado=(es_visible and propio),
+                           tapa_un_ancestro=(es_visible and ancestro))
 
     # Como se sube del texto del producto a su tarjeta/fila (XPATH_TARJETA),
     # y que la identifica: un atributo de la tarjeta misma, o de algun
@@ -464,16 +593,27 @@ class PlataformaBase(ABC):
         click. Playwright scrollea el elemento a la vista, algo le queda
         encima, y reintenta hasta agotar el timeout de 30s.
 
-        Tres defensas, en orden:
+        Las defensas, en orden. Las tres del medio son excluyentes: el
+        diagnostico del click fallado dice cual corresponde, y las tres
+        terminan en un click de VERDAD.
           1. Centrar el elemento en la pantalla (arriba esta el header,
              abajo la franja) y clickear normal, con timeout corto.
-          2. Si no entra Y el diagnostico prueba que NADA lo tapa, clickear
-             forzado. Saltea los chequeos de accionabilidad de Playwright
-             pero sigue siendo un evento de mouse de verdad en la posicion
-             del elemento, asi que es fiel. Solo se usa cuando esta
-             despejado: si algo tapa, forzar seria clickear a ciegas lo que
-             haya encima, que es justo lo que no se quiere.
-          3. Recien ahi, click por JS, que no mira nada. Es el plan C.
+          2. Si lo tapa un ANCESTRO suyo, destaparlo y reintentar. Un
+             ancestro no puede estar legitimamente por encima de su propio
+             hijo: es decoracion.
+          3. Si NADA lo tapa, clickear forzado. Saltea los chequeos de
+             accionabilidad de Playwright pero sigue siendo un evento de
+             mouse de verdad en la posicion del elemento, asi que es fiel.
+             Solo se usa cuando esta despejado: si algo tapa, forzar seria
+             clickear a ciegas lo que haya encima, que es justo lo que no se
+             quiere.
+          4. Si lo tapa algo que NO es ancestro (UI de verdad, pegajosa),
+             correrse y reintentar.
+          5. Recien ahi, click por JS, que no mira nada. Es el ultimo plan.
+
+        Del 2 al 4 el timeout es TIMEOUT_REINTENTO y no el de arriba: son
+        preguntas de "¿pasa el hit test ahora?", y con los 8 s de siempre un
+        click que no entra por ningun lado costaba casi un minuto.
 
         Se usa para TODOS los clicks (toggle, opciones del popup, boton de
         confirmar): cualquiera de ellos puede quedar tapado.
@@ -484,11 +624,23 @@ class PlataformaBase(ABC):
         que un resultado inesperado despues de un False todavia puede ser
         culpa del click. El forzado no tiene ese problema.
 
-        POR QUE EL PELDAÑO 2 (log del 2026-08-03): en PedidosYa el toggle
+        POR QUE EL PELDAÑO 2 (log del 2026-08-05): en Rappi el toggle
+        fallaba con "encima=ul[data-testid=menu-categories]", que es un
+        ANCESTRO del toggle: decoracion pintada por encima de su propio
+        hijo. Ahi se le sacan los clicks al ancestro, entra el click de
+        verdad, y se deja todo como estaba. Ver JS_DESTAPAR.
+
+        POR QUE EL PELDAÑO 3 (log del 2026-08-03): en PedidosYa el toggle
         fallaba con "element is not enabled" teniendo el camino libre —el
         <input> de Angular Material es cdk-visually-hidden y Playwright lo
         da por deshabilitado, pero el toggle anda—. Ahi el click forzado
         entra y ahorra los 8-10 s del timeout, sin caer en el JS.
+
+        POR QUE EL PELDAÑO 4: lo que tapa y NO es ancestro es UI de verdad
+        (el header pegajoso de categoria de Rappi, que a proposito no se
+        neutraliza). A eso no hay que desactivarlo sino correrse: se baja el
+        elemento dentro de su contenedor y se reintenta, que es lo que hace
+        el usuario a mano.
         """
         objetivo = locator.first
         await objetivo.evaluate(
@@ -501,24 +653,141 @@ class PlataformaBase(ABC):
             await objetivo.click(timeout=timeout)
             return True
         except Exception as e:
-            estado, despejado = await self._diagnosticar(objetivo)
+            diag = await self._diagnosticar(objetivo)
             motivo = self._motivo_del_click(e)
 
-        if despejado:
+        if diag.tapa_un_ancestro:
+            entro, detalle = await self._click_destapando(objetivo)
+            if entro:
+                log.info("%s: el click sobre %s entro despues de destapar %s",
+                         self.nombre, que, detalle)
+                return True
+            motivo += f" || destapando ({detalle})"
+
+        if diag.despejado:
             try:
                 await objetivo.click(timeout=timeout, force=True)
                 log.warning("%s: click normal sobre %s fallo con el camino "
                             "libre; entro forzado.\n    motivo: %s\n"
-                            "    estado: %s", self.nombre, que, motivo, estado)
+                            "    estado: %s", self.nombre, que, motivo,
+                            diag.texto)
                 return True
             except Exception as e2:
                 motivo += f" || forzado: {self._motivo_del_click(e2)}"
+        else:
+            entro, detalle = await self._click_corriendose(objetivo)
+            if entro:
+                log.info("%s: el click sobre %s entro despues de %s",
+                         self.nombre, que, detalle)
+                return True
+            motivo += f" || corriendose ({detalle})"
 
         log.warning("%s: click normal sobre %s fallo. Voy por JS.\n"
                     "    motivo: %s\n"
-                    "    estado: %s", self.nombre, que, motivo, estado)
+                    "    estado: %s", self.nombre, que, motivo, diag.texto)
         await self.clickear_por_js(objetivo, profundo=profundo, timeout=timeout)
         return False
+
+    # Cuantas capas de decoracion se destapan antes de rendirse. Son varias
+    # porque el log del 2026-08-05 mostro dos ancestros distintos tapando el
+    # mismo toggle en momentos distintos (el <ul> de las categorias y el
+    # <div> de una categoria): sacado el de arriba puede quedar el de abajo.
+    CAPAS_A_DESTAPAR = 3
+
+    # Los reintentos NO usan el timeout del click normal. El elemento ya esta
+    # localizado y lo unico que se esta preguntando es si el hit test pasa
+    # ahora: 2,5 s alcanzan de sobra. Con los 8 s de siempre, un click que no
+    # entra por ningun lado pasaba de costar 8 s a costar casi 50, y lo que
+    # el usuario reporto fue justamente que la app "se queda trabada".
+    TIMEOUT_REINTENTO = 2500
+
+    async def _click_destapando(self, objetivo) -> tuple[bool, str]:
+        """Le saca los clicks a los ancestros que tapan, clickea y restaura.
+
+        El click sigue siendo el NORMAL de Playwright, con todos sus
+        chequeos: si despues de destapar el que recibe el click sigue sin
+        ser nuestro elemento, falla igual y seguimos al peldaño que viene.
+        Destapar no puede hacer que se clickee otra cosa.
+        """
+        destapados = []
+        try:
+            for _ in range(self.CAPAS_A_DESTAPAR):
+                try:
+                    quien = await objetivo.evaluate(
+                        self.JS_DESTAPAR, timeout=self.TIMEOUT_REINTENTO)
+                except Exception as e:
+                    return False, f"no pude destapar: {_resumen(e)}"
+                if not quien:
+                    break
+                destapados.append(quien)
+
+                try:
+                    await objetivo.click(timeout=self.TIMEOUT_REINTENTO)
+                    return True, ", ".join(destapados)
+                except Exception:
+                    continue    # puede quedar otra capa abajo
+            return False, ", ".join(destapados) or "no habia nada que destapar"
+        finally:
+            # Pase lo que pase la pagina queda como estaba: el usuario mira
+            # esta misma ventana y la va a seguir usando a mano.
+            try:
+                await self.page.evaluate(self.JS_DESTAPAR_DESHACER)
+            except Exception as e:
+                log.warning("%s: no pude restaurar los pointer-events: %s",
+                            self.nombre, _resumen(e))
+
+    # Cuanto se corre el elemento cuando lo tapa algo pegajoso, y cuantas
+    # veces. 120 px alcanzan para pasar un header de categoria.
+    PIXELES_A_CORRER = 120
+    VECES_A_CORRERSE = 2
+
+    async def _click_corriendose(self, objetivo) -> tuple[bool, str]:
+        """Baja el elemento dentro de su contenedor y reintenta el click."""
+        for _ in range(self.VECES_A_CORRERSE):
+            try:
+                movido = await objetivo.evaluate(
+                    self.JS_BAJAR_UN_POCO, self.PIXELES_A_CORRER,
+                    timeout=self.TIMEOUT_REINTENTO)
+            except Exception as e:
+                return False, f"no pude scrollear: {_resumen(e)}"
+            if not movido:
+                return False, "el elemento no se movio (no hay a donde scrollear)"
+
+            await self.page.wait_for_timeout(300)
+            try:
+                await objetivo.click(timeout=self.TIMEOUT_REINTENTO)
+                return True, f"bajarlo {movido} px"
+            except Exception:
+                continue
+        return False, f"no entro ni corriendolo {self.VECES_A_CORRERSE} veces"
+
+    async def recargar_y_preparar(self, por_que: str = "",
+                                  asentar: int = 1500) -> bool:
+        """Recarga la pagina y la deja lista para volver a operar.
+
+        Es lo que al usuario le funciona a mano cuando el portal se pone
+        raro: recargar y reintentar. Rehace la preparacion del arranque
+        (asegurar_sesion cierra popups, espera el menu y reinyecta
+        neutralizar_estorbos, que no sobrevive a una navegacion) en vez de
+        dormir un rato fijo y esperar lo mejor.
+
+        Nunca tira: se llama en caminos de error, donde una excepcion aca
+        taparia el error de verdad. Devuelve si la pagina quedo lista.
+        """
+        try:
+            await self.page.reload(wait_until="domcontentloaded")
+            lista = await self.asegurar_sesion()
+        except Exception as e:
+            log.warning("%s: error recargando la pagina%s: %s", self.nombre,
+                        f" para {por_que}" if por_que else "", _resumen(e, 120))
+            return False
+
+        if not lista:
+            log.warning("%s: al recargar%s, la pagina no quedo lista",
+                        self.nombre, f" para {por_que}" if por_que else "")
+
+        await self.page.wait_for_timeout(asentar)
+        return lista
 
     async def _confirmar(self, nombre_remoto: str, esperado_disponible: bool,
                          asentar: int = 1500) -> bool:
@@ -535,17 +804,8 @@ class PlataformaBase(ABC):
         (asegurar_sesion: cierra popups y espera a que el menu exista) en
         vez de dormir y esperar lo mejor.
         """
-        await self.page.reload(wait_until="domcontentloaded")
-
-        try:
-            if not await self.asegurar_sesion():
-                log.warning("%s: al recargar para reconfirmar '%s', la pagina "
-                            "no quedo lista", self.nombre, nombre_remoto)
-        except Exception as e:
-            log.warning("%s: error preparando la pagina para reconfirmar '%s': %s",
-                        self.nombre, nombre_remoto, " ".join(str(e).split())[:120])
-
-        await self.page.wait_for_timeout(asentar)
+        await self.recargar_y_preparar(por_que=f"reconfirmar '{nombre_remoto}'",
+                                       asentar=asentar)
 
         estado = await self.leer_estado(nombre_remoto)
 

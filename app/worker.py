@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from playwright.async_api import async_playwright
+from sqlalchemy import or_
 
 from . import config
 from .carta import emparejar_n, resumen
@@ -69,6 +70,13 @@ def _carta_de_muestra() -> dict:
 
 
 INTERVALO_COLA = 2               # segundos entre chequeos de la cola
+
+# Cuanto espera una operacion que fallo antes de volver a intentar. No es
+# para descansar el portal: es para dejar pasar a las que estan atras. La
+# cola se ordena por creada_en, asi que sin esto la fallida gana el turno de
+# nuevo a los 2 s y con "Apagar todo" las otras 29 esperan a la unica que no
+# entra (log del 2026-08-05). Sigue teniendo sus max_intentos.
+ESPERA_ENTRE_INTENTOS = 30
 
 # Cuanto se espera antes de volver a intentar una plataforma deslogueada.
 # Reintentar cada 2 segundos no la va a reloguear (el login es a mano, a
@@ -287,7 +295,11 @@ class Worker:
                          if ahora < hasta]
 
             consulta = (db.query(Operacion)
-                        .filter(Operacion.estado == Operacion.PENDIENTE))
+                        .filter(Operacion.estado == Operacion.PENDIENTE,
+                                # Una que fallo recien espera su turno al
+                                # final de la fila (ver ESPERA_ENTRE_INTENTOS).
+                                or_(Operacion.reintentar_en.is_(None),
+                                    Operacion.reintentar_en <= ahora)))
             if en_espera:
                 consulta = consulta.filter(~Operacion.plataforma.in_(en_espera))
 
@@ -320,6 +332,29 @@ class Worker:
                 op.plataforma, op.accion, nombre_remoto
             )
 
+            # El usuario pudo haber cancelado mientras esto corria: el intento
+            # se lleva un rato largo y la fila la toco otra sesion de la base,
+            # asi que hay que RELEERLA para enterarse.
+            #
+            # Un intento que ya esta en el navegador no se corta a la mitad
+            # (dejaria el portal con un dialogo abierto a medio camino), pero
+            # no hay intento 2 ni 3: es lo acordado para el boton de cancelar.
+            db.refresh(op)
+            if op.estado == Operacion.CANCELADA and not exito:
+                log.info("op#%s la cancelaste mientras corria: no la reintento",
+                         op.id)
+                op.detalle = detalle or "cancelada mientras corria"
+                op.finalizada_en = datetime.now()
+                db.commit()
+                return
+
+            # Si llego a entrar antes de la cancelacion, se anota igual: el
+            # cambio ocurrio en el portal y esconderlo dejaria la pantalla
+            # mintiendo (regla 8, del otro lado: lo que SI vimos se dice).
+            if op.estado == Operacion.CANCELADA:
+                log.info("op#%s la cancelaste, pero el cambio ya habia entrado "
+                         "en el portal: lo dejo anotado", op.id)
+
             # Sesion caida: la operacion NO se gasta un intento ni termina en
             # error. Antes se moria despues de 3 reintentos de 2 segundos, y
             # cuando el usuario terminaba de loguearse a mano ya no quedaba
@@ -347,7 +382,9 @@ class Worker:
                 op.detalle = detalle
                 op.finalizada_en = datetime.now()
                 self._marcar_fallo(db, op.producto_id, op.plataforma, detalle)
-                log.warning("op#%s cancelada: %s", op.id, detalle)
+                # "termina aca" y no "cancelada": cancelada es lo que saca el
+                # usuario desde la pantalla, y son cosas distintas.
+                log.warning("op#%s termina aca: %s", op.id, detalle)
                 db.commit()
                 return
 
@@ -375,6 +412,10 @@ class Worker:
             elif op.intentos < max_intentos:
                 op.estado = Operacion.PENDIENTE   # reintenta despues
                 op.detalle = detalle
+                # Al final de la fila, no adelante: las que estan atras
+                # pasan primero (ver ESPERA_ENTRE_INTENTOS).
+                op.reintentar_en = (datetime.now()
+                                    + timedelta(seconds=ESPERA_ENTRE_INTENTOS))
             else:
                 op.estado = Operacion.ERROR
                 op.detalle = detalle
@@ -1313,7 +1354,11 @@ class Worker:
                              Operacion.creada_en >= op.creada_en)
                      .first())
         if posterior is not None:
-            return f"despues se pidio otra cosa (op#{posterior.id})"
+            # Una cancelacion posterior tambien manda: el usuario dijo que no
+            # queria eso, y traerlo de vuelta solo seria pasarle por arriba.
+            que = ("la cancelaste" if posterior.estado == Operacion.CANCELADA
+                   else "se pidio otra cosa")
+            return f"despues {que} (op#{posterior.id})"
 
         est = next((e for e in producto.estados
                     if e.plataforma == op.plataforma), None)

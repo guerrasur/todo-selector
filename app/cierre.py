@@ -114,7 +114,7 @@ def planificar(db, plataforma: str, accion: str,
         (op.producto_id, op.plataforma)
         for op in db.query(Operacion).filter(
             Operacion.plataforma == plataforma,
-            Operacion.estado.in_([Operacion.PENDIENTE, Operacion.EN_CURSO]),
+            Operacion.estado.in_(Operacion.VIVAS),
         )
     }
 

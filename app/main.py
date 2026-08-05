@@ -12,13 +12,15 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from . import catalogo, cierre, config
-from .database import init_db, get_db
+from .database import init_db, get_db, SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
 from .seed import sembrar
 from .worker import worker
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+log = logging.getLogger("app")
 
 
 # La pantalla se repinta sola cada 3 segundos y en cada vuelta pide cuatro
@@ -96,10 +98,41 @@ def _leer_version() -> str:
 VERSION = _leer_version()
 
 
+def _destrabar_operaciones_colgadas():
+    """Las que quedaron EN_CURSO de una corrida anterior vuelven a la cola.
+
+    EN_CURSO significa "la esta ejecutando el worker ahora". Si la app se
+    cerro (o se colgo) con una adentro, nadie la termina nunca: quedaba
+    contando en el badge para siempre, el producto quedaba en "apagando…"
+    eterno y encima bloqueaba el reencolado, porque tanto
+    `_motivo_para_no_reintentar` como `cierre.planificar` saltean lo que
+    tiene un EstadoItem en curso.
+
+    Vuelven a PENDIENTE y no a ERROR: no sabemos si el cambio entro o no, y
+    la operacion sigue confirmando releyendo, asi que si ya estaba hecho
+    termina en "ya estaba apagado" sin tocar nada.
+    """
+    db = SessionLocal()
+    try:
+        colgadas = (db.query(Operacion)
+                    .filter(Operacion.estado == Operacion.EN_CURSO)
+                    .all())
+        for op in colgadas:
+            op.estado = Operacion.PENDIENTE
+            op.detalle = "la app se cerro mientras corria: vuelve a la cola"
+        if colgadas:
+            db.commit()
+            log.info("%s operacion(es) habian quedado a medias de la corrida "
+                     "anterior: vuelven a la cola", len(colgadas))
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 async def arrancar():
     silenciar_ruido_de_refresco()
     init_db()
+    _destrabar_operaciones_colgadas()
     sembrar()
     config.recargar()
     await worker.iniciar(modo_simulado=MODO_SIMULADO)
@@ -218,8 +251,7 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
                     .filter(Operacion.producto_id == data.producto_id,
                             Operacion.plataforma == plat,
                             Operacion.accion == data.accion,
-                            Operacion.estado.in_([Operacion.PENDIENTE,
-                                                  Operacion.EN_CURSO]))
+                            Operacion.estado.in_(Operacion.VIVAS))
                     .first())
         if repetida is not None:
             salteadas.append({"plataforma": plat, "motivo": "ya estaba encolada"})
@@ -238,6 +270,98 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
 
     db.commit()
     return {"encoladas": creadas, "salteadas": salteadas}
+
+
+ETIQUETA_ACCION = {
+    "apagar_hoy": "apagar hoy",
+    "apagar_indef": "apagar indefinido",
+    "prender": "prender",
+}
+
+
+@app.get("/api/cola")
+def ver_cola(db: Session = Depends(get_db)):
+    """Lo que todavia tiene algo que hacer, en el orden en que se va a hacer.
+
+    Hasta ahora la cola era un numero en el header y nada mas: si se
+    encadenaban acciones que no se querian, no habia forma de ver cuales
+    eran ni de sacarlas. `/api/historial` es otra cosa (lo ya terminado).
+    """
+    ops = (db.query(Operacion)
+           .filter(Operacion.estado.in_(Operacion.VIVAS))
+           .order_by(Operacion.creada_en)
+           .all())
+
+    return {"operaciones": [
+        {
+            "id": op.id,
+            "producto_id": op.producto_id,
+            "producto": op.producto.nombre if op.producto else "(borrado)",
+            "plataforma": op.plataforma,
+            "accion": op.accion,
+            "etiqueta": ETIQUETA_ACCION.get(op.accion, op.accion),
+            "en_curso": op.estado == Operacion.EN_CURSO,
+            "intentos": op.intentos or 0,
+            "detalle": op.detalle or "",
+            "creada_en": op.creada_en.isoformat(timespec="seconds")
+                         if op.creada_en else None,
+        }
+        for op in ops
+    ]}
+
+
+class CancelarIn(BaseModel):
+    ids: list[int] = []
+    todo: bool = False
+
+
+@app.post("/api/cancelar")
+def cancelar(data: CancelarIn, db: Session = Depends(get_db)):
+    """Saca de la cola lo que el usuario no queria que pasara.
+
+    La que ya esta EN_CURSO se marca igual: el intento que esta en el
+    navegador termina (cortar un click a la mitad deja el portal con un
+    dialogo abierto), pero el worker relee la fila al terminar y no hace el
+    intento 2 ni el 3. Ver worker._procesar_pendientes.
+    """
+    if not data.todo and not data.ids:
+        raise HTTPException(400, "no me dijiste que cancelar")
+
+    consulta = (db.query(Operacion)
+                .filter(Operacion.estado.in_(Operacion.VIVAS)))
+    if not data.todo:
+        consulta = consulta.filter(Operacion.id.in_(data.ids))
+
+    ahora = datetime.now()
+    canceladas = []
+    for op in consulta.all():
+        estaba_en_curso = op.estado == Operacion.EN_CURSO
+        op.estado = Operacion.CANCELADA
+        op.finalizada_en = ahora
+        op.detalle = "la cancelaste desde la pantalla"
+
+        # El EstadoItem quedo en APAGANDO/PRENDIENDO cuando se encolo
+        # (/api/accion). Si se cancela, eso no puede quedar parpadeando para
+        # siempre — pero tampoco podemos afirmar como quedo el producto:
+        # nadie miro el portal. DESCONOCIDO es lo unico honesto, y la lectura
+        # siguiente lo resuelve (regla 8).
+        est = (db.query(EstadoItem)
+               .filter_by(producto_id=op.producto_id, plataforma=op.plataforma)
+               .first())
+        if est is not None and est.estado in EstadoItem.EN_CURSO:
+            # Salvo que siga corriendo: ahi el estado transitorio es cierto
+            # hasta que el worker termine el intento que ya arranco.
+            if not estaba_en_curso:
+                est.estado = EstadoItem.DESCONOCIDO
+                est.detalle = "cancelada antes de tocar el portal"
+
+        canceladas.append(op.id)
+
+    db.commit()
+    if canceladas:
+        log.info("Canceladas %s operacion(es) de la cola: %s",
+                 len(canceladas), ", ".join(f"op#{i}" for i in canceladas))
+    return {"canceladas": canceladas}
 
 
 class MasivoIn(BaseModel):
@@ -368,8 +492,7 @@ def alertas(db: Session = Depends(get_db)):
 @app.get("/api/estado-sistema")
 def estado_sistema(db: Session = Depends(get_db)):
     pendientes = (db.query(Operacion)
-                  .filter(Operacion.estado.in_([Operacion.PENDIENTE,
-                                                Operacion.EN_CURSO]))
+                  .filter(Operacion.estado.in_(Operacion.VIVAS))
                   .count())
     # Lo que necesita la pantalla para saber si esto es un primer arranque:
     # sin sucursal no hay a donde entrar, y sin catalogo no hay nada que
