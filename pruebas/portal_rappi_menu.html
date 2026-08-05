@@ -126,6 +126,30 @@
     content: ''; position: absolute; inset: 0; z-index: 40;
   }
 
+  /* ---- ?tapa=muchos: MAS capas decorativas que el limite viejo ----
+     El log del 2026-08-05 destapo tres ancestros (ul[data-testid=
+     menu-categories], div.sc-izEbhJ, div.sc-izEbhJ) y el toggle seguia
+     tapado: el limite de 3 era un numero inventado. Estas capas son cinco
+     en total contando las dos de arriba, asi que destapando de a una con
+     tope de 3 el click NO entra, y destapandolas todas de una si. */
+  .capa { position: relative; }
+  .capa::before {
+    content: ''; position: absolute; inset: 0; z-index: 41;
+  }
+
+  /* ---- ?tapa=recorte: el toggle NO aparece en su propia pila ----
+     No lo tapa nada: esta RECORTADO, asi que el punto que Playwright
+     clickea (su centro) no le pertenece y contesta el primer ancestro que
+     si es hit-testable. Hasta el 2026-08-05 eso se leia igual que "lo tapa
+     un ancestro" y mandaba a destapar capas para siempre, que es
+     justamente lo que no arregla este caso.
+
+     clip-path y no overflow a proposito: no genera contenedor scrolleable,
+     asi que el scrollIntoView de clickear() no lo puede deshacer, y no
+     cambia la caja del elemento — la posicion del click sigue siendo la
+     misma. Es el caso "no hay nada que destapar ni a donde correrse". */
+  .recortado { clip-path: inset(0 100% 0 0); }
+
   /* La perilla del switch: en el portal real el handler vive ACA ADENTRO,
      no en el <label>. Tiene que cubrir el label entero para que un click de
      verdad en el centro le pegue a ella. */
@@ -150,9 +174,17 @@
 //                  suyo, y el popup se abre solo con pointerdown sobre la
 //                  perilla de adentro del <label>. Implica ?dialogo=portal,
 //                  que es el dialogo que tiene el portal de verdad.
+// ?tapa=muchos    igual que ancestro pero con MAS capas decorativas que el
+//                 limite de 3 que tenia el destapado viejo.
+// ?tapa=recorte   el toggle no aparece en su propia pila: no lo tapa nada,
+//                 esta recortado y su centro no le pertenece.
 const params = new URLSearchParams(location.search);
 const CON_GAP = params.get("gap") !== "no";
-const TAPA_ANCESTRO = params.get("tapa") === "ancestro";
+const TAPA = params.get("tapa") || "";
+const TAPA_MUCHOS = TAPA === "muchos";
+const TAPA_RECORTE = TAPA === "recorte";
+// Los tres arman la misma jerarquia de ancestros del portal real.
+const TAPA_ANCESTRO = TAPA === "ancestro" || TAPA_MUCHOS || TAPA_RECORTE;
 const DIALOGO_PORTAL = params.get("dialogo") === "portal" || TAPA_ANCESTRO;
 if (!CON_GAP) {
   document.querySelector('[data-testid^="menu-categories-hoverable-gap"]').remove();
@@ -193,7 +225,19 @@ function contenedor() {
   li.appendChild(cuerpo);
   ul.appendChild(li);
   lista.appendChild(ul);
-  return cuerpo;
+  if (!TAPA_MUCHOS) return cuerpo;
+
+  // Tres capas mas, cada una con su propio pseudo-elemento por encima. Con
+  // el <ul> y .cat-cuerpo son cinco ancestros tapando el mismo toggle: mas
+  // que las 3 que el destapado viejo podia sacar.
+  let dentro = cuerpo;
+  for (let i = 0; i < 3; i++) {
+    const capa = document.createElement("div");
+    capa.className = "capa";
+    dentro.appendChild(capa);
+    dentro = capa;
+  }
+  return dentro;
 }
 
 function pintar() {
@@ -265,7 +309,16 @@ function pintar() {
     } else {
       label.addEventListener("click", () => togglear(pid, nombre));
     }
-    tarjeta.appendChild(label);
+    if (TAPA_RECORTE) {
+      // El toggle queda recortado: se sigue midiendo igual (clip-path no
+      // cambia la caja) pero su centro ya no le pertenece en el hit test.
+      const recorte = document.createElement("div");
+      recorte.className = "recortado";
+      recorte.appendChild(label);
+      tarjeta.appendChild(recorte);
+    } else {
+      tarjeta.appendChild(label);
+    }
 
     lista.appendChild(tarjeta);
   });

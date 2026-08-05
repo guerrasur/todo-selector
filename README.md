@@ -849,6 +849,23 @@ carta entera hay que recorrerlas (ver el punto 0).
 
       Cubierto por `pruebas/probar_rappi_menu.py` (escenario F, con la
       réplica `?tapa=ancestro`) y `pruebas/probar_estados.py`.
+
+      **Seguía fallando, y el log del 2026-08-05 (segunda tanda) dijo dónde.**
+      El destapado del punto 1 gastaba sus 3 capas
+      (`ul[data-testid=menu-categories]`, `div.sc-izEbhJ`, `div.sc-izEbhJ`)
+      con el toggle **todavía tapado**: el tope de 3 era un número inventado.
+      Arreglado con `elementsFromPoint` (plural), que trae la pila entera de
+      una llamada y permite neutralizar todos los ancestros de una pasada, sin
+      límite. Con la pila, además, se puede contestar lo que antes no se
+      podía: **si el target aparece en su propia pila**. Si no aparece, no lo
+      tapa nadie —lo recorta un `overflow`, o tiene `pointer-events:none`— y
+      destapar ancestros no lo arregla nunca. Los dos casos se veían idénticos
+      en el log y tienen arreglos opuestos. También se corrigió que
+      «corriendose» corría **después** de restaurar el destapado, o sea contra
+      la pila entera de nuevo: ahora los peldaños de forzar y correrse van
+      adentro del destapado y contra un diagnóstico nuevo.
+      Escenarios G (`?tapa=muchos`) y H (`?tapa=recorte`) de
+      `pruebas/probar_rappi_menu.py`, los dos rojos con el código anterior.
 - [x] **Poder cancelar lo que está en la cola.** Hecho (2026-08-05). El badge
       de "N en cola" abre un panel con lo que falta hacer, en orden, con una
       ✕ por operación y "Cancelar todo". La que **ya está corriendo** no se
@@ -858,6 +875,43 @@ carta entera hay que recorrerlas (ver el punto 0).
       el portal (regla 8). De paso, las operaciones que quedaban `EN_CURSO`
       al cerrarse la app vuelven a la cola al arrancar, en vez de quedar
       colgadas para siempre contando en el badge.
+- [ ] **Confirmar en vivo cuál es el caso de Rappi Turbo.** ← EMPEZÁ POR ACÁ
+      El arreglo del 2026-08-05 (segunda tanda) dejó la escalera de clicks
+      aguantando más y el diagnóstico sin ambigüedad, pero **no está probado
+      contra el portal real**: el usuario reportó que «por ahora la app anda»,
+      así que la falla es intermitente y no se pudo reproducir en vivo.
+
+      El paso que lo cierra, y que no hace falta esperar a que falle:
+
+      ```
+      GET /api/diagnostico?plataforma=rappi&nombre=<uno que esté prendido>
+      ```
+
+      (`rappi` es Turbo; la segunda tienda es `rappi_comun`. El `nombre` es el
+      alias remoto, tal cual figura en el portal.)
+
+      Ahora trae `inspeccion.toggle` (`base.por_que_no_entra()`): la pila del
+      hit test en el centro del toggle, si el toggle **aparece en su propia
+      pila**, la cadena de ancestros con `pointer-events` / `position` /
+      `z-index` / `overflow` / `transform` computados, y si algo lo recorta.
+      Con esa salida se sabe de una cuál de los tres casos es:
+
+      | Qué dice la salida | Qué significa | Dónde se arregla |
+      | --- | --- | --- |
+      | `aparece_en_su_pila: false`, `recortado_por: <algo>` | no lo tapa nada, lo recortan | hay que correr el scroll del contenedor, no destapar |
+      | `aparece_en_su_pila: false`, `recortado_por: null` | `pointer-events` en la cadena | mirar `ancestros[].pointer_events` |
+      | `aparece_en_su_pila: true` + varios en `pila_en_su_centro` | lo tapan de verdad | ya lo cubre el destapado |
+
+      Y si vuelve a fallar apagando, el log ahora trae dos líneas que antes no
+      existían: la pila **después** de destapar, y `opciones en el DOM: N -> M`
+      con la línea de base de antes del click (`3 -> 3` = el popup no se abrió,
+      el problema es el click; `0 -> 3` = se abrió y el problema es otro).
+
+      **Lo que se decidió NO hacer, a propósito:** cortar en el intento 1
+      cuando el diagnóstico prueba que el click no llegó. Ahorraría ~75 s por
+      producto, pero la app hoy anda y puede ser justamente porque el intento
+      2 o el 3 entra: cortar convertiría un éxito lento en una falla rápida.
+      Retomarlo **solo** cuando el volcado de arriba diga cuál es el caso.
 - [ ] **Rediseñar la estética de la aplicación.** Pedido del usuario
       (2026-07-30), para más adelante: **recién cuando lo funcional esté
       terminado**. No tocar esto todavía.

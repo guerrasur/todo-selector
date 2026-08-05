@@ -255,7 +255,17 @@ class Rappi(PlataformaBase):
         # De paso resuelve el TODO-SELECTOR de _tarjeta(): con esto vemos
         # por fin el HTML completo de la tarjeta de Rappi.
         await self.ir_al_menu()
-        return await self._html_de(self._tarjeta(nombre_remoto))
+        tarjeta = self._tarjeta(nombre_remoto)
+        salida = await self._html_de(tarjeta)
+        # Y el toggle aparte, que es el que no se deja clickear. El HTML de
+        # la tarjeta solo no alcanza: lo que decide si el click entra no esta
+        # en el HTML sino en los estilos computados de la cadena y en quien
+        # gana el hit test. Con esto se contesta de una cual de los tres
+        # casos es (lo tapan ancestros / lo recorta un overflow / no lo tapa
+        # nada) sin tener que provocar el error.
+        salida["toggle"] = await self.por_que_no_entra(
+            self._toggle_clickeable(tarjeta))
+        return salida
 
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
         await self.ir_al_menu()
@@ -407,6 +417,14 @@ class Rappi(PlataformaBase):
         await self.cerrar_dialogo()
 
         tarjeta = self._tarjeta(nombre_remoto)
+        # Cuantas opciones habia ANTES de tocar nada. Sin esta linea de base,
+        # el "opciones en el DOM: 3" de despues no distingue dos casos con
+        # arreglos opuestos: que el popup se haya abierto y Playwright no lo
+        # vea (floating-ui deja visibility:hidden hasta que posiciona), o que
+        # haya una plantilla escondida que esta siempre y el popup no se
+        # abrio nunca. "3 -> 3" es lo segundo; "0 -> 3" es lo primero.
+        opciones_antes = await self._contar_opciones()
+
         # profundo=True (regla 6, y el log del 2026-08-05 lo confirmo): el
         # handler que abre el popup de "hasta cuando" vive ADENTRO del
         # <label>, y los eventos suben pero no bajan. Con el click por JS
@@ -429,7 +447,8 @@ class Rappi(PlataformaBase):
                       "Lo que hay abierto dice: %s. %s", opcion,
                       self.opciones_vistas or "(ninguna)",
                       await self.texto_overlay() or "(nada)",
-                      await self._por_que_no_hubo_dialogo(tarjeta, click_real))
+                      await self._por_que_no_hubo_dialogo(
+                          tarjeta, click_real, opciones_antes))
             await self.cerrar_dialogo()
             # El intento siguiente del worker viene a los 2 s: sin esto lo
             # hace contra el MISMO DOM que ya fallo, que es lo que convertia
@@ -456,7 +475,19 @@ class Rappi(PlataformaBase):
             await self.cerrar_dialogo()
         return ok
 
-    async def _por_que_no_hubo_dialogo(self, tarjeta, click_real: bool) -> str:
+    async def _contar_opciones(self):
+        """Opciones del dialogo en el DOM, SIN filtrar por visibilidad.
+
+        Devuelve "?" si no se pudo contar: un diagnostico que no pudo mirar
+        no puede afirmar que habia cero (regla 8).
+        """
+        try:
+            return await self.page.locator(self.SELECTOR_OPCION).count()
+        except Exception:
+            return "?"
+
+    async def _por_que_no_hubo_dialogo(self, tarjeta, click_real: bool,
+                                       opciones_antes=None) -> str:
         """Diagnostico para cuando el popup de disponibilidad no aparecio.
 
         "Opciones que vi: (ninguna). Lo que hay abierto dice: (nada)" no
@@ -468,13 +499,21 @@ class Rappi(PlataformaBase):
         partes = ["el click sobre el toggle "
                   + ("fue real" if click_real else "tuvo que ir por JS")]
 
-        # Opciones en el DOM SIN filtrar por visibilidad: si hay y no se ven,
-        # el popup se abrio y el problema es otro.
-        try:
-            en_el_dom = await self.page.locator(self.SELECTOR_OPCION).count()
-        except Exception:
-            en_el_dom = "?"
-        partes.append(f"opciones en el DOM (visibles o no): {en_el_dom}")
+        # Opciones en el DOM SIN filtrar por visibilidad, contra la linea de
+        # base de antes del click. Es la medicion que decide donde esta el
+        # problema: si el numero NO cambio, el popup no se abrio y hay que
+        # mirar el click; si subio, el popup SI se abrio y lo que falla es
+        # verlo (o el texto de las opciones), que se arregla en otro lado.
+        en_el_dom = await self._contar_opciones()
+        cambio = ""
+        if isinstance(opciones_antes, int) and isinstance(en_el_dom, int):
+            cambio = ("  <- no cambio: el popup no se abrio, mira el click"
+                      if en_el_dom == opciones_antes
+                      else "  <- subio: el popup SI se abrio, el click no es "
+                           "el problema")
+        partes.append(f"opciones en el DOM (visibles o no): "
+                      f"{opciones_antes if opciones_antes is not None else '?'}"
+                      f" -> {en_el_dom}{cambio}")
 
         # Si el toggle no se movio, el portal ni se entero del click.
         try:
