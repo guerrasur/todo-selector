@@ -144,6 +144,13 @@ class Operacion(Base):
     EN_CURSO = "en_curso"
     OK = "ok"
     ERROR = "error"
+    # La saco el usuario de la cola a mano. NO es un error: no se reintenta
+    # sola, no cuenta como fallo del producto y no manda a mirar el portal.
+    CANCELADA = "cancelada"
+
+    # Las que todavia tienen algo que hacer. Es la cola de verdad, y lo que
+    # cuenta el badge de la pantalla.
+    VIVAS = (PENDIENTE, EN_CURSO)
 
     id = Column(Integer, primary_key=True)
     producto_id = Column(Integer, ForeignKey("productos.id"), nullable=False)
@@ -170,6 +177,15 @@ class Operacion(Base):
     # NULL en las filas que ya existian: se leen como 0 / False.
     reintentada = Column(Boolean, default=False)
     auto_reintentos = Column(Integer, default=0)
+
+    # No tomar esta operacion antes de esta hora. NULL = ya mismo.
+    #
+    # Es lo que evita que una operacion que falla frene a las demas: la cola
+    # se ordena por creada_en, asi que una fallida que vuelve a PENDIENTE
+    # gana el turno otra vez a los 2 segundos y las 29 de atras esperan a la
+    # que no entra (log del 2026-08-05). Con esto sigue teniendo sus 3
+    # intentos, pero al final de la fila.
+    reintentar_en = Column(DateTime, nullable=True)
 
     creada_en = Column(DateTime, default=datetime.now)
     finalizada_en = Column(DateTime, nullable=True)

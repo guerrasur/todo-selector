@@ -10,6 +10,13 @@ en vivo contra los dos portales el 2026-07-27. Queda un `TODO-SELECTOR` en
 `plataformas/rappi.py`: el HTML completo de la tarjeta y la pantalla de sesión
 expirada.
 
+**El apagado de Rappi Turbo y la cola trabada** (2026-08-05). El portal
+cambió otra vez: lo que tapa el toggle ahora es un ancestro suyo, el label
+trae `for="switch-hidden-input"` (repetido en toda la carta) y el popup de
+"hasta cuándo" solo abre con `pointerdown` adentro del `<label>`. Ver las
+reglas 6, 13, 14 y 15, y `pruebas/probar_rappi_menu.py` escenario F. La cola
+ahora **se ve y se cancela**: el badge de «N en cola» abre un panel.
+
 El catálogo ya no se mantiene a mano: la pantalla **Carta** lee los dos
 portales y el usuario vincula o separa desde ahí (`app/catalogo.py`). En
 cuanto toca algo, `seed.py` deja de pisar los alias.
@@ -134,7 +141,39 @@ columna sigue sin estar cubierto.
 
 6. **Un click por JS sobre un custom element puede no hacer nada.** Si el
    listener vive en un hijo, el evento no le llega: los eventos suben, no
-   bajan. Para eso está `clickear(..., profundo=True)`.
+   bajan. Para eso está `clickear(..., profundo=True)`. Y `.click()` solo
+   dispara `click`: un handler atado a `pointerdown` (floating-ui) no se
+   entera. Por eso el fallback manda la secuencia entera. Esto costó dos
+   días de "Rappi prende pero no apaga" (2026-08-05): el mismo click servía
+   para prender —lo dispara el `change` del `<input>`— y no abría nunca el
+   popup de "hasta cuándo".
+
+13. **Si lo que tapa el click es un ANCESTRO del target, es decoración**
+    (2026-08-05, `base.JS_DESTAPAR`). Que un ancestro gane
+    `elementFromPoint` sobre el centro de su propio descendiente solo puede
+    ser un pseudo-elemento o un fondo pintado por encima: UI de verdad
+    "arriba" estaría adentro del target. A eso se le sacan los clicks y se
+    restauran (`pointer-events` se HEREDA: hay que volver a habilitar el
+    target). Lo que tapa y **no** es ancestro es UI de verdad —el header
+    pegajoso de categoría de Rappi— y no se toca: ahí hay que correrse.
+    Destapar nunca clickea otra cosa: Playwright sigue verificando quién
+    recibe el click.
+
+14. **Una operación que falla no puede quedarse con el turno.** La cola se
+    ordena por `creada_en`, así que la que volvía a `PENDIENTE` ganaba de
+    nuevo a los 2 s y con «Apagar todo» las otras 29 esperaban a la única
+    que no entraba. Vuelve con `Operacion.reintentar_en` (30 s): conserva
+    sus `max_intentos`, pero al final de la fila. Y **antes de reintentar
+    hay que recargar**: los 3 intentos contra el mismo DOM roto son uno
+    solo repetido.
+
+15. **La cola se puede cancelar** (2026-08-05, `/api/cancelar`,
+    `Operacion.CANCELADA`). La que **ya está corriendo** no se corta a la
+    mitad —dejaría el portal con un diálogo abierto—: el worker relee la
+    fila al terminar el intento y no hace el 2 ni el 3. Un producto
+    cancelado antes de tocar el portal queda en `DESCONOCIDO`, no en un
+    estado inventado (regla 8); si el cambio llegó a entrar, se anota, que
+    esconder lo que sí vimos es el mismo error del otro lado.
 
 5. **Probá con modo simulado primero** (`STOCKSWITCH_SIMULADO=1`) si tocás
    worker o API, para no depender del navegador.

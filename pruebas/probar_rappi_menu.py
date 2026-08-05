@@ -243,6 +243,68 @@ async def el_dialogo_de_floating_ui(navegador):
     await pagina.close()
 
 
+async def lo_tapa_un_ancestro(navegador):
+    print("\n== F) Lo que tapa el toggle es un ANCESTRO suyo (2026-08-05) ==")
+    plat, pagina = await abrir_plataforma(navegador, "?tapa=ancestro")
+    revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja el menu listo")
+
+    # Defensa 1: el ::after del <ul>, que si esta en SELECTORES_ESTORBO.
+    sin_clicks = await pagina.evaluate(
+        """() => getComputedStyle(
+               document.querySelector('ul[data-testid="menu-categories"]'),
+               '::after').pointerEvents""")
+    revisar(sin_clicks == "none",
+            "el ::after del <ul> de categorias ya no recibe clicks")
+
+    # Defensa 2: .cat-cuerpo::before NO esta en ninguna lista, asi que este
+    # lo tiene que resolver el peldaño de destapar de clickear(). Es el que
+    # importa: cuando el portal cambie el DOM otra vez, es el unico que
+    # sigue sirviendo.
+    quien_tapa = await pagina.evaluate(
+        """() => {
+            const l = document.querySelector('[data-testid$="582222-availability-switch-control"]');
+            const r = l.getBoundingClientRect();
+            const a = document.elementFromPoint(r.left + r.width / 2,
+                                                r.top + r.height / 2);
+            return a.className + '|' + a.contains(l);
+        }""")
+    revisar(quien_tapa == "cat-cuerpo|true",
+            f"al toggle lo tapa un ancestro suyo ({quien_tapa})")
+
+    tarjeta = plat._tarjeta("Villavicencio sin gas 500 ml")
+    entro = await plat.clickear(plat._toggle_clickeable(tarjeta), que="toggle",
+                                profundo=True)
+    revisar(entro, "el click entra igual, destapando, SIN pasar por el JS")
+
+    # Y la pagina queda como estaba: el usuario mira esta misma ventana.
+    quedo = await pagina.evaluate(
+        """() => [document.querySelector('.cat-cuerpo').style.pointerEvents,
+                  (window.__tsDestapado || []).length]""")
+    revisar(quedo == ["", 0], f"y los pointer-events quedan restaurados ({quedo})")
+
+    await plat.cerrar_dialogo()
+
+    # Lo de fondo: apagar() ahora abre el popup. El handler vive en la
+    # perilla y escucha pointerdown, que es lo que el .click() sobre el
+    # <label> no despertaba nunca.
+    nombre = "Villavicencio con gas 500 ml"
+    revisar(await plat.apagar(nombre, por_hoy=True),
+            "apagar() abre el popup y confirma el cambio")
+    estado = await plat.leer_estado(nombre)
+    revisar(estado is not None and not estado.disponible,
+            "quedo apagado de verdad")
+
+    # El for="switch-hidden-input" esta repetido en toda la carta: si algo
+    # activa el label por la via nativa, el que se apaga es el PRIMERO.
+    otro = await plat.leer_estado("Gaseosa cola 500 ml")
+    revisar(otro is not None and otro.disponible,
+            "y no se toco el switch de otro producto (for= repetido)")
+
+    revisar(await plat.prender(nombre), "prender() lo vuelve a prender")
+
+    await pagina.close()
+
+
 async def main():
     servidor = servir()
     try:
@@ -253,6 +315,7 @@ async def main():
             await el_fantasma_del_radio(navegador)
             await nombres_ambiguos(navegador)
             await el_dialogo_de_floating_ui(navegador)
+            await lo_tapa_un_ancestro(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()

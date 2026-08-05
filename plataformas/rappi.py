@@ -93,7 +93,23 @@ class Rappi(PlataformaBase):
     # A proposito NO entra aca el "collapsible-panel-header", que tambien
     # aparecio en el log: ese es un elemento de verdad (role="button"), y
     # desactivarlo seria romper la UI del portal.
-    SELECTORES_ESTORBO = ('[data-testid^="menu-categories-hoverable-gap"]',)
+    #
+    # CONFIRMADO POR LOG (2026-08-05): la franja dejo de ser la que tapa y
+    # aparecieron el <ul> de las categorias y el <div> de una categoria, que
+    # son ANCESTROS del toggle. A un ancestro no se le pueden sacar los
+    # clicks de una (pointer-events se hereda y el toggle se quedaria sin
+    # ellos), pero si a sus pseudo-elementos, que es de donde sale el
+    # estorbo: ::before/::after se reportan como el elemento que los
+    # origina, que es justo lo que hacia que elementFromPoint contestara el
+    # <ul>. Esto es la defensa barata; la general es el peldaño de
+    # "destapar" de base.clickear().
+    SELECTORES_ESTORBO = (
+        '[data-testid^="menu-categories-hoverable-gap"]',
+        'ul[data-testid="menu-categories"]::before',
+        'ul[data-testid="menu-categories"]::after',
+        'div[data-testid="menu-category"]::before',
+        'div[data-testid="menu-category"]::after',
+    )
 
     # Del nombre del producto se sube al primer ancestro que TAMBIEN tenga
     # el toggle: esa es la tarjeta. El data-testid del toggle trae el id de
@@ -274,6 +290,23 @@ class Rappi(PlataformaBase):
         """Las opciones del dialogo de disponibilidad que se estan viendo."""
         return self.visible(self.page.locator(self.SELECTOR_OPCION))
 
+    def _dialogo_abierto(self):
+        """El dialogo, este montado del todo o a medias.
+
+        CONFIRMADO (2026-08-05): el CONTENEDOR del portal de floating-ui
+        aparece antes que sus opciones —las monta ~1 s despues— y ya tapa la
+        pantalla entera (position:fixed; inset:0). Mirando solo las opciones,
+        cerrar_dialogo() contestaba "no hay nada que cerrar" con el portal
+        adelante, y el click siguiente fallaba con "div.portal-flotante
+        intercepts pointer events". Ese es medio camino andado del "se
+        encadenan operaciones que fallan todas igual".
+        """
+        return self.visible(self.page.locator(
+            f"{self.SELECTOR_OPCION}, [data-floating-ui-portal]"))
+
+    # Cuantas veces mandar Escape antes de avisar que quedo algo abierto.
+    INTENTOS_DE_CIERRE = 2
+
     async def cerrar_dialogo(self):
         """Cierra el dialogo de disponibilidad si quedo abierto.
 
@@ -287,11 +320,21 @@ class Rappi(PlataformaBase):
         Escape y nada mas: cerrar clickeando "Cancelar" seria clickear a
         ciegas en un dialogo que no sabemos como esta.
         """
-        if await self._opciones_abiertas().count() == 0:
-            return
+        for _ in range(self.INTENTOS_DE_CIERRE):
+            try:
+                if await self._dialogo_abierto().count() == 0:
+                    return
+                await self.page.keyboard.press("Escape")
+                await self.page.wait_for_timeout(500)
+            except Exception:
+                return
+
         try:
-            await self.page.keyboard.press("Escape")
-            await self.page.wait_for_timeout(500)
+            if await self._dialogo_abierto().count() > 0:
+                # No es fatal (el que llama sigue igual), pero si el click
+                # siguiente falla "porque algo lo tapa", esta linea dice que.
+                log.warning("%s: quedo un dialogo abierto que Escape no cerro",
+                            self.nombre)
         except Exception:
             pass
 
@@ -364,7 +407,15 @@ class Rappi(PlataformaBase):
         await self.cerrar_dialogo()
 
         tarjeta = self._tarjeta(nombre_remoto)
-        await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
+        # profundo=True (regla 6, y el log del 2026-08-05 lo confirmo): el
+        # handler que abre el popup de "hasta cuando" vive ADENTRO del
+        # <label>, y los eventos suben pero no bajan. Con el click por JS
+        # disparado en el label, prender andaba (lo dispara el `change` del
+        # <input>, que la activacion nativa del label si propaga) y apagar
+        # no abria nada nunca. profundo=True clickea el descendiente mas
+        # profundo, asi que el evento sube por todos los niveles.
+        click_real = await self.clickear(self._toggle_clickeable(tarjeta),
+                                         que="toggle", profundo=True)
 
         # El dialogo ofrece 2 opciones utiles (la 3ra, "Personalizar
         # disponibilidad", no se usa: pide elegir una fecha).
@@ -375,10 +426,15 @@ class Rappi(PlataformaBase):
             # dialogo que si se abrio: si el portal cambio el texto de la
             # opcion, esta linea lo dice y el arreglo es de una.
             log.error("No aparecio '%s' en el dialogo. Opciones que vi: %s. "
-                      "Lo que hay abierto dice: %s", opcion,
+                      "Lo que hay abierto dice: %s. %s", opcion,
                       self.opciones_vistas or "(ninguna)",
-                      await self.texto_overlay() or "(nada)")
+                      await self.texto_overlay() or "(nada)",
+                      await self._por_que_no_hubo_dialogo(tarjeta, click_real))
             await self.cerrar_dialogo()
+            # El intento siguiente del worker viene a los 2 s: sin esto lo
+            # hace contra el MISMO DOM que ya fallo, que es lo que convertia
+            # los 3 intentos en uno solo repetido (log del 2026-08-05).
+            await self.recargar_y_preparar(por_que=f"reintentar '{nombre_remoto}'")
             return False
 
         await self.clickear(radio, que=f"radio '{opcion}'")
@@ -396,8 +452,39 @@ class Rappi(PlataformaBase):
         ok = await self._confirmar(nombre_remoto, esperado_disponible=False)
         if not ok:
             # Si termino mal, que no arrastre el dialogo al proximo intento.
+            # _confirmar() ya recargo, asi que la pagina esta limpia.
             await self.cerrar_dialogo()
         return ok
+
+    async def _por_que_no_hubo_dialogo(self, tarjeta, click_real: bool) -> str:
+        """Diagnostico para cuando el popup de disponibilidad no aparecio.
+
+        "Opciones que vi: (ninguna). Lo que hay abierto dice: (nada)" no
+        distingue los dos casos que tienen arreglos opuestos: que el click
+        no haya entrado (hay que mirar el click) o que el portal haya
+        cambiado los data-testid del popup (hay que mirar los selectores).
+        Esto contesta cual de los dos es.
+        """
+        partes = ["el click sobre el toggle "
+                  + ("fue real" if click_real else "tuvo que ir por JS")]
+
+        # Opciones en el DOM SIN filtrar por visibilidad: si hay y no se ven,
+        # el popup se abrio y el problema es otro.
+        try:
+            en_el_dom = await self.page.locator(self.SELECTOR_OPCION).count()
+        except Exception:
+            en_el_dom = "?"
+        partes.append(f"opciones en el DOM (visibles o no): {en_el_dom}")
+
+        # Si el toggle no se movio, el portal ni se entero del click.
+        try:
+            entrada = self._toggle_input(tarjeta)
+            partes.append("el toggle quedo "
+                          + ("prendido" if await entrada.is_checked() else "apagado"))
+        except Exception:
+            partes.append("no pude leer el toggle")
+
+        return "; ".join(partes) + "."
 
     # Los textos del boton de confirmar, por orden de preferencia. Se
     # comparan sin tildes por lo mismo que las opciones: "Sí, desactivar" y
@@ -444,7 +531,11 @@ class Rappi(PlataformaBase):
         await self.cerrar_dialogo()
 
         tarjeta = self._tarjeta(nombre_remoto)
-        await self.clickear(self._toggle_clickeable(tarjeta), que="toggle")
+        # Mismo profundo=True que en apagar(): aca el camino viejo andaba,
+        # pero el toggle es el mismo elemento y no hay motivo para que los
+        # dos lados usen fallbacks distintos.
+        await self.clickear(self._toggle_clickeable(tarjeta), que="toggle",
+                            profundo=True)
         await self.page.wait_for_timeout(2500)
 
         return await self._confirmar(nombre_remoto, esperado_disponible=True)

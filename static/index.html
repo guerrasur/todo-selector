@@ -382,6 +382,33 @@
     color: var(--tenue);
   }
 
+  /* ---- Cola: lo que todavía tiene algo que hacer ---- */
+  /* El badge del header abre el panel, así que tiene que verse clickeable. */
+  #pendientes.clickeable { cursor: pointer; }
+  #pendientes.clickeable:hover { border-color: var(--acento); color: var(--texto); }
+
+  .fila-cola {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 0; border-top: 1px solid var(--borde); font-size: 14px;
+  }
+  .fila-cola:first-of-type { border-top: none; }
+  .fila-cola .qué-cola { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .fila-cola .quien-cola { color: var(--tenue); font-size: 12px; }
+  /* La que está corriendo se marca: es la única que no se corta a la mitad. */
+  .fila-cola.corriendo { color: var(--curso); }
+  .fila-cola .turno {
+    font-size: 11px; color: var(--tenue); white-space: nowrap;
+  }
+  .fila-cola.corriendo .turno { color: var(--curso); }
+  .fila-cola .sacar {
+    background: transparent; border: 1px solid var(--borde);
+    color: var(--tenue); font-size: 12px; line-height: 1; padding: 5px 8px;
+  }
+  .fila-cola .sacar:hover { border-color: var(--error); color: var(--error); }
+  #resultado-cola {
+    font-size: 13px; margin-top: 14px; color: var(--tenue);
+  }
+
   /* ---- Ajustes ---- */
   .ajuste {
     display: grid; grid-template-columns: 1fr auto; gap: 8px 14px;
@@ -478,6 +505,7 @@
   <div id="panel-alertas" class="solo-dashboard" style="display:none"></div>
   <div id="panel-novedades" class="solo-dashboard" style="display:none"></div>
   <div id="panel-cierre" class="carta solo-dashboard" style="display:none"></div>
+  <div id="panel-cola" class="carta solo-dashboard" style="display:none"></div>
   <div id="panel-ajustes" class="carta" style="display:none"></div>
   <div id="panel-carta" class="carta" style="display:none"></div>
   <div id="lista" class="vacio solo-dashboard">Cargando productos…</div>
@@ -615,6 +643,9 @@ async function cargar() {
     .map(a => [a.producto_id + '|' + a.plataforma, a]));
 
   pintarSistema(sistema);
+  // Solo si está abierto: si no, sería un fetch más cada pocos segundos
+  // para todo el mundo.
+  if (colaAbierta) await pintarCola();
   await pintarInicio(sistema);
   pintarAlertas(alertas);
   pintarNovedades(novedades.novedades || []);
@@ -1064,6 +1095,17 @@ function pintarSistema(s) {
   const p = document.getElementById('pendientes');
   p.textContent = s.operaciones_pendientes
     ? `${s.operaciones_pendientes} en cola` : '';
+  // El badge es la puerta al panel de la cola, pero solo cuando hay algo:
+  // un badge vacío que abre un panel vacío es ruido.
+  p.classList.toggle('clickeable', !!s.operaciones_pendientes);
+  p.title = s.operaciones_pendientes
+    ? 'Ver la cola y cancelar lo que no querías' : '';
+  if (!s.operaciones_pendientes && colaAbierta) {
+    // Se vació sola mientras lo mirabas: no dejamos un panel abierto que ya
+    // no dice nada.
+    colaAbierta = false;
+    panelCola().style.display = 'none';
+  }
 
   // Cuando arranca, la lectura del estado real tarda un rato. Sin esto la
   // pantalla muestra todo en "sin leer" y parece que no funciona.
@@ -2082,12 +2124,144 @@ let catalogo = null;     // ultimo /api/catalogo
 
 function panelCarta() { return document.getElementById('panel-carta'); }
 
-// Los tres paneles de arriba (cierre, ajustes, carta) son grandes y se
+// ------------------------------------------------------------------- Cola
+//
+// Hasta acá la cola era un número en el header y nada más. Si se encadenaban
+// acciones que no eran las que querías, no había forma de ver cuáles eran ni
+// de sacarlas: con «Apagar todo» son ~30 operaciones por portal y cada una
+// recarga la página, así que un encolado equivocado eran veinte minutos sin
+// salida.
+//
+// REGLA 7: si el panel está abierto o no NO puede vivir en el repintado —
+// cargar() corre cada pocos segundos y lo cerraría solo, igual que pasaba con
+// los chips de plataforma. Va acá afuera, como `elegidas`.
+let colaAbierta = false;
+
+// Lo último que pasó ("Cancelé 3 operaciones"). Por la MISMA regla 7: si
+// viviera solo en el DOM, el repintado de los 3 segundos lo borraría antes
+// de que llegues a leerlo — y es lo único que te dice que tu click hizo algo.
+let mensajeCola = '';
+
+function panelCola() { return document.getElementById('panel-cola'); }
+
+function alternarCola() {
+  if (colaAbierta) { colaAbierta = false; panelCola().style.display = 'none'; return; }
+  cerrarPaneles('panel-cola');
+  colaAbierta = true;
+  mensajeCola = '';        // lo de la vez pasada ya no viene al caso
+  panelCola().style.display = 'block';
+  pintarCola();
+}
+
+// `mensaje` es lo que acaba de pasar (cuántas se sacaron). Se pasa por
+// parámetro y no se escribe después de repintar por lo mismo que en
+// pintarCierre(): entre el repintado y el restore el panel queda un instante
+// en blanco, y eso es lo único que mirás para saber si tu click hizo algo.
+async function pintarCola(mensaje = mensajeCola) {
+  mensajeCola = mensaje;
+  const panel = panelCola();
+
+  let ops;
+  try {
+    ops = (await fetch('/api/cola').then(r => r.json())).operaciones || [];
+  } catch (e) {
+    panel.innerHTML = '<h2>La cola</h2>' +
+      '<div class="ayuda">No pude leer la cola.</div>';
+    return;
+  }
+
+  panel.innerHTML = `
+    <h2>La cola${ops.length ? ` · ${ops.length}` : ''}</h2>
+    <div class="ayuda">
+      Lo que todavía falta hacer, en el orden en que se va a hacer. La ✕ lo
+      saca.
+      <br>La que <b>está corriendo</b> no se corta a la mitad (cortar un click
+      a la mitad deja el portal con un diálogo abierto): termina el intento
+      que ya está en el navegador, pero no se reintenta.
+    </div>
+    <div id="filas-cola"></div>
+    <div id="resultado-cola"></div>`;
+  document.getElementById('resultado-cola').textContent = mensaje;
+
+  const cont = document.getElementById('filas-cola');
+  if (!ops.length) {
+    cont.innerHTML = '<div class="ayuda">No queda nada esperando.</div>';
+    return;
+  }
+
+  for (const op of ops) {
+    const fila = document.createElement('div');
+    fila.className = 'fila-cola' + (op.en_curso ? ' corriendo' : '');
+
+    const qué = document.createElement('div');
+    qué.className = 'qué-cola';
+    // textContent y no innerHTML: el nombre del producto lo escribe el
+    // usuario y sale de los portales.
+    qué.textContent = `${op.etiqueta} · ${op.producto}`;
+    const quién = document.createElement('div');
+    quién.className = 'quien-cola';
+    quién.textContent = NOMBRE_PLAT[op.plataforma] || op.plataforma;
+    qué.appendChild(quién);
+    fila.appendChild(qué);
+
+    const turno = document.createElement('span');
+    turno.className = 'turno';
+    turno.textContent = op.en_curso
+      ? 'corriendo ahora'
+      : (op.intentos ? `esperando · intento ${op.intentos + 1}` : 'esperando');
+    fila.appendChild(turno);
+
+    const sacar = document.createElement('button');
+    sacar.className = 'sacar';
+    sacar.textContent = '✕';
+    sacar.title = op.en_curso
+      ? 'Cancelarla: el intento que está corriendo termina, pero no se reintenta'
+      : 'Sacarla de la cola';
+    sacar.onclick = () => cancelarCola({ ids: [op.id] });
+    fila.appendChild(sacar);
+
+    cont.appendChild(fila);
+  }
+
+  const todo = document.createElement('button');
+  todo.textContent = `Cancelar todo (${ops.length})`;
+  todo.style.marginTop = '14px';
+  todo.onclick = () => {
+    if (!confirm(`¿Cancelar las ${ops.length} operaciones de la cola?`)) return;
+    cancelarCola({ todo: true });
+  };
+  cont.appendChild(todo);
+}
+
+async function cancelarCola(qué) {
+  let mensaje;
+  try {
+    const r = await fetch('/api/cancelar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(qué),
+    });
+    const datos = await r.json();
+    const cuántas = (datos.canceladas || []).length;
+    mensaje = cuántas
+      ? `Cancelé ${cuántas} operación${cuántas === 1 ? '' : 'es'}.`
+      : 'No quedaba nada que cancelar.';
+  } catch (e) {
+    mensaje = 'No pude cancelar: ' + e;
+  }
+  await pintarCola(mensaje);
+  cargar();      // el badge y las pills de los productos, al día
+}
+
+// Los paneles de arriba (cierre, cola, ajustes, carta) son grandes y se
 // turnan: dos abiertos a la vez empujan la lista fuera de la pantalla.
 function cerrarPaneles(salvo) {
-  for (const id of ['panel-cierre', 'panel-ajustes', 'panel-carta']) {
+  for (const id of ['panel-cierre', 'panel-cola', 'panel-ajustes', 'panel-carta']) {
     if (id !== salvo) document.getElementById(id).style.display = 'none';
   }
+  // Cerrar el panel y dejar la variable diciendo «abierto» lo haría
+  // reaparecer solo en el próximo repintado.
+  if (salvo !== 'panel-cola') colaAbierta = false;
 }
 
 // ---------------------------------------------------------------- Pantallas
@@ -2622,6 +2796,10 @@ for (const chip of document.querySelectorAll('.chip-vista')) {
 
 document.getElementById('btn-carta').onclick = abrirCarta;
 document.getElementById('btn-cierre').onclick = abrirCierre;
+document.getElementById('pendientes').onclick = () => {
+  // Solo si hay algo en la cola: con el badge vacío no hay nada que abrir.
+  if (document.getElementById('pendientes').textContent) alternarCola();
+};
 document.getElementById('btn-ajustes').onclick = abrirAjustes;
 
 document.getElementById('btn-avisos').onclick = async () => {
