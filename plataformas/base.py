@@ -8,6 +8,7 @@ import logging
 import re
 import unicodedata
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Optional
 
@@ -62,12 +63,19 @@ class ResultadoTienda:
 class Diagnostico:
     """Como quedo el elemento que no se pudo clickear.
 
-    Los dos booleanos NO son decoracion del log: cada uno habilita un
-    peldaño distinto de clickear(), y son excluyentes entre si.
+    Los booleanos NO son decoracion del log: cada uno habilita un peldaño
+    distinto de clickear().
     """
     texto: str = ""             # lo que se escribe en el log
     despejado: bool = False     # visible y NADA lo tapa -> se puede forzar
     tapa_un_ancestro: bool = False   # lo tapa un ancestro SUYO -> destapar
+    # Si el target (o un hijo suyo) aparece en su PROPIA pila de hit test.
+    # False = no lo tapa nadie: directamente no es clickeable en ese punto
+    # (recortado por el overflow de un ancestro, o pointer-events:none
+    # propio). Ahi no hay nada que destapar ni a donde correrse, y el log
+    # tiene que decir eso y no "algo lo tapa". Arranca en True: si el
+    # diagnostico no pudo correr, no se afirma lo que no se vio (regla 8).
+    alcanzable: bool = True
 
 
 class PlataformaBase(ABC):
@@ -303,32 +311,58 @@ class PlataformaBase(ABC):
         js = self.JS_CLICK_PROFUNDO if profundo else self.JS_CLICK
         return await locator.first.evaluate(js, timeout=timeout)
 
-    # Que elemento hay ARRIBA del centro del target. Si el click no entra
-    # porque algo lo tapa, esto dice quien es el que tapa; si el que
-    # contesta es el target mismo (o un hijo suyo), el problema es otro.
+    # Como nombrar un elemento en el log. Se comparte entre los scripts.
+    JS_DESC = """
+        const desc = n => {
+            const t = n.tagName.toLowerCase();
+            const id = n.getAttribute('data-testid');
+            if (id) return `${t}[data-testid=${id}]`;
+            const c = (n.getAttribute('class') || '').trim().split(/\\s+/)[0];
+            return c ? `${t}.${c}` : t;
+        };
+    """
+
+    # Que hay ARRIBA del centro del target. Usa elementsFromPoint (PLURAL):
+    # devuelve la pila ENTERA de una sola llamada, no solo el de mas arriba.
     #
-    # Devuelve {desc, propio, ancestro}. Los dos booleanos deciden por que
-    # peldaño sigue clickear(), asi que no son para el log:
-    #   propio   -> nada lo tapa, se puede forzar.
-    #   ancestro -> lo tapa un ANCESTRO suyo (ver JS_DESTAPAR).
-    JS_QUIEN_TAPA = """
-        el => {
+    # POR QUE LA PILA Y NO EL PRIMERO (log del 2026-08-05): destapando de a
+    # una capa, cada vuelta contestaba un ancestro distinto y a las 3 nos
+    # quedabamos sin intentos. Con la pila entera se ve de una cuantos son,
+    # y sobre todo se puede contestar la pregunta que antes no se podia:
+    #
+    #   ¿aparece el target en su PROPIA pila?
+    #
+    # Si no aparece, no lo tapa nada: no es hit-testable en ese punto (lo
+    # recorta el overflow de un ancestro, o tiene pointer-events:none). Ahi
+    # elementFromPoint contestaba el primer ancestro que si lo es, y eso se
+    # leia como "un ancestro lo esta tapando" — dos problemas con arreglos
+    # opuestos que se veian igual.
+    #
+    # Devuelve {desc, propio, ancestro, alcanzable, encima}. Los booleanos
+    # deciden por que peldaño sigue clickear(), asi que no son para el log:
+    #   propio     -> nada lo tapa, se puede forzar.
+    #   ancestro   -> lo tapa un ANCESTRO suyo (ver JS_DESTAPAR).
+    #   alcanzable -> el target participa de su propio hit test.
+    JS_QUIEN_TAPA = f"""
+        el => {{
+            {JS_DESC}
             const r = el.getBoundingClientRect();
             const x = r.left + r.width / 2, y = r.top + r.height / 2;
-            const arriba = document.elementFromPoint(x, y);
-            if (!arriba) return {desc: "(nadie: el centro cae fuera de la ventana)",
-                                 propio: false, ancestro: false};
-            const desc = n => {
-                const t = n.tagName.toLowerCase();
-                const id = n.getAttribute('data-testid');
-                if (id) return `${t}[data-testid=${id}]`;
-                const c = (n.getAttribute('class') || '').trim().split(/\\s+/)[0];
-                return c ? `${t}.${c}` : t;
-            };
-            return {desc: desc(arriba),
-                    propio: el === arriba || el.contains(arriba),
-                    ancestro: arriba !== el && arriba.contains(el)};
-        }
+            const pila = document.elementsFromPoint(x, y);
+            if (!pila.length) return {{desc: "(nadie: el centro cae fuera de la ventana)",
+                                       propio: false, ancestro: false,
+                                       alcanzable: false, encima: []}};
+            const arriba = pila[0];
+            // El target cuenta como alcanzado tambien si el que contesta es
+            // un hijo suyo: el click igual le llega, porque los eventos suben.
+            const i = pila.findIndex(n => n === el || el.contains(n));
+            const encima = (i < 0 ? pila : pila.slice(0, i));
+            return {{desc: desc(arriba),
+                     propio: el === arriba || el.contains(arriba),
+                     ancestro: arriba !== el && arriba.contains(el),
+                     alcanzable: i >= 0,
+                     encima: encima.slice(0, 8).map(desc)}};
+        }}
     """
 
     # Le saca los clicks de encima al ANCESTRO que esta tapando al target.
@@ -342,32 +376,47 @@ class PlataformaBase(ABC):
     # puede ser: estaria adentro del target. Por eso este caso se destapa y
     # el del header pegajoso (que NO es ancestro) no se toca.
     #
+    # Se hace en UNA pasada, con la pila entera. Antes se destapaba de a una
+    # capa y se reintentaba, hasta CAPAS_A_DESTAPAR: el log del 2026-08-05
+    # gasto las 3 (ul[data-testid=menu-categories], div.sc-izEbhJ,
+    # div.sc-izEbhJ) y el toggle seguia tapado. El limite era un numero
+    # inventado; con elementsFromPoint no hace falta ninguno.
+    #
+    # Se filtra a los ancestros A PROPOSITO: lo que tapa y no es ancestro es
+    # UI de verdad (el header pegajoso de categoria) y no se toca, aunque
+    # este en la misma pila. Si queda algo asi, el click normal de despues
+    # va a fallar igual y seguimos al peldaño que corresponde.
+    #
     # Se guarda lo que habia para devolverlo tal cual, y el target se vuelve
-    # a habilitar a mano: pointer-events se HEREDA, asi que apagarlo en el
-    # ancestro apagaria tambien el toggle que queremos clickear.
-    JS_DESTAPAR = """
-        el => {
+    # a habilitar a mano: pointer-events se HEREDA, asi que apagarlo en los
+    # ancestros apagaria tambien el toggle que queremos clickear.
+    JS_DESTAPAR = f"""
+        el => {{
+            {JS_DESC}
             const r = el.getBoundingClientRect();
             const x = r.left + r.width / 2, y = r.top + r.height / 2;
-            const arriba = document.elementFromPoint(x, y);
-            if (!arriba || arriba === el || !arriba.contains(el)) return null;
+            const pila = document.elementsFromPoint(x, y);
+            const i = pila.findIndex(n => n === el || el.contains(n));
+            const encima = (i < 0 ? pila : pila.slice(0, i));
+            const objetivos = encima.filter(n => n !== el && n.contains(el));
+            if (!objetivos.length) return [];
 
-            const guardar = n => ({
+            const guardar = n => ({{
                 nodo: n,
                 valor: n.style.getPropertyValue('pointer-events'),
                 prioridad: n.style.getPropertyPriority('pointer-events'),
-            });
+            }});
             window.__tsDestapado = window.__tsDestapado || [];
-            window.__tsDestapado.push(guardar(arriba), guardar(el));
+            for (const n of objetivos) window.__tsDestapado.push(guardar(n));
+            window.__tsDestapado.push(guardar(el));
 
-            arriba.style.setProperty('pointer-events', 'none', 'important');
+            for (const n of objetivos) {{
+                n.style.setProperty('pointer-events', 'none', 'important');
+            }}
             el.style.setProperty('pointer-events', 'auto', 'important');
 
-            const id = arriba.getAttribute('data-testid');
-            const c = (arriba.getAttribute('class') || '').trim().split(/\\s+/)[0];
-            return arriba.tagName.toLowerCase() +
-                   (id ? `[data-testid=${id}]` : (c ? `.${c}` : ''));
-        }
+            return objetivos.map(desc);
+        }}
     """
 
     # Deja todo como estaba. Corre SIEMPRE (finally): dejar media pagina sin
@@ -463,11 +512,16 @@ class PlataformaBase(ABC):
     async def _diagnosticar(self, locator) -> Diagnostico:
         """Como esta el elemento que no se pudo clickear.
 
-        Ademas del texto para el log, contesta las dos preguntas que deciden
+        Ademas del texto para el log, contesta las preguntas que deciden
         como sigue clickear(): si esta despejado (visible y sin nada encima,
-        se puede forzar) y si lo tapa un ancestro suyo (es decoracion, se
-        puede destapar). No son excluyentes en el codigo pero si en la
-        practica: si nada lo tapa, ningun ancestro lo esta tapando.
+        se puede forzar), si lo tapa un ancestro suyo (es decoracion, se
+        puede destapar) y si el target aparece en su propia pila de hit test
+        (si no aparece, no lo tapa nada: no es clickeable ahi, y ni destapar
+        ni correrse sirven).
+
+        Se llama DOS veces cuando hay destapado de por medio: la foto de
+        antes ya no describe la pagina despues de neutralizar tres
+        ancestros, y los peldaños que siguen se deciden con esto.
 
         Corre unicamente cuando el click ya fallo, asi que puede pagar unas
         consultas al DOM. Nunca puede tirar: un diagnostico que explota
@@ -480,7 +534,7 @@ class PlataformaBase(ABC):
                 texto=f"(no pude diagnosticar: {' '.join(str(e).split())[:80]})")
 
         objetivo = locator.first
-        es_visible, propio, ancestro = False, False, False
+        es_visible, propio, ancestro, alcanzable = False, False, False, True
         # Fabricas y no corrutinas ya creadas: si una falla, las que
         # quedaban sin await tirarian "coroutine was never awaited".
         for etiqueta, hacer in (
@@ -501,14 +555,27 @@ class PlataformaBase(ABC):
             elif etiqueta == "encima" and isinstance(valor, dict):
                 propio = bool(valor.get("propio"))
                 ancestro = bool(valor.get("ancestro"))
-                valor = valor["desc"] + (
-                    " (es el target o un hijo suyo)" if propio
-                    else " (NO es el target: lo esta tapando"
-                         + (", y es un ancestro suyo)" if ancestro else ")"))
+                alcanzable = bool(valor.get("alcanzable"))
+                pila = valor.get("encima") or []
+                if propio:
+                    valor = valor["desc"] + " (es el target o un hijo suyo)"
+                elif not alcanzable:
+                    # El caso que antes se leia como "lo tapa un ancestro" y
+                    # mandaba a destapar capas para siempre.
+                    valor = (f"{valor['desc']}, y el target NO aparece en su "
+                             f"propia pila: no lo tapa nadie, no es clickeable "
+                             f"en ese punto (lo recorta un overflow, o tiene "
+                             f"pointer-events:none)")
+                else:
+                    valor = (" > ".join(pila) or valor["desc"]) + (
+                        f" ({len(pila)} encima del target"
+                        + (", el de arriba es un ancestro suyo)" if ancestro
+                           else ")"))
             partes.append(f"{etiqueta}={valor}")
         return Diagnostico(texto=", ".join(partes),
                            despejado=(es_visible and propio),
-                           tapa_un_ancestro=(es_visible and ancestro))
+                           tapa_un_ancestro=(es_visible and ancestro),
+                           alcanzable=alcanzable)
 
     # Como se sube del texto del producto a su tarjeta/fila (XPATH_TARJETA),
     # y que la identifica: un atributo de la tarjeta misma, o de algun
@@ -593,14 +660,13 @@ class PlataformaBase(ABC):
         click. Playwright scrollea el elemento a la vista, algo le queda
         encima, y reintenta hasta agotar el timeout de 30s.
 
-        Las defensas, en orden. Las tres del medio son excluyentes: el
-        diagnostico del click fallado dice cual corresponde, y las tres
-        terminan en un click de VERDAD.
+        Las defensas, en orden. El diagnostico del click fallado dice cual
+        corresponde, y todas menos la ultima terminan en un click de VERDAD.
           1. Centrar el elemento en la pantalla (arriba esta el header,
              abajo la franja) y clickear normal, con timeout corto.
-          2. Si lo tapa un ANCESTRO suyo, destaparlo y reintentar. Un
-             ancestro no puede estar legitimamente por encima de su propio
-             hijo: es decoracion.
+          2. Si lo tapan ANCESTROS suyos, neutralizarlos TODOS de una y
+             reintentar. Un ancestro no puede estar legitimamente por encima
+             de su propio hijo: es decoracion.
           3. Si NADA lo tapa, clickear forzado. Saltea los chequeos de
              accionabilidad de Playwright pero sigue siendo un evento de
              mouse de verdad en la posicion del elemento, asi que es fiel.
@@ -610,6 +676,17 @@ class PlataformaBase(ABC):
           4. Si lo tapa algo que NO es ancestro (UI de verdad, pegajosa),
              correrse y reintentar.
           5. Recien ahi, click por JS, que no mira nada. Es el ultimo plan.
+
+        El 3 y el 4 corren tambien ADENTRO del 2, con el destapado puesto y
+        contra un diagnostico nuevo: neutralizar los ancestros cambia la
+        pagina, y el 4 corriendo sobre la pila ya restaurada era trabajo
+        tirado (log del 2026-08-05).
+
+        Hay un caso que no tiene peldaño y que hasta el 2026-08-05 se
+        confundia con el 2: que el target no aparezca en su PROPIA pila de
+        hit test. Ahi no lo tapa nada —lo recorta un overflow, o tiene
+        pointer-events:none— y no hay nada que destapar ni a donde correrse.
+        Se dice en el log y se va derecho al JS.
 
         Del 2 al 4 el timeout es TIMEOUT_REINTENTO y no el de arriba: son
         preguntas de "¿pasa el hit test ahora?", y con los 8 s de siempre un
@@ -627,8 +704,10 @@ class PlataformaBase(ABC):
         POR QUE EL PELDAÑO 2 (log del 2026-08-05): en Rappi el toggle
         fallaba con "encima=ul[data-testid=menu-categories]", que es un
         ANCESTRO del toggle: decoracion pintada por encima de su propio
-        hijo. Ahi se le sacan los clicks al ancestro, entra el click de
-        verdad, y se deja todo como estaba. Ver JS_DESTAPAR.
+        hijo. Ahi se le sacan los clicks a los ancestros, entra el click de
+        verdad, y se deja todo como estaba. Ver JS_DESTAPAR. Son TODOS de
+        una: destapando de a uno, el mismo log gasto las 3 capas que habia
+        y el toggle seguia tapado.
 
         POR QUE EL PELDAÑO 3 (log del 2026-08-03): en PedidosYa el toggle
         fallaba con "element is not enabled" teniendo el camino libre —el
@@ -657,42 +736,54 @@ class PlataformaBase(ABC):
             motivo = self._motivo_del_click(e)
 
         if diag.tapa_un_ancestro:
-            entro, detalle = await self._click_destapando(objetivo)
-            if entro:
-                log.info("%s: el click sobre %s entro despues de destapar %s",
-                         self.nombre, que, detalle)
-                return True
-            motivo += f" || destapando ({detalle})"
+            # Los peldaños que siguen corren ADENTRO del destapado. Antes el
+            # destapado se restauraba al salir de _click_destapando() y
+            # "corriendose" peleaba de nuevo contra la pila entera: en el log
+            # del 2026-08-05 se ven las dos lineas seguidas, y la segunda
+            # trabajando sobre la pagina ya restaurada.
+            async with self._destapado(objetivo) as destapados:
+                if destapados:
+                    try:
+                        await objetivo.click(timeout=self.TIMEOUT_REINTENTO)
+                        log.info("%s: el click sobre %s entro despues de "
+                                 "destapar %s", self.nombre, que,
+                                 ", ".join(destapados))
+                        return True
+                    except Exception:
+                        pass
 
-        if diag.despejado:
-            try:
-                await objetivo.click(timeout=timeout, force=True)
-                log.warning("%s: click normal sobre %s fallo con el camino "
-                            "libre; entro forzado.\n    motivo: %s\n"
-                            "    estado: %s", self.nombre, que, motivo,
-                            diag.texto)
-                return True
-            except Exception as e2:
-                motivo += f" || forzado: {self._motivo_del_click(e2)}"
+                    # La foto de antes describe una pagina que ya no existe:
+                    # se acaban de neutralizar N ancestros. Los peldaños que
+                    # vienen se deciden con esta, no con aquella.
+                    diag = await self._diagnosticar(objetivo)
+                    entro, detalle = await self._forzar_o_correrse(objetivo, diag)
+                    if entro:
+                        log.info("%s: el click sobre %s entro despues de "
+                                 "destapar %s y %s", self.nombre, que,
+                                 ", ".join(destapados), detalle)
+                        return True
+                    motivo += (f" || destapando ({', '.join(destapados)})"
+                               f" + {detalle}")
+                else:
+                    motivo += f" || destapando ({destapados.motivo})"
         else:
-            entro, detalle = await self._click_corriendose(objetivo)
+            entro, detalle = await self._forzar_o_correrse(objetivo, diag)
             if entro:
-                log.info("%s: el click sobre %s entro despues de %s",
-                         self.nombre, que, detalle)
+                # Con el motivo, que es lo que dice POR QUE no habia entrado
+                # el normal: en PedidosYa este camino es el de todos los dias
+                # ("element is not enabled" con el camino libre) y sin el
+                # motivo el log no deja rastro de cual de los dos casos fue.
+                log.info("%s: el click sobre %s entro despues de %s.\n"
+                         "    motivo: %s\n    estado: %s",
+                         self.nombre, que, detalle, motivo, diag.texto)
                 return True
-            motivo += f" || corriendose ({detalle})"
+            motivo += f" || {detalle}"
 
         log.warning("%s: click normal sobre %s fallo. Voy por JS.\n"
                     "    motivo: %s\n"
                     "    estado: %s", self.nombre, que, motivo, diag.texto)
         await self.clickear_por_js(objetivo, profundo=profundo, timeout=timeout)
         return False
-
-    # Cuantas capas de decoracion se destapan antes de rendirse. Son varias
-    # porque el log del 2026-08-05 mostro dos ancestros distintos tapando el
-    # mismo toggle en momentos distintos (el <ul> de las categorias y el
-    # <div> de una categoria): sacado el de arriba puede quedar el de abajo.
-    CAPAS_A_DESTAPAR = 3
 
     # Los reintentos NO usan el timeout del click normal. El elemento ya esta
     # localizado y lo unico que se esta preguntando es si el hit test pasa
@@ -701,32 +792,62 @@ class PlataformaBase(ABC):
     # el usuario reporto fue justamente que la app "se queda trabada".
     TIMEOUT_REINTENTO = 2500
 
-    async def _click_destapando(self, objetivo) -> tuple[bool, str]:
-        """Le saca los clicks a los ancestros que tapan, clickea y restaura.
+    async def _forzar_o_correrse(self, objetivo, diag) -> tuple[bool, str]:
+        """Los peldaños que dependen de QUE es lo que no deja clickear.
 
-        El click sigue siendo el NORMAL de Playwright, con todos sus
-        chequeos: si despues de destapar el que recibe el click sigue sin
+        Van juntos porque son excluyentes y los decide el mismo diagnostico.
+        Devuelve (entro, que se hizo / por que no).
+        """
+        if diag.despejado:
+            # Saltea los chequeos de accionabilidad pero sigue siendo un
+            # evento de mouse de verdad en la posicion del elemento. Solo con
+            # el camino libre: si algo tapa, forzar es clickear a ciegas lo
+            # que haya encima.
+            try:
+                await objetivo.click(timeout=self.TIMEOUT_REINTENTO, force=True)
+                return True, "forzarlo con el camino libre"
+            except Exception as e:
+                return False, f"forzado: {self._motivo_del_click(e)}"
+
+        if not diag.alcanzable:
+            # No hay nada que correr ni que destapar: el punto que Playwright
+            # clickea no le pertenece al target. Decirlo con estas palabras
+            # es la mitad del arreglo.
+            return False, ("el target no aparece en su propia pila: no lo tapa "
+                           "nada, no es clickeable en su centro")
+
+        return await self._click_corriendose(objetivo)
+
+    class _Destapados(list):
+        """Los ancestros neutralizados, y por que no hubo ninguno.
+
+        Es una lista para poder preguntarle `if destapados:` y recorrerla, y
+        ademas guarda el motivo: "no habia nada que destapar" y "no pude
+        destapar" son cosas distintas y las dos terminan en lista vacia.
+        """
+        motivo: str = "no habia ancestros que destapar"
+
+    @asynccontextmanager
+    async def _destapado(self, objetivo):
+        """Neutraliza de una los ancestros que tapan, y restaura al salir.
+
+        Todo lo que se intente adentro del `async with` ve la pagina
+        destapada; al salir queda como estaba, pase lo que pase.
+
+        El click de adentro sigue siendo el NORMAL de Playwright, con todos
+        sus chequeos: si despues de destapar el que recibe el click sigue sin
         ser nuestro elemento, falla igual y seguimos al peldaño que viene.
         Destapar no puede hacer que se clickee otra cosa.
         """
-        destapados = []
+        destapados = self._Destapados()
         try:
-            for _ in range(self.CAPAS_A_DESTAPAR):
-                try:
-                    quien = await objetivo.evaluate(
-                        self.JS_DESTAPAR, timeout=self.TIMEOUT_REINTENTO)
-                except Exception as e:
-                    return False, f"no pude destapar: {_resumen(e)}"
-                if not quien:
-                    break
-                destapados.append(quien)
-
-                try:
-                    await objetivo.click(timeout=self.TIMEOUT_REINTENTO)
-                    return True, ", ".join(destapados)
-                except Exception:
-                    continue    # puede quedar otra capa abajo
-            return False, ", ".join(destapados) or "no habia nada que destapar"
+            try:
+                quienes = await objetivo.evaluate(
+                    self.JS_DESTAPAR, timeout=self.TIMEOUT_REINTENTO)
+                destapados.extend(quienes or [])
+            except Exception as e:
+                destapados.motivo = f"no pude destapar: {_resumen(e)}"
+            yield destapados
         finally:
             # Pase lo que pase la pagina queda como estaba: el usuario mira
             # esta misma ventana y la va a seguir usando a mano.
@@ -872,6 +993,76 @@ class PlataformaBase(ABC):
             salida[selector] = {"total": total, "textos": textos}
 
         return salida
+
+    # Por que un elemento no recibe el click, mirado desde el DOM y no desde
+    # el error de Playwright. Devuelve la pila de hit test en su centro, la
+    # cadena de ancestros con lo unico que puede estar estorbando
+    # (pointer-events, position, z-index, overflow, transform) y si algun
+    # ancestro lo esta RECORTANDO — que es el caso que el error de Playwright
+    # nunca nombra y que se confundia con "algo lo tapa".
+    JS_POR_QUE_NO_ENTRA = f"""
+        el => {{
+            {JS_DESC}
+            const r = el.getBoundingClientRect();
+            const x = r.left + r.width / 2, y = r.top + r.height / 2;
+            const pila = document.elementsFromPoint(x, y).slice(0, 10).map(desc);
+
+            const cadena = [];
+            let recortado_por = null;
+            let n = el.parentElement, prof = 0;
+            while (n && n !== document.documentElement && prof < 12) {{
+                const s = getComputedStyle(n);
+                cadena.push({{
+                    quien: desc(n),
+                    pointer_events: s.pointerEvents,
+                    position: s.position,
+                    z_index: s.zIndex,
+                    overflow: `${{s.overflowX}}/${{s.overflowY}}`,
+                    transform: s.transform === 'none' ? '' : 'si',
+                }});
+                if (!recortado_por && s.overflow !== 'visible') {{
+                    const c = n.getBoundingClientRect();
+                    // El CENTRO del target es el punto que Playwright clickea:
+                    // si cae afuera de la caja del contenedor que recorta, el
+                    // click no le puede llegar por mas que se vea.
+                    if (x < c.left || x > c.right || y < c.top || y > c.bottom) {{
+                        recortado_por = desc(n);
+                    }}
+                }}
+                n = n.parentElement; prof++;
+            }}
+
+            const mio = getComputedStyle(el);
+            return {{
+                quien: desc(el),
+                caja: `${{Math.round(r.width)}}x${{Math.round(r.height)}}`
+                      + `@${{Math.round(r.left)}},${{Math.round(r.top)}}`,
+                pointer_events_propio: mio.pointerEvents,
+                visibility: mio.visibility,
+                pila_en_su_centro: pila,
+                aparece_en_su_pila: document.elementsFromPoint(x, y)
+                    .some(m => m === el || el.contains(m)),
+                recortado_por: recortado_por,
+                ancestros: cadena,
+                html: el.outerHTML.slice(0, 1500),
+            }};
+        }}
+    """
+
+    async def por_que_no_entra(self, locator) -> dict:
+        """Diagnostico: todo lo que hay alrededor de un elemento que no se
+        deja clickear.
+
+        Es para mirarlo a mano cuando el log ya no alcanza: dice quien esta
+        en la pila del hit test, si el target participa de ella, si algun
+        ancestro lo recorta, y como quedan los pointer-events de toda la
+        cadena. Nunca tira: es diagnostico.
+        """
+        try:
+            return await locator.first.evaluate(self.JS_POR_QUE_NO_ENTRA,
+                                                timeout=3000)
+        except Exception as e:
+            return {"error": _resumen(e, 160)}
 
     async def esqueleto(self, max_nodos: int = 400, max_texto: int = 45) -> list[str]:
         """Diagnostico: el arbol del DOM en una lista de lineas.

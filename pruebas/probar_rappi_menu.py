@@ -305,6 +305,83 @@ async def lo_tapa_un_ancestro(navegador):
     await pagina.close()
 
 
+async def mas_capas_que_el_limite_viejo(navegador):
+    print("\n== G) Mas ancestros tapando que el limite viejo (2026-08-05) ==")
+    plat, pagina = await abrir_plataforma(navegador, "?tapa=muchos")
+    revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja el menu listo")
+
+    # El log real destapo tres capas y el toggle SEGUIA tapado: el tope de 3
+    # era inventado. Aca son cinco, asi que destapar de a una con ese tope no
+    # alcanza ni de casualidad.
+    cuantos = await pagina.evaluate(
+        """() => {
+            const l = document.querySelector('[data-testid$="582222-availability-switch-control"]');
+            const r = l.getBoundingClientRect();
+            const pila = document.elementsFromPoint(r.left + r.width / 2,
+                                                    r.top + r.height / 2);
+            const i = pila.findIndex(n => n === l || l.contains(n));
+            return (i < 0 ? pila : pila.slice(0, i))
+                   .filter(n => n !== l && n.contains(l)).length;
+        }""")
+    revisar(cuantos > 3,
+            f"al toggle lo tapan {cuantos} ancestros (mas que las 3 capas viejas)")
+
+    tarjeta = plat._tarjeta("Villavicencio sin gas 500 ml")
+    entro = await plat.clickear(plat._toggle_clickeable(tarjeta), que="toggle",
+                                profundo=True)
+    revisar(entro, "el click entra igual, destapandolas TODAS de una, sin JS")
+
+    quedo = await pagina.evaluate(
+        """() => [[...document.querySelectorAll('.capa, .cat-cuerpo')]
+                    .every(n => n.style.pointerEvents === ''),
+                  (window.__tsDestapado || []).length]""")
+    revisar(quedo == [True, 0],
+            f"y los pointer-events de las cinco quedan restaurados ({quedo})")
+
+    await plat.cerrar_dialogo()
+
+    nombre = "Villavicencio con gas 500 ml"
+    revisar(await plat.apagar(nombre, por_hoy=True),
+            "apagar() abre el popup y confirma el cambio")
+    estado = await plat.leer_estado(nombre)
+    revisar(estado is not None and not estado.disponible, "quedo apagado de verdad")
+
+    await pagina.close()
+
+
+async def el_toggle_no_esta_en_su_pila(navegador):
+    print("\n== H) El toggle NO aparece en su propia pila (2026-08-05) ==")
+    plat, pagina = await abrir_plataforma(navegador, "?tapa=recorte")
+    revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja el menu listo")
+
+    # No lo tapa nada: esta recortado, y el punto que Playwright clickea no
+    # le pertenece. Contesta un ancestro, igual que cuando SI lo tapan, y
+    # hasta ahora las dos cosas se leian igual.
+    afuera = await pagina.evaluate(
+        """() => {
+            const l = document.querySelector('[data-testid$="582222-availability-switch-control"]');
+            const r = l.getBoundingClientRect();
+            const pila = document.elementsFromPoint(r.left + r.width / 2,
+                                                    r.top + r.height / 2);
+            return {en_la_pila: pila.some(n => n === l || l.contains(n)),
+                    arriba_es_ancestro: pila.length > 0 && pila[0].contains(l)};
+        }""")
+    revisar(not afuera["en_la_pila"] and afuera["arriba_es_ancestro"],
+            f"el toggle no esta en su pila y arriba contesta un ancestro ({afuera})")
+
+    diag = await plat._diagnosticar(plat._toggle_clickeable(
+        plat._tarjeta("Villavicencio sin gas 500 ml")))
+    revisar(not diag.alcanzable,
+            "el diagnostico lo marca como NO alcanzable")
+    revisar("NO aparece en su propia pila" in diag.texto,
+            f"y el log lo dice con todas las letras ({diag.texto[-90:]})")
+    # Lo que importa: NO se va a gastar los intentos destapando capas que no
+    # son el problema. Destapar aca no arregla nada.
+    revisar(not diag.despejado, "y no se lo da por despejado (forzar seria a ciegas)")
+
+    await pagina.close()
+
+
 async def main():
     servidor = servir()
     try:
@@ -316,6 +393,8 @@ async def main():
             await nombres_ambiguos(navegador)
             await el_dialogo_de_floating_ui(navegador)
             await lo_tapa_un_ancestro(navegador)
+            await mas_capas_que_el_limite_viejo(navegador)
+            await el_toggle_no_esta_en_su_pila(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()

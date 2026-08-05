@@ -157,7 +157,14 @@ columna sigue sin estar cubierto.
     target). Lo que tapa y **no** es ancestro es UI de verdad —el header
     pegajoso de categoría de Rappi— y no se toca: ahí hay que correrse.
     Destapar nunca clickea otra cosa: Playwright sigue verificando quién
-    recibe el click.
+    recibe el click. Se destapan **todos de una** (`elementsFromPoint`, en
+    plural): de a uno, cada vuelta contestaba un ancestro nuevo y el tope de
+    3 capas se agotaba con el toggle todavía tapado.
+    **Hay un caso que se le parece y no lo es**: que el target no aparezca en
+    su PROPIA pila. Ahí no lo tapa nadie —lo recorta un `overflow`, o tiene
+    `pointer-events:none`— y destapar ancestros no arregla nada. Se dice en
+    el log con esas palabras y se va derecho al JS. Para mirarlo de cerca
+    está `base.por_que_no_entra()`, que sale por `/api/diagnostico`.
 
 14. **Una operación que falla no puede quedarse con el turno.** La cola se
     ordena por `creada_en`, así que la que volvía a `PENDIENTE` ganaba de
