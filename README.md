@@ -689,6 +689,60 @@ misma.
 - [ ] Pantalla de sesión expirada de Rappi: se sabe que existe (Rappi se
       desloguea por inactividad) pero falta confirmar el selector exacto
       para `asegurar_sesion()`.
+- [ ] **Pantalla de verificación en dos pasos** (`TEXTOS_VERIFICACION`,
+      buscar `TODO-SELECTOR` en el archivo): los textos salen de lo que ve
+      el usuario, no de DevTools. Hay que confirmarlos la próxima vez que
+      Rappi la muestre. **Esto no bloquea nada**: el botón «Rappi me pide
+      código» congela la pestaña sin depender de ningún selector, y esa es
+      la defensa principal. Ver «Verificación en dos pasos» más abajo.
+
+### Verificación en dos pasos de Rappi (2026-08-06)
+
+Cada ~30 días Rappi pide, **además del login**, un código de verificación al
+entrar. El flujo real de este local:
+
+1. La pantalla ofrece SMS por defecto.
+2. Hay que apretar **«Probar otro método»** y después **«Correo electrónico»**.
+3. El código llega al mail del **dueño de la cuenta**, no al del local.
+4. Hay que **quedarse en esa pantalla**, sin recargar ni navegar, hasta que se
+   lo pasen. Pueden pasar varios minutos.
+
+Si la página se recarga o navega en el medio, el código se invalida y hay que
+arrancar de nuevo. Y el worker navegaba esa pestaña **en trece lugares**
+(todos pasan por `worker._preparar`), así que hacer la verificación era una
+carrera contra la app — que además la reportaba como «sesión caída» y mandaba
+a loguearse de nuevo, justo lo contrario de lo que hay que hacer.
+
+**Cómo se usa.** Apretá **«Rappi me pide código»** en el header *antes* de
+empezar. A partir de ahí:
+
+- nada de la app recarga, navega ni cierra esa pestaña: ni el refresco previo
+  a una operación, ni la ronda de relectura, ni «Revalidar sesión», ni la
+  pantalla Carta, ni el badge de tienda abierta, ni un cambio de sucursal en
+  Ajustes;
+- lo que pidas mientras tanto **se encola y espera**: no gasta reintentos y no
+  termina en ERROR (es el mismo trato que ya tenía la sesión caída, pero **sin
+  vencimiento**);
+- PedidosYa sigue trabajando normal;
+- el cartel de arriba te da los pasos concretos y dice cuántas operaciones
+  están esperando.
+
+**La única salida es el botón «Ya terminé de verificar».** No hay timeout ni
+chequeo automático que lo levante: cortar solo, justo cuando estás esperando
+el mail, sería peor que no tener nada. Al salir se relee esa plataforma por
+las dudas, porque mientras estuvo congelada la app no miró nada.
+
+**Congelar Rappi Turbo congela también Rappi Común**: son tiendas
+independientes para todo lo demás, pero se entra con la misma cuenta
+(`config.familia_de_sesion`), así que navegar una puede tirar abajo la sesión
+que se está verificando en la otra.
+
+La detección automática (`Rappi.en_verificacion()`) es un extra, no la
+defensa: pide dos evidencias juntas (que el menú **no** haya cargado y que se
+vea alguno de los textos conocidos) y ante la duda dice que no. Nada en el
+código aprieta los botones de esa pantalla — el paso manual es a propósito,
+porque el código llega al mail de otra persona. Cubierto sin portales por
+`pruebas/probar_verificacion.py`.
 
 ### Estado de tienda de Rappi (badge 🟢/🔴 del header) — FALTA UN PASO TUYO
 

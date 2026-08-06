@@ -8,6 +8,7 @@ py pruebas/probar_pedidosya.py        selectores y clicks de PedidosYa
 py pruebas/probar_rappi_menu.py       selectores y clicks del menu de Rappi
 py pruebas/probar_catalogo.py         vincular / separar / sembrar
 py pruebas/probar_estados.py          guardar el estado leído del portal
+py pruebas/probar_verificacion.py     la verificación en dos pasos de Rappi
 py pruebas/probar_cierre.py           apagar todo por plataforma + ajustes
 py pruebas/probar_pantalla_carta.py   la pantalla entera, de punta a punta
 py pruebas/probar_primer_arranque.py  cómo arranca una instalación nueva
@@ -86,6 +87,28 @@ pero que **quede avisado**, que es el bug del 2026-07-28: la pantalla decía
 También cubre el bug del 2026-08-03: la verificación de 2 minutos reencolaba
 un apagado sobre algo que **el usuario acababa de prender**. Ahora corta si el
 estado ya no es un apagado propio, y ni siquiera va a mirar el portal.
+
+**`probar_verificacion.py`** cubre el modo *«esta pestaña es mía»*: cuando
+Rappi pide el código de verificación en dos pasos, el usuario tiene que
+quedarse varios minutos en esa pantalla y **cualquier recarga lo invalida**.
+Lo que se prueba no es que algo devuelva `False` sino que **nadie toque la
+pestaña**: la pestaña de mentira anota cada recarga, navegación y cierre, y la
+prueba mira ese registro.
+
+Cubre el corte de `_preparar` —que va antes del reload **y antes de
+`asegurar_sesion()`**, que navega igual aunque la pestaña esté fresca—, que la
+cola de esa plataforma espere sin gastar intentos ni terminar en ERROR, que la
+espera **no venza** (a diferencia de la sesión caída, que reintenta a los
+60 s), que la otra plataforma siga trabajando, que congelar Rappi Turbo
+congele también Rappi Común, que guardar Ajustes no le cierre la pestaña, y
+que el **botón manual funcione aunque la detección automática no reconozca la
+pantalla** — que es el caso para el que está hecho, porque los textos de esa
+pantalla todavía no se confirmaron contra el portal real.
+
+La pantalla está cubierta aparte, en `probar_pantalla_carta.py`: que el cartel
+dé los pasos concretos, que diga que lo encolado está esperando y no perdido,
+y que una plataforma congelada **no** salga además como sesión caída (dos
+carteles que se contradicen).
 
 **`probar_cierre.py`** cubre el botón de "apagar todo" y los ajustes. Lo que
 importa ahí es lo que **no** se encola: apagar la carta entera son ~30

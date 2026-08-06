@@ -85,6 +85,20 @@ ESPERA_SIN_SESION = 60
 
 # Motivo por el que fallo una operacion, cuando importa distinguirlo.
 SIN_SESION = "sin_sesion"
+# La plataforma esta en verificacion manual: el usuario esta parado en la
+# pantalla del codigo en dos pasos y NADIE puede tocar esa pestaña. Es
+# hermano de SIN_SESION —la operacion espera sin gastar intentos y sin
+# terminar en ERROR— con UNA diferencia que es todo el punto: no tiene
+# vencimiento. SIN_SESION reintenta a los 60 s; esto sale solo cuando el
+# usuario aprieta el boton. Un plazo automatico acá cortaria justo cuando
+# esta esperando el mail, que es peor que no tener nada.
+VERIFICACION = "verificacion"
+
+# Lo que se muestra en la cola y en los diagnosticos mientras una plataforma
+# esta congelada. En una sola linea y sin jerga: es lo que va a leer el
+# usuario en el detalle de una operacion que no arranca.
+MSG_VERIFICACION = ("verificación en dos pasos en curso: la pestaña es tuya "
+                    "hasta que aprietes «Ya terminé de verificar»")
 # La plataforma no esta activa en esta instalacion (no tiene pestaña). No se
 # arregla reintentando: reintentar tres veces por producto solo llena la cola
 # de errores identicos.
@@ -121,6 +135,16 @@ class Worker:
         # plataforma -> hasta cuando no vale la pena reintentar la cola
         # porque la sesion esta caida y hay que loguearse a mano.
         self.reintentar_desde = {}
+        # plataforma -> {"desde": datetime, "origen": str, "detalle": str}.
+        # Las que estan en VERIFICACION MANUAL: el usuario esta parado en la
+        # pantalla del codigo en dos pasos y esa pestaña es SUYA. Mientras
+        # este aca, nada de la app la recarga, la navega ni la cierra, y sus
+        # operaciones esperan quietas.
+        #
+        # Vive en memoria y no en la base a proposito: la pestaña la abre
+        # esta corrida del navegador, asi que si la app se reinicia no hay
+        # ninguna verificacion en curso que proteger.
+        self.verificacion = {}
         # plataforma -> {"abierta": bool, "detalle": str} | None. Es la
         # tienda ENTERA, no un producto. Se refresca en la lectura inicial y
         # en cada ronda de reverificacion, no en cada poll de la pantalla
@@ -255,6 +279,7 @@ class Worker:
         self.sesion_ok.pop(nombre, None)
         self.ultimo_refresco.pop(nombre, None)
         self.reintentar_desde.pop(nombre, None)
+        self.verificacion.pop(nombre, None)
         self.novedades.pop(nombre, None)
         self.no_encontrados.pop(nombre, None)
         self.bloqueos.pop(nombre, None)
@@ -293,6 +318,13 @@ class Worker:
             ahora = datetime.now()
             en_espera = [p for p, hasta in self.reintentar_desde.items()
                          if ahora < hasta]
+
+            # Y las que estan en verificacion manual. Misma idea que arriba
+            # —la operacion no se toma, asi que no gasta intentos ni termina
+            # en ERROR— con la diferencia de que esta espera NO VENCE: sale
+            # cuando el usuario aprieta el boton y no antes. Cortarla sola
+            # seria navegarle la pestaña mientras espera el codigo.
+            en_espera += [p for p in self.verificacion if p not in en_espera]
 
             consulta = (db.query(Operacion)
                         .filter(Operacion.estado == Operacion.PENDIENTE,
@@ -360,15 +392,25 @@ class Worker:
             # cuando el usuario terminaba de loguearse a mano ya no quedaba
             # nada encolado: lo que habia pedido se habia perdido en silencio.
             # Ahora espera ahi y sale sola apenas vuelve la sesion.
-            if motivo == SIN_SESION:
+            #
+            # La verificacion manual va por el mismo camino y por el mismo
+            # motivo: la operacion no se pierde, espera. Lo unico distinto es
+            # que no se le pone hora de vuelta — sale cuando el usuario
+            # aprieta «Ya terminé de verificar», nunca sola.
+            if motivo in (SIN_SESION, VERIFICACION):
                 op.estado = Operacion.PENDIENTE
                 op.intentos = max(0, op.intentos - 1)
                 op.detalle = detalle
-                self.reintentar_desde[op.plataforma] = (
-                    datetime.now() + timedelta(seconds=ESPERA_SIN_SESION))
-                log.warning("op#%s en espera: %s esta deslogueado. Logueate en "
-                            "la ventana del navegador y sale sola.",
-                            op.id, op.plataforma)
+                if motivo == SIN_SESION:
+                    self.reintentar_desde[op.plataforma] = (
+                        datetime.now() + timedelta(seconds=ESPERA_SIN_SESION))
+                    log.warning("op#%s en espera: %s esta deslogueado. Logueate "
+                                "en la ventana del navegador y sale sola.",
+                                op.id, op.plataforma)
+                else:
+                    log.info("op#%s en espera: %s esta en verificación manual. "
+                             "Sale cuando aprietes «Ya terminé de verificar».",
+                             op.id, op.plataforma)
                 db.commit()
                 return
 
@@ -446,6 +488,13 @@ class Worker:
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
         if not listo:
+            # Primero de todo: si esta congelada, esta operacion espera y no
+            # es ninguna otra cosa. Sin este chequeo caia en SIN_SESION
+            # (sesion_ok quedo en False porque el menu no cargo), que arma un
+            # reintento a los 60 s — o sea, le navega la pestaña al usuario
+            # justo mientras espera el codigo.
+            if self.en_verificacion(plataforma):
+                return False, motivo, VERIFICACION
             # Sin los ids de la sucursal no hay a donde ir: reintentar no lo
             # arregla y "sesion caida" manda al usuario a loguearse, que no
             # es el problema.
@@ -591,6 +640,26 @@ class Worker:
         if plat is None:
             return False, f"plataforma desconocida: {plataforma}"
 
+        # ESTA PESTAÑA ES DEL USUARIO. Mientras hace la verificacion en dos
+        # pasos no la toca nadie: ni el refresco previo a una operacion, ni
+        # la ronda de relectura, ni «Revalidar sesión», ni la pantalla Carta,
+        # ni el badge de tienda abierta, ni ningun diagnostico.
+        #
+        # Va ARRIBA DE TODO a proposito, y esto es el punto entero:
+        #
+        #   - antes del reload de mas abajo, que es lo obvio;
+        #   - y antes de asegurar_sesion(), que es lo que no lo es.
+        #     asegurar_sesion() arranca con ir_al_menu() y en la pantalla de
+        #     verificacion la URL no es la del menu, asi que NAVEGA igual
+        #     aunque la pestaña este recien refrescada y el reload no corra.
+        #
+        # Todo el worker pasa por aca (13 lugares al 2026-08-06), asi que
+        # este return es el corte de verdad. Los que no pasan por aca tienen
+        # su propia guarda: aplicar_config (no le cierra la pestaña) y
+        # _procesar_pendientes (la cola espera sin gastar intentos).
+        if self.en_verificacion(plataforma):
+            return False, MSG_VERIFICACION
+
         # Sin los datos de la sucursal no hay a donde navegar: la URL sale
         # con los ids vacios y carga cualquier cosa. Y la sesion queda en
         # None (no configurada), que NO es lo mismo que caida.
@@ -624,11 +693,154 @@ class Worker:
 
         self.sesion_ok[plataforma] = ok
         if not ok:
+            # No toda sesion que "no esta lista" es una sesion caida. La
+            # pantalla de verificacion en dos pasos tampoco tiene el menu
+            # cargado, asi que hasta ahora salia como «logueate de nuevo»:
+            # el cartel te mandaba a loguearte justo cuando ya estabas
+            # verificando, y encima con sonido y el titulo parpadeando.
+            if await self._detectar_verificacion(plataforma, plat):
+                return False, MSG_VERIFICACION
             return False, "sesion caida: logueate en la ventana del navegador"
 
         # Volvio la sesion: lo que estaba esperando puede salir ya.
         self.reintentar_desde.pop(plataforma, None)
         return True, ""
+
+    # ---------- Verificacion manual (la pestaña es del usuario) ----------
+
+    async def _detectar_verificacion(self, plataforma: str, plat) -> bool:
+        """Despues de un asegurar_sesion() fallido: ¿es la pantalla del codigo?
+
+        Va aca y no adentro de asegurar_sesion() porque asegurar_sesion()
+        arranca navegando (ir_al_menu), y lo que hay que decidir es
+        justamente si se puede navegar. En este punto ya navegamos, y esta
+        bien: en este momento el usuario todavia NO pidio el codigo, asi que
+        no hay nada roto. Lo que evita el destrozo es que a partir de aca la
+        pestaña queda congelada y las 13 puertas de _preparar se cierran.
+
+        Nunca tira: un chequeo que no pudo mirar contesta que no vio nada
+        (regla 8), y el boton manual de la pantalla sigue estando.
+        """
+        try:
+            if not await plat.en_verificacion():
+                return False
+        except Exception as e:
+            log.warning("%s: error preguntando si es la pantalla de "
+                        "verificacion: %s", plataforma, _resumen(e, 120))
+            return False
+
+        self.congelar_por_verificacion(
+            plataforma, origen="detectada",
+            detalle="la pestaña quedo en la pantalla de verificación en dos pasos")
+        return True
+
+    def en_verificacion(self, plataforma: str) -> bool:
+        """True si nadie puede tocar la pestaña de esa plataforma."""
+        return plataforma in self.verificacion
+
+    def congelar_por_verificacion(self, plataforma: str, origen: str = "manual",
+                                  detalle: str = "") -> list[str]:
+        """Congela la plataforma y a las que comparten login con ella.
+
+        Las dos tiendas de Rappi entran con la MISMA cuenta: la verificacion
+        se hace una vez y vale para las dos, y navegar la pestaña de la
+        hermana mientras tanto puede tirar abajo la sesion que se esta
+        verificando. Ver config.familia_de_sesion.
+
+        Idempotente: volver a llamarlo no reinicia la hora de la que ya
+        estaba congelada (asi el cartel no dice "hace 0 minutos" para
+        siempre) ni pisa el origen: si se congelo a mano, se congelo a mano.
+        """
+        afectadas = config.familia_de_sesion(plataforma) or [plataforma]
+        for nombre in afectadas:
+            if nombre in self.verificacion:
+                continue
+            self.verificacion[nombre] = {
+                "desde": datetime.now(),
+                "origen": origen,
+                "detalle": detalle,
+            }
+            log.warning("%s CONGELADA por verificación manual (%s). Nadie "
+                        "recarga ni navega esa pestaña, y lo encolado espera "
+                        "quieto, hasta que aprietes «Ya terminé de verificar».",
+                        nombre, origen)
+        return afectadas
+
+    def empezar_verificacion(self, plataforma: str) -> dict:
+        """El boton de la pantalla: «Rappi me pide código».
+
+        Es el camino que TIENE que funcionar. La deteccion automatica puede
+        fallar (no tenemos el HTML de esa pantalla todavia); esto no depende
+        de ningun selector.
+        """
+        afectadas = self.congelar_por_verificacion(
+            plataforma, origen="manual",
+            detalle="lo pediste vos desde la pantalla")
+        return {"congeladas": afectadas, "verificacion": self.verificacion_ui()}
+
+    async def terminar_verificacion(self, plataforma: str,
+                                    leer: bool = True) -> dict:
+        """El boton «Ya terminé de verificar». La UNICA salida de este modo.
+
+        No hay timeout ni chequeo automatico que lo apague: el usuario puede
+        estar diez minutos esperando el mail, y cortarlo ahi seria peor que
+        no tener nada.
+
+        Al salir se lee de nuevo, por las dudas: mientras estuvo congelada la
+        app no miro nada, y la ronda pudo haberse salteado varias vueltas.
+        Va en background para que el boton conteste al toque (la lectura de
+        las cartas tarda como un minuto); la pantalla lo muestra sola cuando
+        termina.
+        """
+        # solo_activas=False: para soltar se es generoso a proposito. Si le
+        # borraron el storeId a Rappi Común en Ajustes MIENTRAS verificaba,
+        # ya no figura como activa — y con el filtro puesto quedaria
+        # congelada para siempre, sin ningun boton que la suelte.
+        familia = config.familia_de_sesion(plataforma, solo_activas=False)
+        afectadas = [p for p in familia if p in self.verificacion]
+
+        for nombre in afectadas:
+            self.verificacion.pop(nombre, None)
+            # Que la pestaña se refresque en la proxima operacion (estuvo
+            # parada un rato largo) y que la cola salga YA: el usuario acaba
+            # de decir que terminó, no tiene por que esperar el minuto de la
+            # espera por sesion caida.
+            self.ultimo_refresco.pop(nombre, None)
+            self.reintentar_desde.pop(nombre, None)
+            log.info("%s: se termino la verificación manual. Vuelve a "
+                     "trabajar normal.", nombre)
+
+        # Si mientras estaba congelada la sacaron de Ajustes, recien ahora se
+        # le puede cerrar la pestaña (ver aplicar_config).
+        activas = config.plataformas_activas()
+        for nombre in afectadas:
+            if nombre not in activas and nombre in self.plataformas:
+                await self._cerrar_plataforma(nombre)
+
+        if leer and not self.modo_simulado:
+            asyncio.create_task(self._leer_despues_de_verificar(afectadas))
+
+        return {"liberadas": afectadas, "leyendo": bool(leer),
+                "verificacion": self.verificacion_ui()}
+
+    async def _leer_despues_de_verificar(self, plataformas: list):
+        """La lectura de "por las dudas" al salir del modo verificacion."""
+        for nombre in plataformas:
+            if nombre not in self.plataformas:
+                continue
+            try:
+                await self.sincronizar_estados(nombre)
+            except Exception as e:
+                log.exception("Leyendo %s despues de la verificación: %s",
+                              nombre, e)
+        await self._refrescar_estado_tiendas()
+
+    def verificacion_ui(self) -> dict:
+        """Lo mismo que self.verificacion pero serializable, para la API."""
+        return {plat: {"desde": datos["desde"].isoformat(timespec="seconds"),
+                       "origen": datos["origen"],
+                       "detalle": datos["detalle"]}
+                for plat, datos in self.verificacion.items()}
 
     async def aplicar_config(self) -> dict:
         """Le pasa a las pestañas los ids de sucursal que se acaban de guardar.
@@ -668,7 +880,17 @@ class Worker:
             await self._abrir_rappi_comun()
             log.info("Rappi Común recien configurada: se le abre la pestaña")
         elif not activa and rappi_comun is not None:
-            await self._cerrar_plataforma("rappi_comun")
+            # Cerrar la pestaña es la forma mas terminante de romperle la
+            # verificacion al usuario: no hay recarga que recuperar. Si esta
+            # congelada se deja abierta y se cierra al salir del modo (ver
+            # terminar_verificacion).
+            if self.en_verificacion("rappi_comun"):
+                log.warning("Rappi Común quedo sin storeId en Ajustes, pero "
+                            "esta en verificación manual: no le cierro la "
+                            "pestaña hasta que aprietes «Ya terminé de "
+                            "verificar».")
+            else:
+                await self._cerrar_plataforma("rappi_comun")
 
         for nombre, plat in self.plataformas.items():
             if not plat.en_el_menu():
@@ -694,6 +916,14 @@ class Worker:
                     else list(self.plataformas.keys()))
 
         for nombre in objetivo:
+            # Este boton es exactamente lo que no puede pasar durante una
+            # verificacion: fuerza el refresco. _preparar lo frenaria igual,
+            # pero salteandolo aca el log no se llena de intentos que no
+            # llegan a ningun lado.
+            if self.en_verificacion(nombre):
+                log.info("%s esta en verificación manual: «Revalidar sesión» "
+                         "no la toca.", nombre)
+                continue
             async with self.bloqueo(nombre):
                 self.ultimo_refresco.pop(nombre, None)  # fuerza el refresco
                 # Que el boton sirva para lo que el usuario lo aprieta: acaba
@@ -814,6 +1044,12 @@ class Worker:
         for nombre in config.plataformas_activas():
             plat = self.plataformas.get(nombre)
             if plat is None or not plat.configurado:
+                continue
+            # Congelada: se saltea entera y se DEJA lo ultimo que se sabia.
+            # _preparar la frenaria igual, pero el {"error": ...} pisaria el
+            # badge de abierta/cerrada con un error — una lectura que no se
+            # pudo hacer no puede borrar lo que ya sabiamos (regla 8).
+            if self.en_verificacion(nombre):
                 continue
             try:
                 self.estado_tiendas[nombre] = await self.estado_tienda(nombre)

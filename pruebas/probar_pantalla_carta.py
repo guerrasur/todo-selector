@@ -600,6 +600,82 @@ async def probar_aviso_de_apagado_sin_confirmar(pagina):
             "y el cartel se va cuando deja de haber dudas")
 
 
+async def probar_verificacion_manual(pagina):
+    """El modo «esta pestaña es mía», desde la pantalla.
+
+    Pedido del 2026-08-06: Rappi pide cada ~30 dias un codigo de
+    verificacion que llega al mail del dueño de la cuenta, y hay que
+    quedarse en esa pantalla varios minutos esperandolo. Cualquier recarga
+    del worker lo invalida.
+
+    Lo que se prueba aca es el camino que TIENE que funcionar aunque la
+    deteccion automatica falle: el boton. En modo simulado no hay navegador
+    ni pestaña que congelar, pero el estado, la cola y los carteles son los
+    mismos.
+    """
+    print("\n== Verificación en dos pasos: congelar a mano ==")
+    boton = pagina.locator("#btn-verificacion")
+    revisar(await boton.count() == 1,
+            "hay un botón para congelar Rappi sin esperar a que la app se de "
+            "cuenta sola")
+
+    await boton.click()
+    await pagina.wait_for_selector("#panel-alertas:visible", timeout=10000)
+    await pagina.wait_for_timeout(600)
+
+    panel = pagina.locator("#panel-alertas")
+    texto = await panel.inner_text()
+
+    revisar("congelada" in texto.lower(),
+            "el cartel dice que la app esta congelada, y sobre qué")
+    revisar("Probar otro método" in texto and "Correo electrónico" in texto,
+            "y da los pasos concretos, con los nombres de los botones del portal")
+    revisar("Ya terminé de verificar" in texto,
+            "incluido el último, que es el único que apaga el modo")
+    revisar("invalida" in texto or "empezar de nuevo" in texto,
+            "y avisa por qué no hay que recargar")
+
+    estado = await pagina.locator("#estado-sistema").inner_text()
+    revisar("CONGELADO" in estado,
+            f"el badge de arriba también lo dice ({estado})")
+    revisar(await boton.is_disabled(),
+            "y el botón de congelar queda apagado: ya está congelada")
+
+    # Lo pedido mientras tanto se encola y ESPERA. Que se vea que no se
+    # perdio es la otra mitad del mensaje.
+    r = await pagina.evaluate("""
+        fetch('/api/productos').then(r => r.json()).then(ps => {
+          const p = ps.find(p => p.estados.rappi);
+          return fetch('/api/accion', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({producto_id: p.id, accion: 'apagar_hoy',
+                                  plataformas: ['rappi']}),
+          }).then(r => r.json());
+        })""")
+    revisar(len(r["encoladas"]) == 1,
+            f"una acción pedida mientras tanto se encola igual ({r})")
+
+    await pagina.wait_for_timeout(4000)
+    texto = await pagina.locator("#panel-alertas").inner_text()
+    revisar("esperando en la cola" in texto and "no se perdieron" in texto,
+            f"y el cartel dice que está esperando, no perdida ({texto[-160:]})")
+
+    # Una plataforma congelada NO puede salir ademas como sesion caida: son
+    # dos carteles que se contradicen ("logueate" contra "quedate quieto").
+    alertas = await pagina.evaluate("fetch('/api/alertas').then(r => r.json())")
+    revisar("rappi" not in alertas["sesiones_caidas"],
+            "y no sale además como sesión caída, que diría lo contrario")
+
+    # La unica salida.
+    await pagina.locator("#panel-alertas button", has_text="Ya terminé de verificar").click()
+    await pagina.wait_for_timeout(1500)
+    estado = await pagina.locator("#estado-sistema").inner_text()
+    revisar("CONGELADO" not in estado,
+            f"el botón «Ya terminé» la saca del modo ({estado})")
+    revisar(not await pagina.locator("#btn-verificacion").is_disabled(),
+            "y el botón del header vuelve a estar disponible")
+
+
 async def probar_ajustes(pagina):
     """El panel de configuracion: que guarde y que valide."""
     print("\n== Ajustes ==")
@@ -1023,6 +1099,7 @@ async def main():
         await probar_vista_de_prendidos(pagina)
         await probar_seleccion_de_plataforma(pagina)
         await probar_aviso_de_apagado_sin_confirmar(pagina)
+        await probar_verificacion_manual(pagina)
 
         print("\n== El icono de la pestaña ==")
         icono = await pagina.evaluate("""

@@ -9,6 +9,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import catalogo, cierre, config
@@ -149,6 +150,13 @@ class AccionIn(BaseModel):
     producto_id: int
     accion: str                      # apagar_hoy | apagar_indef | prender
     plataformas: list[str] = ["pedidosya", "rappi"]
+
+
+class VerificacionIn(BaseModel):
+    plataforma: str
+    # True = congelá esa plataforma (y las que comparten login con ella).
+    # False = «Ya terminé de verificar»: la única salida del modo.
+    activa: bool
 
 
 class AliasIn(BaseModel):
@@ -465,8 +473,31 @@ def alertas(db: Session = Depends(get_db)):
                 "motivo": ("no_aparece" if no_visto else "sin_confirmar"),
             })
 
+    # Las congeladas por la verificación en dos pasos. Van con la cuenta de
+    # lo que quedó esperando: «hay 12 operaciones encoladas» es la mitad del
+    # mensaje que importa, porque lo que el usuario necesita saber es que
+    # están esperando, no perdidas.
+    congeladas = worker.verificacion_ui()
+    esperando = {}
+    if congeladas:
+        filas = (db.query(Operacion.plataforma, func.count(Operacion.id))
+                 .filter(Operacion.estado.in_(Operacion.VIVAS),
+                         Operacion.plataforma.in_(list(congeladas)))
+                 .group_by(Operacion.plataforma).all())
+        esperando = {plat: cuantas for plat, cuantas in filas}
+
     return {
-        "sesiones_caidas": [p for p, ok in worker.sesion_ok.items() if ok is False],
+        "verificacion": [
+            {"plataforma": plat, "desde": datos["desde"],
+             "origen": datos["origen"], "detalle": datos["detalle"],
+             "en_espera": esperando.get(plat, 0)}
+            for plat, datos in congeladas.items()],
+        # Una plataforma congelada NO sale además como sesión caída: el menú
+        # tampoco cargó ahí, así que técnicamente lo está, pero el cartel de
+        # «logueate de nuevo» le diría que haga justo lo contrario de lo que
+        # tiene que hacer. Dos carteles que se contradicen es peor que uno.
+        "sesiones_caidas": [p for p, ok in worker.sesion_ok.items()
+                            if ok is False and p not in congeladas],
         "sin_confirmar": salida,
         # Apagado en una tienda de Rappi y prendido en la hermana. Es el
         # mismo tipo de problema que el de arriba —algo que se sigue
@@ -520,6 +551,11 @@ def estado_sistema(db: Session = Depends(get_db)):
         # apagar), pero la app no las prende. La pantalla las marca y saca
         # el botón de prender; el corte de verdad está en el backend.
         "pausadas": config.tiendas_pausadas(),
+        # Las que están congeladas porque el usuario está haciendo la
+        # verificación en dos pasos: plataforma -> {desde, origen, detalle}.
+        # NO va metido en `sesiones`: ahí el tercer valor (None) ya significa
+        # «todavía no dijiste qué sucursal sos», que es otra cosa.
+        "verificacion": worker.verificacion_ui(),
         # Cada cuántos minutos vuelve sola una operación que falló (0 = no
         # vuelve). La pantalla lo dice en el cartel rojo del producto: si no,
         # un "FALLÓ" parece que espera que el usuario haga algo.
@@ -547,6 +583,34 @@ async def sincronizar_estado(plataforma: str = None):
     algo desde el portal y querés que la pantalla se entere.
     """
     return {"resultado": await worker.sincronizar_estados(plataforma)}
+
+
+@app.post("/api/verificacion")
+async def verificacion(data: VerificacionIn):
+    """Prende y apaga el modo «esta pestaña es mía» de una plataforma.
+
+    Rappi pide cada ~30 días, además del login, un código de verificación en
+    dos pasos que llega al mail del dueño de la cuenta. Mientras el usuario
+    espera ese código, CUALQUIER recarga o navegación lo invalida y hay que
+    empezar de nuevo. Con el modo prendido, nada de la app toca esa pestaña
+    y lo que esté encolado espera quieto.
+
+    Prenderlo A MANO es el camino principal, no el plan B: la detección
+    automática depende de un selector que todavía no se pudo confirmar
+    contra el portal real (ver TODO-SELECTOR en plataformas/rappi.py). El
+    usuario ve la pantalla, aprieta el botón antes de empezar, y con eso
+    alcanza.
+
+    Se apaga SOLO con este endpoint (`activa: false`). No hay timeout ni
+    chequeo automático que lo levante: cortar solo, justo cuando está
+    esperando el mail, sería peor que no tener nada.
+    """
+    if data.plataforma not in config.plataformas_activas():
+        raise HTTPException(400, f"plataforma desconocida: {data.plataforma}")
+
+    if data.activa:
+        return worker.empezar_verificacion(data.plataforma)
+    return await worker.terminar_verificacion(data.plataforma)
 
 
 @app.post("/api/revalidar-sesion")

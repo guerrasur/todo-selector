@@ -293,6 +293,30 @@
     background: linear-gradient(90deg, var(--error-fondo), var(--panel) 55%);
   }
   .aviso.grave b { color: #fda4af; }
+  /* Una plataforma congelada por la verificación en dos pasos. Ámbar y no
+     rojo a propósito: la app no está fallando, está haciendo exactamente lo
+     que le pediste (no tocar esa pestaña). El rojo es para lo que salió mal. */
+  .aviso.congelado {
+    border-color: var(--curso-borde); border-left-color: var(--curso);
+    background: linear-gradient(90deg, var(--curso-fondo), var(--panel) 55%);
+  }
+  .bloque-verif { width: 100%; }
+  .bloque-verif .titulo { font-size: 14.5px; color: var(--curso); font-weight: 600; }
+  .bloque-verif .sub { font-size: 13px; color: var(--tenue); margin-top: 4px; }
+  .bloque-verif ol { margin: 10px 0 0; padding-left: 22px; line-height: 1.8; }
+  .bloque-verif li { font-size: 13.5px; }
+  .bloque-verif li.final { color: var(--curso); font-weight: 550; }
+  .bloque-verif kbd {
+    background: var(--panel-2); border: 1px solid var(--borde);
+    border-radius: 4px; padding: 1px 6px; font-family: inherit;
+    font-size: 12.5px; color: var(--texto);
+  }
+  .bloque-verif .pie-verif {
+    display: flex; align-items: center; gap: 12px; margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .bloque-verif .en-espera { font-size: 13px; color: var(--tenue); }
+  #btn-verificacion.activo { background: #2a1f0e; border-color: #8a6318; color: #fcd34d; }
   .pista {
     color: var(--tenue); font-size: 12.5px; margin: -6px 0 16px;
     line-height: 1.55;
@@ -469,6 +493,12 @@
   <button id="btn-cierre" class="solo-dashboard" style="margin-left:auto">Apagar todo</button>
   <button id="btn-leer-estado" class="solo-dashboard">Leer estado real</button>
   <button id="btn-revalidar" class="solo-dashboard">Revalidar sesión</button>
+  <!-- Congela Rappi para hacer la verificación en dos pasos a mano. Es el
+       camino principal, no el plan B: la detección automática todavía no
+       está confirmada contra el portal real, así que lo que tiene que
+       funcionar siempre es que lo aprietes vos ANTES de empezar. -->
+  <button id="btn-verificacion" class="solo-dashboard"
+          title="Apretalo cuando Rappi te pida el código de verificación. La app deja de tocar esa pestaña hasta que le digas que terminaste.">Rappi me pide código</button>
   <button id="btn-avisos" class="solo-dashboard" title="Click para que te avise con una notificación si se cae una sesión">🔔</button>
   <!-- Estos dos quedan visibles siempre (dashboard y pantallas): son la
        navegación a Ajustes/Carta, no solo el botón para abrirlas. Con
@@ -526,6 +556,14 @@ let PLATS = ['pedidosya', 'rappi'];
 // el corte de verdad está en el backend, porque esta pantalla se repinta
 // sola pero un click puede salir con los datos de hace tres segundos.
 let PAUSADAS = new Set();
+
+// Las plataformas congeladas porque estás haciendo la verificación en dos
+// pasos (/api/estado-sistema → verificacion). Sale del backend en cada
+// repintado, así que no es una elección tuya viviendo en una variable local
+// (regla 7): el estado de verdad está del otro lado y esta pantalla solo lo
+// muestra. Se usa para no mandarte a loguearte justo cuando estás
+// verificando, que es lo contrario de lo que tenés que hacer.
+let VERIFICANDO = new Set();
 
 // Cada cuántos minutos vuelve sola una operación que falló (0 = no vuelve).
 // Sale de Ajustes; acá se usa solo para decirlo en el cartel del fallo.
@@ -636,7 +674,8 @@ async function cargar() {
     fetch('/api/estado-sistema').then(r => r.json()),
     fetch('/api/novedades').then(r => r.json()).catch(() => ({ novedades: [] })),
     fetch('/api/alertas').then(r => r.json())
-      .catch(() => ({ sin_confirmar: [], sesiones_caidas: [], sin_espejo: [] })),
+      .catch(() => ({ sin_confirmar: [], sesiones_caidas: [], sin_espejo: [],
+                      verificacion: [] })),
   ]);
 
   dudosos = new Map((alertas.sin_confirmar || [])
@@ -839,23 +878,159 @@ function pasoCarta(cont, falta) {
 // La app no puede prometer que no vuelva a pasar (el portal revive cosas
 // solo, y si no encuentra el producto no puede leerlo), pero sí puede dejar
 // de afirmar en presente algo que no está viendo.
+// ------------------------------------------- Verificación en dos pasos
+//
+// Rappi pide cada ~30 días, además del login, un código que llega al mail
+// del dueño de la cuenta. Puede tardar varios minutos, y CUALQUIER recarga o
+// navegación en el medio lo invalida: hay que empezar de nuevo.
+//
+// Mientras el modo está prendido la app no toca esa pestaña. Este cartel
+// tiene que dejar clarísimas dos cosas: los pasos concretos (que son fáciles
+// de olvidar de un mes al otro) y que lo que pediste está esperando, no
+// perdido.
+
+// Los pasos, tal cual el flujo real de este local. Van escritos acá y no en
+// el backend porque son instrucciones para una persona, no datos.
+const PASOS_VERIFICACION = [
+  ['En la pestaña de Rappi, apretá ', 'Probar otro método', ''],
+  ['Elegí ', 'Correo electrónico', ' (por defecto ofrece SMS)'],
+  ['Esperá el código en el mail del dueño de la cuenta. ', null,
+   'Tomate el tiempo que haga falta: la app no va a tocar esa pestaña.'],
+  ['Pegá el código y entrá.', null, ''],
+];
+
+function pasoVerificacion(antes, resaltado, despues) {
+  const li = document.createElement('li');
+  li.append(antes);
+  if (resaltado) {
+    const k = document.createElement('kbd');
+    k.textContent = resaltado;
+    li.append(k);
+  }
+  if (despues) li.append(despues);
+  return li;
+}
+
+function pintarVerificacion(cont, verif, hayMas) {
+  const caja = document.createElement('div');
+  caja.className = 'bloque-verif';
+  if (hayMas) caja.style.marginBottom = '14px';
+
+  const quienes = verif.map(v => NOMBRE_PLAT[v.plataforma] || v.plataforma);
+  const t = document.createElement('div');
+  t.className = 'titulo';
+  t.textContent = '🔒 La app está congelada sobre ' + quienes.join(' y ') + '.';
+  caja.appendChild(t);
+
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  // Por qué está congelada, en una línea: sin esto, un cartel que dice
+  // "congelado" parece que algo se rompió.
+  sub.textContent =
+    'Estás haciendo la verificación en dos pasos, así que esa pestaña es ' +
+    'tuya: la app no la va a recargar, ni navegar, ni cerrar. ' +
+    (verif.some(v => v.origen === 'detectada')
+      ? 'La detectó sola. '
+      : '') +
+    'No recargues ni cambies de página vos tampoco: el código se invalida y ' +
+    'hay que empezar de nuevo.';
+  caja.appendChild(sub);
+
+  const pasos = document.createElement('ol');
+  for (const [antes, resaltado, despues] of PASOS_VERIFICACION) {
+    pasos.appendChild(pasoVerificacion(antes, resaltado, despues));
+  }
+  // El último va aparte y resaltado: es el único que apaga el modo, y
+  // apretarlo antes de tiempo es volver a empezar.
+  const ultimo = pasoVerificacion('Recién ahí apretá ',
+                                  'Ya terminé de verificar', '.');
+  ultimo.className = 'final';
+  pasos.appendChild(ultimo);
+  caja.appendChild(pasos);
+
+  const pie = document.createElement('div');
+  pie.className = 'pie-verif';
+
+  const boton = document.createElement('button');
+  boton.className = 'grande off';
+  boton.textContent = 'Ya terminé de verificar';
+  boton.onclick = () => terminarVerificacion(verif[0].plataforma, boton);
+  pie.appendChild(boton);
+
+  // Lo encolado espera, no se pierde. Es la otra mitad del mensaje: sin
+  // esto, «congelado» se lee como «lo que pediste se cayó».
+  const total = verif.reduce((s, v) => s + (v.en_espera || 0), 0);
+  const nota = document.createElement('span');
+  nota.className = 'en-espera';
+  nota.textContent = total
+    ? `${total} operación${total === 1 ? '' : 'es'} esperando en la cola: ` +
+      'no se perdieron, salen solas apenas apretes el botón.'
+    : 'Lo que pidas mientras tanto queda encolado y sale solo cuando termines.';
+  pie.appendChild(nota);
+
+  caja.appendChild(pie);
+  cont.appendChild(caja);
+}
+
+// El botón del header. Congela SIEMPRE Rappi: es el único portal que pide
+// esto (PedidosYa se reloguea solo), y el backend se encarga de arrastrar a
+// Rappi Común, que entra con la misma cuenta.
+function actualizarBotonVerificacion() {
+  const b = document.getElementById('btn-verificacion');
+  if (!b) return;
+  const activo = VERIFICANDO.size > 0;
+  b.classList.toggle('activo', activo);
+  b.disabled = activo;
+  b.textContent = activo ? 'Verificando…' : 'Rappi me pide código';
+  b.title = activo
+    ? 'La app está congelada sobre Rappi. Para salir, apretá «Ya terminé de ' +
+      'verificar» en el cartel de abajo.'
+    : 'Apretalo cuando Rappi te pida el código de verificación. La app deja ' +
+      'de tocar esa pestaña hasta que le digas que terminaste.';
+}
+
+async function terminarVerificacion(plataforma, boton) {
+  boton.disabled = true;
+  boton.textContent = 'Saliendo…';
+  try {
+    await fetch('/api/verificacion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plataforma, activa: false }),
+    });
+    await cargar();
+  } catch (e) {
+    alert('No pude salir del modo verificación: ' + e);
+    boton.disabled = false;
+    boton.textContent = 'Ya terminé de verificar';
+  }
+}
+
 function pintarAlertas(alertas) {
   const panel = document.getElementById('panel-alertas');
   const caidas = alertas.sesiones_caidas || [];
   const dudas = alertas.sin_confirmar || [];
   const desparejos = alertas.sin_espejo || [];
+  const verif = alertas.verificacion || [];
 
-  if (!caidas.length && !dudas.length && !desparejos.length) {
+  if (!caidas.length && !dudas.length && !desparejos.length && !verif.length) {
     panel.style.display = 'none';
     return;
   }
 
   panel.style.display = 'block';
-  panel.className = 'aviso grave';
+  // Ámbar si lo único que pasa es que estás verificando (nada salió mal:
+  // la app está haciendo lo que le pediste), rojo si además hay algo que
+  // puede costar plata.
+  const hayProblemas = caidas.length || dudas.length || desparejos.length;
+  panel.className = 'aviso ' + (hayProblemas ? 'grave' : 'congelado');
   panel.innerHTML = '';
   const cont = document.createElement('div');
   cont.style.width = '100%';
   panel.appendChild(cont);
+
+  // Primero de todo: si estás verificando, es lo único que estás por hacer.
+  if (verif.length) pintarVerificacion(cont, verif, hayProblemas);
 
   if (caidas.length) {
     const t = document.createElement('div');
@@ -1057,26 +1232,50 @@ function pintarSistema(s) {
   // esta lista.
   if (Array.isArray(s.plataformas) && s.plataformas.length) PLATS = s.plataformas;
   PAUSADAS = new Set(s.pausadas || []);
+  VERIFICANDO = new Set(Object.keys(s.verificacion || {}));
   REINTENTA_FALLIDAS = s.reintenta_fallidas || 0;
   nombrarPlataformas();
+  actualizarBotonVerificacion();
 
   if (s.version) document.getElementById('version').textContent = 'v' + s.version;
 
   pintarTiendas(s.tiendas || {});
 
   const el = document.getElementById('estado-sistema');
+
+  // Que estés verificando manda sobre lo demás: mientras dura, la app no
+  // está tocando esas plataformas, y eso tiene que verse de arriba y no
+  // solo en el cartel. Va incluso en modo simulado —donde no hay pestaña
+  // que congelar— porque esconder un estado según el modo hace que después
+  // no se pueda probar que se muestra.
+  const congelado = VERIFICANDO.size
+    ? 'CONGELADO: verificando ' +
+      [...VERIFICANDO].map(p => NOMBRE_PLAT[p] || p).join(' y ')
+    : '';
+
   if (s.simulado) {
-    el.textContent = 'MODO SIMULADO';
+    el.textContent = congelado ? 'MODO SIMULADO · ' + congelado : 'MODO SIMULADO';
     el.className = 'badge alerta';
   } else {
     // Una plataforma sin sucursal cargada figura como sesión caída, pero el
     // problema NO es el login: es que todavía no dijiste qué local sos. Si
     // te manda a loguearte —y encima con sonido y notificación— en el
     // primer arranque, te manda al lugar equivocado.
+    // Y una plataforma congelada por la verificación en dos pasos tampoco
+    // es una sesión caída, aunque el menú no haya cargado: mandarla a
+    // loguearse de nuevo —con sonido, notificación y el título parpadeando—
+    // es pedirle justo lo contrario de lo que tiene que hacer, que es
+    // quedarse quieta en esa pantalla esperando el código.
     const faltaSucursal = s.falta_sucursal || [];
     const caidas = PLATS.filter(p => s.sesiones[p] === false
-                                     && !faltaSucursal.includes(p));
-    if (caidas.length) {
+                                     && !faltaSucursal.includes(p)
+                                     && !VERIFICANDO.has(p));
+    if (congelado) {
+      // Va antes que "Login pendiente" a propósito: «logueate de nuevo» es
+      // lo contrario de lo que tenés que hacer mientras esperás el código.
+      el.textContent = congelado;
+      el.className = 'badge alerta';
+    } else if (caidas.length) {
       el.textContent = 'Login pendiente: ' + caidas.map(p => NOMBRE_PLAT[p]).join(', ');
       el.className = 'badge alerta';
     } else {
@@ -2824,6 +3023,25 @@ document.getElementById('btn-leer-estado').onclick = async (e) => {
   } finally {
     b.disabled = false;
     b.textContent = 'Leer estado real';
+  }
+};
+
+document.getElementById('btn-verificacion').onclick = async (e) => {
+  const b = e.target;
+  b.disabled = true;
+  try {
+    await fetch('/api/verificacion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Siempre 'rappi': es el único portal que pide verificación en dos
+      // pasos. El backend arrastra a Rappi Común, que entra con la misma
+      // cuenta (config.familia_de_sesion).
+      body: JSON.stringify({ plataforma: 'rappi', activa: true }),
+    });
+    await cargar();
+  } catch (err) {
+    alert('No pude congelar Rappi: ' + err);
+    b.disabled = false;
   }
 };
 

@@ -459,6 +459,42 @@ def plataformas_activas() -> list[str]:
     return activas
 
 
+# Plataformas que comparten EL MISMO LOGIN del portal. Las dos tiendas de
+# Rappi son independientes para todo lo demas (carta distinta, toggles
+# distintos, apagar en una no apaga en la otra) pero se entra con la misma
+# cuenta: la verificacion en dos pasos se hace UNA vez y vale para las dos.
+#
+# Por eso congelar una congela a la otra (ver worker.empezar_verificacion):
+# si Rappi Turbo esta esperando el codigo y la ronda navega la pestaña de
+# Rappi Común, el portal puede tirar abajo la misma sesion que se estaba
+# verificando. Esto NO es propagacion de apagados: lo que se comparte es la
+# sesion del navegador, no el estado de los productos.
+FAMILIAS_DE_SESION = (("rappi", "rappi_comun"),)
+
+
+def familia_de_sesion(plataforma: str, solo_activas: bool = True) -> list[str]:
+    """Las plataformas que comparten login con esta (ella incluida).
+
+    Con `solo_activas` (el default) se filtra por plataformas_activas(), que
+    es lo que corresponde para CONGELAR: quien no esta configurada no tiene
+    pestaña, asi que no hay nada que proteger (regla 9).
+
+    Para SOLTAR hay que pasar solo_activas=False, y es a proposito: si al
+    usuario le borraron el storeId de una tienda MIENTRAS verificaba, esa
+    tienda sigue congelada pero ya no esta activa. Filtrandola tambien acá,
+    quedaria congelada para siempre y sin ningun boton que la suelte.
+    """
+    for familia in FAMILIAS_DE_SESION:
+        if plataforma in familia:
+            if not solo_activas:
+                return list(familia)
+            activas = plataformas_activas()
+            return [p for p in familia if p in activas]
+    if not solo_activas:
+        return [plataforma]
+    return [p for p in plataformas_activas() if p == plataforma]
+
+
 # plataforma -> ajuste que la pone en pausa. OJO: una tienda en pausa SIGUE
 # activa. Se le abre pestaña, se lee y se puede apagar; lo unico que no pasa
 # es que la app la prenda. Sacarla de plataformas_activas() la volveria

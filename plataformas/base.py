@@ -146,6 +146,29 @@ class PlataformaBase(ABC):
         """
         return None
 
+    async def en_verificacion(self) -> bool:
+        """La pantalla que hay AHORA, ¿es una verificacion que hace el usuario?
+
+        Algunos portales piden, cada tanto y ademas del login, un codigo de
+        verificacion que llega por mail o SMS. Eso lo resuelve una persona,
+        puede llevar varios minutos, y RECARGAR O NAVEGAR EN EL MEDIO INVALIDA
+        EL CODIGO: hay que empezar de nuevo.
+
+        Reglas de este metodo, para cualquier plataforma que lo implemente:
+
+          - NO NAVEGA NI RECARGA. Mira lo que ya esta en la pestaña. Si para
+            contestar hubiera que ir a algun lado, ya rompio lo que viene a
+            proteger.
+          - Ante la duda, False. Un falso positivo congela la plataforma
+            hasta que alguien apriete el boton en la pantalla.
+          - No es la defensa principal: la que tiene que funcionar si o si es
+            el boton manual (worker.empezar_verificacion). Esto solo le
+            ahorra el paso al usuario cuando acierta.
+
+        Default: no. PedidosYa se reloguea solo y no pasa por esto.
+        """
+        return False
+
     # ---------- Helpers comunes ----------
 
     def en_el_menu(self) -> bool:
