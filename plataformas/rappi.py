@@ -204,6 +204,85 @@ class Rappi(PlataformaBase):
         await self.neutralizar_estorbos()
         return True
 
+    # =====================================================================
+    #  TODO-SELECTOR: LA PANTALLA DE VERIFICACION EN DOS PASOS
+    # =====================================================================
+    # Cada ~30 dias Rappi pide, ADEMAS del login normal, un codigo de
+    # verificacion al entrar. El flujo real de este local (contado por el
+    # usuario, 2026-08-06):
+    #
+    #   1. La pantalla ofrece SMS por defecto.
+    #   2. Hay que apretar "Probar otro método" y despues "Correo electrónico".
+    #   3. El codigo llega al mail del dueño de la cuenta, no al del local.
+    #   4. Hay que QUEDARSE en esa pantalla, sin recargar ni navegar, hasta
+    #      que se lo pasen. Pueden pasar varios minutos.
+    #
+    # Si la pagina se recarga o navega en el medio, el codigo se invalida.
+    #
+    # NO TENEMOS EL HTML DE ESA PANTALLA TODAVIA. Estos textos salen de lo
+    # que el usuario ve, no de DevTools, asi que hay que confirmarlos en
+    # vivo la proxima vez que aparezca — mismo criterio que el resto del
+    # archivo: texto visible, nunca clases generadas por styled-components
+    # (regla 2 de CLAUDE.md).
+    #
+    # ESTO NO ES LA DEFENSA PRINCIPAL, y es a proposito. La que tiene que
+    # funcionar si o si es el boton de la pantalla: el usuario ve la
+    # verificacion y la congela el mismo ANTES de empezar. Aunque estos
+    # textos esten todos mal, el boton lo cubre igual. Lo que este metodo
+    # agrega es que, cuando acierta, el usuario no tenga que acordarse.
+    #
+    # Tampoco hay nada aca que apriete los botones de esa pantalla. El paso
+    # manual es a proposito: el codigo llega al mail de otra persona.
+    TEXTOS_VERIFICACION = (
+        "Probar otro método",
+        "Verificación en dos pasos",
+        "Verificación de dos pasos",
+        "Código de verificación",
+        "Ingresá el código",
+        "Ingresa el código",
+        "te enviamos un código",
+    )
+
+    async def en_verificacion(self) -> bool:
+        """True si la pestaña esta parada en la pantalla del codigo.
+
+        Pide DOS evidencias juntas, no una:
+
+          1. No estamos en el menu. Si el menu cargo, no hay verificacion
+             pendiente: se entro y listo.
+          2. Se ve alguno de los textos de arriba (comparados sin tildes,
+             por lo mismo que las opciones del dialogo: "Ingresá" e
+             "Ingresa" se leen igual y no son el mismo string).
+
+        Solo el punto 2 alcanzaria para un falso positivo tonto: el portal
+        puede tener un "Código de verificación" escondido en cualquier
+        pantalla. Y solo el punto 1 es casi cualquier fallo de carga.
+
+        No navega ni recarga: mira lo que ya hay. Si ni siquiera se puede
+        leer la pagina, contesta False — un chequeo que no pudo mirar no
+        puede afirmar nada (regla 8), y el boton manual sigue estando.
+        """
+        if self.en_el_menu():
+            return False
+
+        try:
+            cuerpo = await self.page.inner_text("body")
+        except Exception as e:
+            log.debug("%s: no pude leer la pantalla para ver si es la de "
+                      "verificacion: %s", self.nombre, e)
+            return False
+
+        visible = plano(cuerpo)
+        vistos = [f for f in self.TEXTOS_VERIFICACION if plano(f) in visible]
+        if not vistos:
+            return False
+
+        log.warning("%s: parece la pantalla de verificacion en dos pasos "
+                    "(vi %s en %s). Congelo la pestaña: no la toca nadie "
+                    "hasta que aprietes «Ya terminé de verificar».",
+                    self.nombre, vistos, self.page.url)
+        return True
+
     def _tarjeta(self, nombre_remoto: str):
         """Locator de la tarjeta del producto.
 

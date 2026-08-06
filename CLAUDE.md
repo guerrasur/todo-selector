@@ -17,6 +17,13 @@ trae `for="switch-hidden-input"` (repetido en toda la carta) y el popup de
 reglas 6, 13, 14 y 15, y `pruebas/probar_rappi_menu.py` escenario F. La cola
 ahora **se ve y se cancela**: el badge de «N en cola» abre un panel.
 
+**La verificación en dos pasos de Rappi** (2026-08-06). Cada ~30 días el
+portal pide un código que llega al mail del dueño de la cuenta, y hay que
+quedarse en esa pantalla varios minutos: **cualquier recarga lo invalida**.
+El worker navegaba esa pestaña en trece lugares, así que hacerla era una
+carrera contra la app. Ahora hay un tercer estado además de «ok» y «caída»:
+la plataforma se **congela** y nadie toca su pestaña. Ver la regla 16.
+
 El catálogo ya no se mantiene a mano: la pantalla **Carta** lee los dos
 portales y el usuario vincula o separa desde ahí (`app/catalogo.py`). En
 cuanto toca algo, `seed.py` deja de pisar los alias.
@@ -181,6 +188,28 @@ columna sigue sin estar cubierto.
     cancelado antes de tocar el portal queda en `DESCONOCIDO`, no en un
     estado inventado (regla 8); si el cambio llegó a entrar, se anota, que
     esconder lo que sí vimos es el mismo error del otro lado.
+
+16. **Una plataforma congelada no la toca NADIE** (2026-08-06,
+    `worker.verificacion`). Rappi pide cada ~30 días un código de
+    verificación que llega al mail del dueño de la cuenta: hay que
+    quedarse quieto en esa pantalla varios minutos y cualquier recarga o
+    navegación lo invalida. Mientras `en_verificacion(plataforma)` sea
+    True: no se recarga, no se navega y no se le cierra la pestaña. El
+    corte vive arriba de todo en `_preparar()` —por donde pasan las trece
+    puertas del worker— y va **antes de `asegurar_sesion()`**, no solo
+    antes del reload: `asegurar_sesion()` arranca con `ir_al_menu()`, así
+    que navega igual con la pestaña recién refrescada. Los tres que no
+    pasan por `_preparar` tienen su propia guarda: `aplicar_config` (no le
+    cierra la pestaña), `_procesar_pendientes` (la cola espera) y
+    `_refrescar_estado_tiendas` (se saltea, no pisa el badge con un error).
+    **Se sale SOLO con el botón del usuario**: nada de timeouts ni de
+    chequeos automáticos — un plazo que vence solo cortaría justo cuando
+    está esperando el mail, que es peor que no tener nada. Y la activación
+    **manual** es la defensa principal, no el plan B: la detección
+    (`Rappi.en_verificacion()`) tiene un `TODO-SELECTOR` sin confirmar, así
+    que nada puede depender de que acierte. Congelar Rappi Turbo congela
+    Rappi Común: son tiendas independientes pero entran con la MISMA cuenta
+    (`config.familia_de_sesion`).
 
 5. **Probá con modo simulado primero** (`STOCKSWITCH_SIMULADO=1`) si tocás
    worker o API, para no depender del navegador.
