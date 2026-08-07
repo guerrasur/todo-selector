@@ -203,7 +203,25 @@ class Worker:
             user_data_dir=str(PERFIL_CHROME),
             headless=False,
             channel="chrome",
-            args=["--start-maximized", "--no-first-run"],
+            args=["--start-maximized", "--no-first-run",
+                  # Chrome le pisa el freno a las pestañas que no estan
+                  # adelante: estrangula los timers y directamente PAUSA los
+                  # pasos de rendering. Y de las tres pestañas de la app, dos
+                  # estan siempre atras.
+                  #
+                  # Eso rompia el apagado de Rappi (log del 2026-08-07): el
+                  # popup de "hasta cuando" es un portal de floating-ui, que
+                  # se monta invisible y se hace visible recien cuando lo
+                  # posiciona — y posicionarlo depende justamente del
+                  # rendering que la pestaña de fondo no corre. El popup
+                  # quedaba en el DOM y no aparecia nunca.
+                  #
+                  # No se usa bring_to_front() en su lugar a proposito: le
+                  # robaria el foco al usuario 30 veces seguidas durante un
+                  # "Apagar todo", encima de lo que este haciendo.
+                  "--disable-background-timer-throttling",
+                  "--disable-backgrounding-occluded-windows",
+                  "--disable-renderer-backgrounding"],
             ignore_default_args=["--enable-automation"],
             no_viewport=True,
         )

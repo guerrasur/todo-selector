@@ -617,8 +617,12 @@ class PlataformaBase(ABC):
         """
         return self.page.get_by_text(nombre_remoto, exact=True)
 
+    # Cuanto de la tarjeta se muestra en el aviso de ambiguedad. Alcanza
+    # para reconocer el plato sin volcar media pantalla en el log.
+    LARGO_DESC_TARJETA = 70
+
     async def tarjetas_del_nombre(self, nombre_remoto: str) -> list:
-        """Los ids de las tarjetas distintas a las que llega ese nombre.
+        """Las tarjetas distintas a las que llega ese nombre.
 
         Dos matches del mismo texto NO son necesariamente un problema: el
         nombre puede aparecer dos veces DENTRO de una tarjeta (titulo y
@@ -626,8 +630,15 @@ class PlataformaBase(ABC):
         `.first` de siempre elige una al azar, y apagar la equivocada es
         indistinguible de un bug (regla 3 del CLAUDE.md).
 
-        Devuelve la lista de ids distintos, en orden. Vacia si no se pudo
-        averiguar, que se trata como "no se puede afirmar que haya lio".
+        Devuelve una lista de `(id, que dice la tarjeta)`, sin repetir id y
+        en orden. Vacia si no se pudo averiguar, que se trata como "no se
+        puede afirmar que haya lio".
+
+        El texto va porque el id solo no sirve para arreglar nada: el log
+        del 2026-08-07 decia "aparece en 2 productos distintos
+        (mat-slide-toggle-76-input, mat-slide-toggle-77-input)" y el usuario
+        no tiene forma de saber cuales son esos dos platos ni, por lo tanto,
+        que corregir en la pantalla Carta.
         """
         if not (self.XPATH_TARJETA and self.ATRIBUTO_ID_TARJETA):
             return []
@@ -638,19 +649,29 @@ class PlataformaBase(ABC):
         except Exception:
             return []
 
-        ids = []
+        tarjetas = []
+        vistos = set()
         for i in range(min(cuantos, 10)):
             try:
-                quien = textos.nth(i).locator(self.XPATH_TARJETA).first
+                tarjeta = textos.nth(i).locator(self.XPATH_TARJETA).first
+                quien = tarjeta
                 if self.SELECTOR_ID_TARJETA:
-                    quien = quien.locator(self.SELECTOR_ID_TARJETA).first
+                    quien = tarjeta.locator(self.SELECTOR_ID_TARJETA).first
                 ident = await quien.get_attribute(self.ATRIBUTO_ID_TARJETA,
                                                   timeout=1000)
             except Exception:
                 continue
-            if ident and ident not in ids:
-                ids.append(ident)
-        return ids
+            if not ident or ident in vistos:
+                continue
+            # Que diga la tarjeta es un lujo, no un requisito: si no se
+            # puede leer, el id solo sigue sirviendo para contar.
+            try:
+                dice = " ".join((await tarjeta.inner_text(timeout=1000)).split())
+            except Exception:
+                dice = ""
+            vistos.add(ident)
+            tarjetas.append((ident, dice[:self.LARGO_DESC_TARJETA]))
+        return tarjetas
 
     async def revisar_ambiguedad(self, nombre_remoto: str):
         """Tira NombreAmbiguo si el nombre llega a dos productos distintos.
@@ -662,17 +683,22 @@ class PlataformaBase(ABC):
         bug que se esta tratando de evitar. Un apagado que no ocurre y se
         ve en rojo es mejor que uno que cae en el plato equivocado.
         """
-        ids = await self.tarjetas_del_nombre(nombre_remoto)
-        if len(ids) <= 1:
+        tarjetas = await self.tarjetas_del_nombre(nombre_remoto)
+        if len(tarjetas) <= 1:
             return
 
-        log.error("%s: '%s' aparece en %s productos distintos del portal "
-                  "(%s). No toco ninguno: no hay forma de saber cual es.",
-                  self.nombre, nombre_remoto, len(ids), ", ".join(ids[:4]))
+        # Los platos primero y el id despues: el id sirve para rastrear en
+        # el log, pero el que tiene que decidir que corregir es el usuario y
+        # lo que reconoce es el nombre.
+        cuales = "; ".join(f"«{dice or '?'}» ({ident})"
+                           for ident, dice in tarjetas[:4])
+        log.error("%s: '%s' aparece en %s productos distintos del portal: %s. "
+                  "No toco ninguno: no hay forma de saber cual es.",
+                  self.nombre, nombre_remoto, len(tarjetas), cuales)
         raise NombreAmbiguo(
-            f"'{nombre_remoto}' aparece en {len(ids)} productos distintos de "
-            f"{self.nombre}. Corregí el nombre en la pantalla Carta para que "
-            f"apunte a uno solo.")
+            f"'{nombre_remoto}' aparece en {len(tarjetas)} productos distintos "
+            f"de {self.nombre}: {cuales}. Corregí el nombre en la pantalla "
+            f"Carta para que apunte a uno solo.")
 
     async def clickear(self, locator, timeout: int = 8000, que: str = "elemento",
                        profundo: bool = False) -> bool:

@@ -506,6 +506,25 @@ http://127.0.0.1:8001/api/diagnostico?plataforma=pedidosya&nombre=Empanada%20de%
 Con el nombre real, se corrige el alias con `POST /api/alias`, o vinculando
 los dos nombres desde la pantalla Carta, que es lo mismo sin tocar código.
 
+### «Aparece en 2 productos distintos»
+
+El otro fallo típico es el opuesto: el nombre no es que no encuentre nada, es
+que encuentra **de más**. Ahí la app no toca ninguno a propósito (regla 11):
+elegir al azar cuál apagar es indistinguible de un bug, y un apagado que no
+ocurre y se ve en rojo es mejor que uno que cae en el plato equivocado.
+
+El mensaje nombra los dos productos, no solo sus ids internos:
+
+```
+'Wrap brie' aparece en 2 productos distintos de pedidosya:
+  «Wrap brie de rúcula $8500» (mat-slide-toggle-76-input);
+  «Wrap brie y jamón crudo $9200» (mat-slide-toggle-77-input)
+```
+
+Con eso ya se ve cuál de los dos querías: se corrige el alias en la pantalla
+Carta para que apunte a uno solo. Antes salían nada más los dos
+`mat-slide-toggle-NN-input`, que no le dicen a nadie qué corregir.
+
 ## Qué hacer si se cae una sesión
 
 La UI muestra "Login pendiente: Rappi" (o PedidosYa) en rojo. Andá a la ventana
@@ -929,11 +948,65 @@ carta entera hay que recorrerlas (ver el punto 0).
       el portal (regla 8). De paso, las operaciones que quedaban `EN_CURSO`
       al cerrarse la app vuelven a la cola al arrancar, en vez de quedar
       colgadas para siempre contando en el badge.
-- [ ] **Confirmar en vivo cuál es el caso de Rappi Turbo.** ← EMPEZÁ POR ACÁ
-      El arreglo del 2026-08-05 (segunda tanda) dejó la escalera de clicks
-      aguantando más y el diagnóstico sin ambigüedad, pero **no está probado
-      contra el portal real**: el usuario reportó que «por ahora la app anda»,
-      así que la falla es intermitente y no se pudo reproducir en vivo.
+- [x] **El log en vivo contestó cuál era el caso: el click no era el
+      problema.** (2026-08-07.) La línea `opciones en el DOM: 0 -> 3` salió en
+      **todos** los fallos de Rappi Turbo, y significa que el popup de «hasta
+      cuándo» **sí se abría**. Lo que fallaba era leerlo: durante los 10 s que
+      la app esperaba, el filtro `visible=true` no matcheaba ni una opción, y
+      recién al armar el mensaje de error aparecían las 3. Encima no era un
+      fallo duro: los apagados que sí entraron tardaron 23-27 s de punta a
+      punta, o sea rozando el límite. La app se rendía con el popup abierto
+      adelante, recargaba, y tiraba el trabajo hecho.
+
+      Dos mecanismos posibles, y el log no podía distinguirlos, así que se
+      cubrieron los dos:
+
+      1. **El popup monta y se queda invisible para Playwright.** floating-ui
+         deja el portal sin posicionar —y por lo tanto en `visibility:hidden`—
+         hasta que corre el rendering, que Chrome **pausa en las pestañas de
+         fondo**; y de las tres pestañas de la app, dos están siempre atrás.
+         Arreglado por los dos lados: `_opcion_del_dialogo()` tiene ahora un
+         tercer camino que lee las opciones **del DOM** (con `text_content()`,
+         porque `inner_text()` devuelve `""` para lo que no está renderizado) y
+         las clickea por JS; y el navegador arranca con
+         `--disable-background-timer-throttling`,
+         `--disable-backgrounding-occluded-windows` y
+         `--disable-renderer-backgrounding`, que es el arreglo de fondo. **No**
+         se usa `bring_to_front()`: le robaría el foco al usuario 30 veces
+         seguidas durante un «Apagar todo».
+      2. **El popup monta tarde.** El techo pasó de 10 s a `TIMEOUT_DIALOGO`
+         (20 s), y además el reloj dejó de correr igual antes y después: una
+         vez que el popup aparece en el DOM corre `GRACIA_DIALOGO` aparte, que
+         no se descuenta de lo que ya se gastó esperándolo.
+
+      Lo que hace seguro sacar el filtro de visibilidad es la **línea de base**
+      (`opciones_antes`, que ya se medía): el camino nuevo se activa solo si el
+      conteo **subió**. Con `3 -> 3` no se activa, porque ahí lo que hay en el
+      DOM es la plantilla escondida de siempre y el problema vuelve a ser el
+      click. Sin línea de base tampoco: no se puede distinguir una cosa de la
+      otra (regla 8). Y sigue sin elegirse **nunca** por posición: la tercera
+      opción es «Personalizar», que no apaga nada.
+
+      El modal de «¿Desactivar producto?» que viene después se lee igual, así
+      que recibió el mismo fallback — con `include_hidden=True`, porque
+      `get_by_role` sigue el árbol de accesibilidad y un modal en
+      `visibility:hidden` no está ahí.
+
+      Y para que el próximo log no vuelva a dejar los dos mecanismos
+      confundidos, el diagnóstico ahora dice **cuándo** apareció el popup y
+      **cómo** están las opciones (`visibility`/`display`/`opacity`/caja): «a
+      los 1,2 s y sigue en `visibility:hidden`» es el (1), «apareció DESPUÉS de
+      que dejáramos de mirar» es el (2).
+
+      Escenarios I (`?dialogo=invisible`) y J (`?dialogo=tarde`) de
+      `pruebas/probar_rappi_menu.py`, los dos rojos con el código anterior.
+
+      Queda lo que ya estaba anotado abajo y no cambió: el volcado de
+      `/api/diagnostico` para el caso en que el que falle sea el **click**.
+
+- [ ] **Si vuelve a fallar y esta vez el que no entra es el CLICK.** Lo de
+      arriba cubre el popup; esto es para el otro caso, el que se reconoce
+      porque el log dice `3 -> 3` (o «no cambió») en vez de `0 -> 3`.
 
       El paso que lo cierra, y que no hace falta esperar a que falle:
 

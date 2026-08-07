@@ -17,6 +17,14 @@ trae `for="switch-hidden-input"` (repetido en toda la carta) y el popup de
 reglas 6, 13, 14 y 15, y `pruebas/probar_rappi_menu.py` escenario F. La cola
 ahora **se ve y se cancela**: el badge de «N en cola» abre un panel.
 
+**El popup de «hasta cuándo» se abría y la app dejaba de mirarlo**
+(2026-08-07). El apagado de Rappi Turbo fallaba la mitad de las veces, y el
+log contestó qué pasaba: `opciones en el DOM: 0 -> 3`, o sea que el click
+entraba y el popup se abría. Lo que fallaba era **leerlo** — Playwright no
+veía ni una opción, y los apagados que sí entraban tardaban 23-27 s, o sea
+rozando el límite de 10. Ver la regla 17 y `pruebas/probar_rappi_menu.py`
+escenarios I y J.
+
 **La verificación en dos pasos de Rappi** (2026-08-06). Cada ~30 días el
 portal pide un código que llega al mail del dueño de la cuenta, y hay que
 quedarse en esa pantalla varios minutos: **cualquier recarga lo invalida**.
@@ -210,6 +218,35 @@ columna sigue sin estar cubierto.
     que nada puede depender de que acierte. Congelar Rappi Turbo congela
     Rappi Común: son tiendas independientes pero entran con la MISMA cuenta
     (`config.familia_de_sesion`).
+
+17. **Que Playwright no lo vea no quiere decir que no esté**
+    (2026-08-07, `rappi._opcion_del_dialogo`). El popup de «hasta cuándo»
+    es un portal de floating-ui: monta invisible y se hace visible recién
+    cuando lo posiciona, y posicionarlo depende del rendering que **Chrome
+    pausa en las pestañas de fondo** — donde viven dos de las tres
+    pestañas de la app. El popup quedaba en el DOM y no aparecía nunca.
+    Se ataca por los dos lados: el navegador arranca sin el freno de las
+    pestañas de fondo (`--disable-renderer-backgrounding` y las otras dos,
+    en `worker._abrir_navegador`), y la lectura del diálogo tiene un
+    camino que **no exige verlo**: lee las opciones del DOM con
+    `text_content()` —`inner_text()` devuelve `""` para lo que no está
+    renderizado, así que sacar el filtro sin cambiar esto no habría
+    servido de nada— y las clickea por JS.
+
+    Lo que hace seguro sacar el filtro es la **línea de base**: se cuentan
+    las opciones ANTES de tocar el toggle y el camino nuevo se activa solo
+    si el número **subió**. Con `3 -> 3` no se activa (eso es la plantilla
+    escondida de siempre, y el problema es el click); sin línea de base
+    tampoco (regla 8). Y nunca se elige por posición: la tercera opción es
+    «Personalizar», que no apaga nada. El mismo tratamiento va para el
+    modal de confirmar, ahí con `include_hidden=True` porque `get_by_role`
+    sigue el árbol de accesibilidad y un modal en `visibility:hidden` no
+    está en él.
+
+    **Esperar no puede ser un plazo fijo.** Eran 10 s planos de punta a
+    punta. Ahora hay un techo (`TIMEOUT_DIALOGO`) y, aparte, una gracia
+    (`GRACIA_DIALOGO`) que arranca cuando el popup aparece en el DOM:
+    haberlo esperado 18 s no es motivo para darle 2 para leerlo.
 
 5. **Probá con modo simulado primero** (`STOCKSWITCH_SIMULADO=1`) si tocás
    worker o API, para no depender del navegador.

@@ -19,6 +19,23 @@ clase Rappi de verdad. Cubre lo que el log del 2026-08-03 dejo ver:
      por data-testid y el texto SIN tilde. Buscar el texto exacto no
      encuentra nada; hay que elegir la opcion comparando sin tildes, sin
      elegir nunca por posicion, y no dejar el dialogo abierto.
+
+Y lo que dejaron ver los logs de agosto:
+
+  F) (?tapa=ancestro) Lo que tapa el toggle es un ANCESTRO suyo, el popup
+     abre solo con pointerdown adentro del <label>, y el `for` del label
+     esta repetido en toda la carta.
+  G) (?tapa=muchos) Mas capas tapando que el tope de 3 del destapado viejo:
+     se destapan todas de una y se restauran todas.
+  H) (?tapa=recorte) El toggle no aparece en su propia pila: no lo tapa
+     nadie, y destapar ancestros no arregla nada. Hay que decirlo asi.
+  I) (?dialogo=invisible) El popup se abre —las 3 opciones estan en el
+     DOM— pero el portal sigue sin posicionar, asi que Playwright no ve
+     ninguna. Es la mitad del 2026-08-07: el log decia "Opciones que vi:
+     (ninguna)" y "opciones en el DOM: 0 -> 3" en la misma linea. Hay que
+     leerlas del DOM y clickearlas por JS, sin dejar de elegir por texto.
+  J) (?dialogo=tarde) La otra mitad: el popup monta a los 14 s, pasado el
+     limite viejo de 10, y la app se rendia con el popup por llegar.
 """
 
 import asyncio
@@ -165,15 +182,21 @@ async def nombres_ambiguos(navegador):
     await plat.asegurar_sesion()
 
     # Dos veces el mismo texto, pero en UNA sola tarjeta: es inofensivo.
-    ids = await plat.tarjetas_del_nombre("Gaseosa cola 500 ml")
-    revisar(len(ids) == 1,
-            f"el nombre repetido dentro de una tarjeta cuenta como una ({ids})")
+    tarjetas = await plat.tarjetas_del_nombre("Gaseosa cola 500 ml")
+    revisar(len(tarjetas) == 1,
+            f"el nombre repetido dentro de una tarjeta cuenta como una "
+            f"({[i for i, _ in tarjetas]})")
     revisar(await plat.apagar("Gaseosa cola 500 ml", por_hoy=True),
             "y por eso se puede apagar normal")
 
     # Dos tarjetas distintas: no hay forma de saber cual quiso el usuario.
-    ids = await plat.tarjetas_del_nombre("Agua con gas")
-    revisar(len(ids) == 2, f"el que esta en dos tarjetas cuenta como dos ({ids})")
+    tarjetas = await plat.tarjetas_del_nombre("Agua con gas")
+    revisar(len(tarjetas) == 2,
+            f"el que esta en dos tarjetas cuenta como dos "
+            f"({[i for i, _ in tarjetas]})")
+    revisar(all(dice for _, dice in tarjetas),
+            f"y el aviso puede nombrarlas, no solo numerarlas "
+            f"({[d for _, d in tarjetas]})")
 
     antes = await pagina.evaluate("localStorage.getItem('apagados')")
     try:
@@ -382,6 +405,69 @@ async def el_toggle_no_esta_en_su_pila(navegador):
     await pagina.close()
 
 
+async def el_popup_esta_pero_no_se_ve(navegador):
+    print("\n== I) El popup se abre y Playwright no lo ve (2026-08-07) ==")
+    plat, pagina = await abrir_plataforma(navegador, "?dialogo=invisible")
+    revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja el menu listo")
+
+    nombre = "Villavicencio con gas 500 ml"
+
+    # Asi se veia el log: ni una opcion visible, y las 3 en el DOM. Las dos
+    # mediciones a la vez son las que dicen que el click no era el problema.
+    await plat.clickear(plat._toggle_clickeable(plat._tarjeta(nombre)),
+                        que="toggle", profundo=True)
+    await pagina.wait_for_timeout(2500)
+    revisar(await plat._opciones_abiertas().count() == 0,
+            "ninguna opcion cuenta como visible")
+    revisar(await plat._contar_opciones() == 3,
+            "y sin embargo las 3 estan en el DOM")
+    revisar(await plat.texto_overlay() == "",
+            "texto_overlay() tampoco ve nada, igual que en el log")
+    await pagina.reload()
+    await plat.asegurar_sesion()
+
+    revisar(await plat.apagar(nombre, por_hoy=True),
+            "apagar() igual entra: lee las opciones del DOM y clickea por JS")
+
+    apagados = await pagina.evaluate("localStorage.getItem('apagados')")
+    revisar("582221" in (apagados or ""), "y el producto quedo apagado")
+
+    # Que no eligio por posicion: la 3ra es "Personalizar", que no apaga
+    # nada. Si hubiera caido ahi, el producto seguiria prendido.
+    revisar(await plat.prender(nombre), "prender() lo vuelve a prender")
+
+    # La linea de base es lo que hace seguro sacar el filtro de visibilidad.
+    # Sin ella —o con ella empatada— el camino nuevo NO se activa: ahi lo que
+    # hay en el DOM puede ser la plantilla escondida de siempre.
+    radio, _ = await plat._opcion_del_dialogo(
+        plat.TXT_POR_HOY, timeout=1500, opciones_antes=None)
+    revisar(radio is None,
+            "sin linea de base no se elige nada del DOM invisible")
+
+    await pagina.close()
+
+
+async def el_popup_llega_tarde(navegador):
+    print("\n== J) El popup monta a los 14 s, pasado el limite viejo ==")
+    plat, pagina = await abrir_plataforma(navegador, "?dialogo=tarde")
+    revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja el menu listo")
+
+    nombre = "Villavicencio sin gas 500 ml"
+
+    revisar(plat.TIMEOUT_DIALOGO > 14000,
+            f"el techo de espera le da lugar ({plat.TIMEOUT_DIALOGO} ms)")
+    revisar(await plat.apagar(nombre, por_hoy=True),
+            "apagar() lo espera y entra (con 10 s se rendia justo antes)")
+
+    apagados = await pagina.evaluate("localStorage.getItem('apagados')")
+    revisar("582222" in (apagados or ""), "y el producto quedo apagado")
+
+    revisar(await plat._opciones_abiertas().count() == 0,
+            "el dialogo no quedo abierto tapando la pantalla")
+
+    await pagina.close()
+
+
 async def main():
     servidor = servir()
     try:
@@ -395,6 +481,8 @@ async def main():
             await lo_tapa_un_ancestro(navegador)
             await mas_capas_que_el_limite_viejo(navegador)
             await el_toggle_no_esta_en_su_pila(navegador)
+            await el_popup_esta_pero_no_se_ve(navegador)
+            await el_popup_llega_tarde(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()
