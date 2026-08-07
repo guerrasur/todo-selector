@@ -178,6 +178,13 @@
 //                 limite de 3 que tenia el destapado viejo.
 // ?tapa=recorte   el toggle no aparece en su propia pila: no lo tapa nada,
 //                 esta recortado y su centro no le pertenece.
+// ?dialogo=invisible  lo del 2026-08-07: el popup se abre —las 3 opciones
+//                 estan en el DOM— pero el portal sigue en visibility:hidden
+//                 porque floating-ui todavia no lo posiciono, asi que para
+//                 Playwright no existe. El modal de confirmar que viene
+//                 despues monta igual de invisible.
+// ?dialogo=tarde  el otro medio del mismo log: el popup monta, pero recien a
+//                 los 14 s, pasado el limite viejo de 10.
 const params = new URLSearchParams(location.search);
 const CON_GAP = params.get("gap") !== "no";
 const TAPA = params.get("tapa") || "";
@@ -185,7 +192,14 @@ const TAPA_MUCHOS = TAPA === "muchos";
 const TAPA_RECORTE = TAPA === "recorte";
 // Los tres arman la misma jerarquia de ancestros del portal real.
 const TAPA_ANCESTRO = TAPA === "ancestro" || TAPA_MUCHOS || TAPA_RECORTE;
-const DIALOGO_PORTAL = params.get("dialogo") === "portal" || TAPA_ANCESTRO;
+const DIALOGO = params.get("dialogo") || "";
+const DIALOGO_INVISIBLE = DIALOGO === "invisible";
+const DIALOGO_TARDE = DIALOGO === "tarde";
+// Los dos nuevos son variantes del portal de floating-ui, que es el dialogo
+// que tiene el portal de verdad.
+const DIALOGO_PORTAL = DIALOGO === "portal" || DIALOGO_INVISIBLE ||
+                       DIALOGO_TARDE || TAPA_ANCESTRO;
+const DEMORA_OPCIONES = DIALOGO_TARDE ? 14000 : 1200;
 if (!CON_GAP) {
   document.querySelector('[data-testid^="menu-categories-hoverable-gap"]').remove();
 }
@@ -382,6 +396,10 @@ function abrirPopupFlotante(pid) {
   const popup = document.createElement("div");
   popup.className = "popup";
   portal.appendChild(popup);
+  // floating-ui monta el portal invisible y lo revela recien cuando lo
+  // posiciono. Con ?dialogo=invisible se queda asi para siempre: es lo que
+  // pasa cuando la pestaña esta de fondo y Chrome no corre el rendering.
+  if (DIALOGO_INVISIBLE) portal.style.visibility = "hidden";
   document.body.appendChild(portal);
 
   const cerrar = e => {
@@ -413,6 +431,10 @@ function abrirPopupFlotante(pid) {
         fondo.className = "portal portal6";
         const modal = document.createElement("div");
         modal.className = "modal";
+        // El segundo modal se monta igual que el popup: si aquel era
+        // invisible, este tambien. Es el caso que convierte a este modal en
+        // el cuello siguiente apenas el popup empieza a funcionar.
+        if (DIALOGO_INVISIBLE) modal.style.visibility = "hidden";
         document.body.appendChild(fondo);
         document.body.appendChild(modal);
         // "Personalizar" no apaga nada: pide una fecha. Si el codigo elige
@@ -425,7 +447,7 @@ function abrirPopupFlotante(pid) {
       });
       popup.appendChild(op);
     });
-  }, 1200);
+  }, DEMORA_OPCIONES);
 }
 
 function confirmar(pid, fondo, modal) {

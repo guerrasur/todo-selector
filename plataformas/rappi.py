@@ -83,6 +83,34 @@ class Rappi(PlataformaBase):
     # lo sigue diciendo el texto.
     SELECTOR_OPCION = '[data-testid*="availability-switch-option"]'
 
+    # Cuanto se espera el dialogo, y cada cuanto se lo mira.
+    #
+    # CONFIRMADO POR LOG (2026-08-07): eran 10 s planos y no alcanzaban. Los
+    # apagados que SI entraron tardaron 23-27 s de punta a punta —o sea,
+    # rozando el limite— y los que fallaron mostraban las 3 opciones ya en
+    # el DOM justo al rendirse. La app se rendia con el popup abierto
+    # adelante, recargaba, y tiraba el trabajo hecho.
+    #
+    # Y el reloj no puede correr igual antes y despues: mientras el popup no
+    # existe, esperarlo es una apuesta y tiene su techo; una vez que
+    # aparecio ya no lo es —esta ahi, falta leerlo— y ahi corre GRACIA_DIALOGO
+    # aparte, que no se descuenta de lo que ya se gasto esperandolo.
+    TIMEOUT_DIALOGO = 20000
+    GRACIA_DIALOGO = 5000
+    PASO_DIALOGO = 250
+
+    # Lo que devuelve la eleccion cuando el texto matchea mas de una opcion.
+    # No es "ninguna": es "hay, y no se cual", que se trata distinto (no se
+    # elige, y no tiene sentido seguir esperando).
+    AMBIGUA = -1
+
+    # Lo que dejo la ultima busqueda de opcion, para el mensaje de error.
+    # Declarados aca y no solo adentro de _opcion_del_dialogo: el
+    # diagnostico los lee, y un diagnostico que revienta con AttributeError
+    # tapa justo el error que venia a explicar.
+    opciones_vistas: list = []
+    dialogo_aparecio_a = None
+
     # CONFIRMADO POR LOG (2026-08-03): el toggle fallaba SIEMPRE con
     # "<div data-testid='menu-categories-hoverable-gap-5'> intercepts
     # pointer events", incluso con el elemento centrado en pantalla. Es una
@@ -427,58 +455,147 @@ class Rappi(PlataformaBase):
         except Exception:
             pass
 
-    async def _opcion_del_dialogo(self, frase: str, timeout: int = 10000):
-        """El elemento del dialogo que dice `frase`, o None.
+    async def _leer_opciones(self, opciones, cuantas: int, del_dom: bool):
+        """Los textos de las opciones. `del_dom` = leerlas aunque no se vean.
 
-        Dos caminos, y en este orden:
+        inner_text() depende del layout: devuelve "" para lo que todavia no
+        esta renderizado, que es EXACTAMENTE el estado de las opciones
+        cuando se llega por el camino 3 de abajo. Sacar el filtro de
+        visibilidad sin cambiar tambien esto no habria servido de nada: los
+        textos hubieran vuelto vacios y no habria matcheado ninguna.
+        text_content() sale del DOM y no necesita layout.
+        """
+        textos = []
+        for i in range(cuantas):
+            try:
+                if del_dom:
+                    textos.append(await opciones.nth(i).text_content() or "")
+                else:
+                    textos.append(await opciones.nth(i).inner_text())
+            except Exception:
+                textos.append("")
+        return textos
+
+    def _cual_dice(self, textos, buscado: str, frase: str):
+        """Cual de las opciones dice `frase`: su indice, AMBIGUA, o None.
+
+        Nunca elige por posicion: si el texto no identifica UNA sola
+        opcion, no elige. Entre "solo por hoy" e "indefinidamente" no hay
+        adivinanza posible que sea aceptable.
+        """
+        iguales = [i for i, t in enumerate(textos) if buscado in plano(t)]
+        if len(iguales) == 1:
+            return iguales[0]
+        if len(iguales) > 1:
+            log.error("%s: '%s' matchea %s opciones del dialogo (%s). "
+                      "No elijo ninguna.", self.nombre, frase, len(iguales),
+                      [" ".join(t.split()) for t in textos])
+            return self.AMBIGUA
+        return None
+
+    async def _opcion_del_dialogo(self, frase: str, timeout: int = None,
+                                  opciones_antes=None):
+        """El elemento del dialogo que dice `frase`, y si hay que ir por JS.
+
+        Devuelve `(localizador, por_js)`. `por_js` True significa que la
+        opcion esta en el DOM pero Playwright no la ve, asi que clickearla
+        con el camino normal se colgaria esperando una visibilidad que no
+        va a llegar. None en el primero es "no la encontre".
+
+        Tres caminos, y en este orden:
 
           1. El texto exacto visible. Es el que ya venia andando, y lo de
              "visible" no es un detalle: hay un elemento con el mismo texto
              ESCONDIDO en el DOM, y el `.first` de antes agarraba ese
              fantasma y se comia el timeout entero.
 
-          2. Las opciones por su data-testid, comparando el texto SIN
-             TILDES. Este es el que faltaba: el 2026-08-03 el dialogo se
-             abria (el log lo muestra tapando el toggle del intento
-             siguiente) y aun asi el paso 1 no encontraba nada, porque el
-             texto del portal no es caracter por caracter el nuestro.
+          2. Las opciones VISIBLES por su data-testid, comparando el texto
+             SIN TILDES. El 2026-08-03 el dialogo se abria (el log lo
+             muestra tapando el toggle del intento siguiente) y aun asi el
+             paso 1 no encontraba nada, porque el texto del portal no es
+             caracter por caracter el nuestro.
 
-        Nunca elige por posicion: si el texto no identifica UNA sola
-        opcion, devuelve None. Entre "solo por hoy" e "indefinidamente" no
-        hay adivinanza posible que sea aceptable.
+          3. Las opciones que aparecieron DESPUES del click, se vean o no.
+             CONFIRMADO POR LOG (2026-08-07): el apagado de Rappi Turbo
+             fallaba la mitad de las veces con "Opciones que vi: (ninguna)"
+             y, en la misma linea, "opciones en el DOM (visibles o no):
+             0 -> 3". O sea: el popup se abria y los pasos 1 y 2 no lo
+             veian, porque floating-ui deja el portal sin posicionar (y por
+             lo tanto invisible para Playwright) hasta que corre el
+             rendering, que Chrome pausa en las pestañas de fondo.
+
+             `opciones_antes` es lo que hace que este paso sea seguro: son
+             las opciones que habia ANTES de tocar el toggle. Si el numero
+             subio, lo que aparecio es el popup de este click y no la
+             plantilla escondida que vive en el DOM desde siempre. Con
+             "3 -> 3" este paso NO se activa: ahi el popup no se abrio y el
+             problema es el click, que es otro arreglo y el diagnostico lo
+             sigue diciendo.
+
+             Sin linea de base (`opciones_antes` no es un numero, porque no
+             se pudo contar) tampoco se activa: no se puede distinguir una
+             cosa de la otra, y afirmar sin haber visto es justo lo que no
+             se hace (regla 8).
         """
         self.opciones_vistas: list[str] = []
+        # A los cuantos segundos aparecio el popup en el DOM. None = no
+        # aparecio (o no se pudo saber). Lo usa el diagnostico de abajo para
+        # decir cual de los dos problemas fue.
+        self.dialogo_aparecio_a = None
+
         buscado = plano(frase)
-        limite = time.monotonic() + timeout / 1000
+        arranque = time.monotonic()
+        limite = arranque + (timeout or self.TIMEOUT_DIALOGO) / 1000
 
         while True:
+            # 1. El texto exacto, entre lo que se ve.
             exacto = self.visible(self.page.get_by_text(frase, exact=True))
             if await exacto.count() > 0:
-                return exacto.first
+                return exacto.first, False
 
+            # 2. Las opciones visibles, por data-testid.
             opciones = self._opciones_abiertas()
             cuantas = await opciones.count()
             if cuantas:
-                textos = []
-                for i in range(cuantas):
-                    try:
-                        textos.append(await opciones.nth(i).inner_text())
-                    except Exception:
-                        textos.append("")
+                textos = await self._leer_opciones(opciones, cuantas,
+                                                   del_dom=False)
                 self.opciones_vistas = [" ".join(t.split()) for t in textos]
+                cual = self._cual_dice(textos, buscado, frase)
+                if cual == self.AMBIGUA:
+                    return None, False
+                if cual is not None:
+                    return opciones.nth(cual), False
 
-                iguales = [i for i, t in enumerate(textos) if buscado in plano(t)]
-                if len(iguales) == 1:
-                    return opciones.nth(iguales[0])
-                if len(iguales) > 1:
-                    log.error("%s: '%s' matchea %s opciones del dialogo (%s). "
-                              "No elijo ninguna.", self.nombre, frase,
-                              len(iguales), self.opciones_vistas)
-                    return None
+            # 3. Las que aparecieron despues del click, se vean o no.
+            en_el_dom = await self._contar_opciones()
+            if (isinstance(opciones_antes, int) and isinstance(en_el_dom, int)
+                    and en_el_dom > opciones_antes):
+                if self.dialogo_aparecio_a is None:
+                    self.dialogo_aparecio_a = time.monotonic() - arranque
+                todas = self.page.locator(self.SELECTOR_OPCION)
+                textos = await self._leer_opciones(todas, en_el_dom,
+                                                   del_dom=True)
+                # Si el paso 2 no vio nada, que el mensaje de error diga al
+                # menos que decia el popup que si estaba: "(ninguna)" mandaba
+                # a buscar el problema al lugar equivocado.
+                if not self.opciones_vistas:
+                    self.opciones_vistas = [" ".join(t.split()) for t in textos]
+                cual = self._cual_dice(textos, buscado, frase)
+                if cual == self.AMBIGUA:
+                    return None, False
+                if cual is not None:
+                    return todas.nth(cual), True
 
-            if time.monotonic() >= limite:
-                return None
-            await self.page.wait_for_timeout(250)
+            # El techo, mas la gracia propia de despues de que el popup
+            # existe: haberlo esperado 18 s no es motivo para darle 2 para
+            # leerlo.
+            tope = limite
+            if self.dialogo_aparecio_a is not None:
+                tope = max(tope, arranque + self.dialogo_aparecio_a
+                           + self.GRACIA_DIALOGO / 1000)
+            if time.monotonic() >= tope:
+                return None, False
+            await self.page.wait_for_timeout(self.PASO_DIALOGO)
 
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
         # Va ANTES de leer: con un nombre que llega a dos productos, la
@@ -517,7 +634,8 @@ class Rappi(PlataformaBase):
         # El dialogo ofrece 2 opciones utiles (la 3ra, "Personalizar
         # disponibilidad", no se usa: pide elegir una fecha).
         opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
-        radio = await self._opcion_del_dialogo(opcion)
+        radio, por_js = await self._opcion_del_dialogo(
+            opcion, opciones_antes=opciones_antes)
         if radio is None:
             # Lo unico util no es "no encontre el texto" sino QUE decia el
             # dialogo que si se abrio: si el portal cambio el texto de la
@@ -535,7 +653,25 @@ class Rappi(PlataformaBase):
             await self.recargar_y_preparar(por_que=f"reintentar '{nombre_remoto}'")
             return False
 
-        await self.clickear(radio, que=f"radio '{opcion}'")
+        if por_js:
+            # La opcion esta en el DOM pero Playwright no la ve. El camino
+            # normal quemaria su timeout entero esperando una visibilidad
+            # que no va a llegar antes de caer igual al fallback, asi que
+            # va derecho. Con el click SIMPLE y no el profundo: el handler
+            # esta en la fila de la opcion y el evento sube, y el profundo
+            # necesita una caja no vacia para buscar el descendiente del
+            # centro, que es justo lo que un popup sin posicionar no tiene.
+            #
+            # Esto no puede clickear otra cosa: el localizador salio del
+            # data-testid mas el texto de esa opcion, no de un hit test
+            # sobre coordenadas. Y si igual no entrara, _confirmar() recarga
+            # y relee, asi que termina en rojo y no en un OK inventado.
+            log.info("%s: '%s' esta en el dialogo pero Playwright no lo ve "
+                     "(popup sin posicionar); lo clickeo por JS",
+                     self.nombre, opcion)
+            await self.clickear_por_js(radio)
+        else:
+            await self.clickear(radio, que=f"radio '{opcion}'")
         await self.page.wait_for_timeout(1000)
 
         # CONFIRMADO POR CAPTURA (2026-07-27): cualquiera de las 2 opciones
@@ -553,6 +689,29 @@ class Rappi(PlataformaBase):
             # _confirmar() ya recargo, asi que la pagina esta limpia.
             await self.cerrar_dialogo()
         return ok
+
+    # Como esta cada opcion del dialogo, mirando el estilo computado y no
+    # el filtro de Playwright. Es lo que dice si el popup esta invisible
+    # (floating-ui todavia no lo posiciono) o si esta bien y el problema
+    # era otro. Se cortan en 3: son las que hay, y si fueran mas el log se
+    # vuelve ilegible.
+    JS_COMO_ESTAN = """
+        sel => Array.from(document.querySelectorAll(sel)).slice(0, 3).map(n => {
+            const e = getComputedStyle(n);
+            const b = n.getBoundingClientRect();
+            return `visibility:${e.visibility} display:${e.display} ` +
+                   `opacity:${e.opacity} caja:${Math.round(b.width)}x` +
+                   `${Math.round(b.height)}`;
+        })
+    """
+
+    async def _como_estan_las_opciones(self) -> str:
+        try:
+            estados = await self.page.evaluate(self.JS_COMO_ESTAN,
+                                               self.SELECTOR_OPCION)
+        except Exception:
+            return "?"
+        return " | ".join(estados) if estados else "(no hay ninguna)"
 
     async def _contar_opciones(self):
         """Opciones del dialogo en el DOM, SIN filtrar por visibilidad.
@@ -594,6 +753,22 @@ class Rappi(PlataformaBase):
                       f"{opciones_antes if opciones_antes is not None else '?'}"
                       f" -> {en_el_dom}{cambio}")
 
+        # CUANDO aparecio el popup, y COMO esta. Sin esto, "0 -> 3" deja
+        # confundidos dos problemas con arreglos distintos: que el popup
+        # este ahi desde el principio y Playwright no lo vea (floating-ui no
+        # lo posiciono; se lee "aparecio a los 1,2 s ... visibility:hidden"),
+        # o que haya montado despues de que dejaramos de mirarlo (se lee
+        # "aparecio DESPUES de que dejaramos de mirar"). Ese es el dato que
+        # faltaba el 2026-08-07 y por el que hubo que dejar los dos cubiertos.
+        if self.dialogo_aparecio_a is not None:
+            partes.append(f"el popup aparecio en el DOM a los "
+                          f"{self.dialogo_aparecio_a:.1f} s y las opciones "
+                          f"estan asi: {await self._como_estan_las_opciones()}")
+        elif (isinstance(opciones_antes, int) and isinstance(en_el_dom, int)
+                and en_el_dom > opciones_antes):
+            partes.append("el popup aparecio DESPUES de que dejaramos de "
+                          "mirar: subile el TIMEOUT_DIALOGO")
+
         # Si el toggle no se movio, el portal ni se entero del click.
         try:
             entrada = self._toggle_input(tarjeta)
@@ -610,7 +785,35 @@ class Rappi(PlataformaBase):
     TXT_CONFIRMAR = ("Sí, desactivar", "Guardar", "Confirmar", "Aceptar", "Aplicar")
 
     async def _confirmar_en_el_modal(self) -> bool:
-        botones = self.visible(self.page.get_by_role("button"))
+        """Aprieta el "Sí, desactivar" del segundo modal.
+
+        Dos pasadas, y la segunda solo si la primera no encontro nada:
+
+          1. Entre los botones VISIBLES, leidos con inner_text(). Es la que
+             ya venia andando.
+
+          2. Entre TODOS, leidos con text_content() y clickeando por JS.
+             Este modal viene despues del popup de "hasta cuando" y se monta
+             igual: si aquel estaba en el DOM sin posicionar (ver el camino
+             3 de _opcion_del_dialogo), este va a estar igual, y en cuanto
+             el popup empezo a funcionar el cuello pasa a ser este. Como
+             corre solo cuando la pasada 1 fallo, no cambia nada de lo que
+             hoy anda.
+
+        El texto sigue decidiendo cual es: la segunda pasada saca el filtro
+        de visibilidad, no el criterio.
+        """
+        if await self._apretar_confirmar(visibles=True):
+            return True
+        return await self._apretar_confirmar(visibles=False)
+
+    async def _apretar_confirmar(self, visibles: bool) -> bool:
+        # include_hidden no es opcional en la segunda pasada: get_by_role
+        # sigue el arbol de ACCESIBILIDAD, y un modal en visibility:hidden no
+        # esta ahi. Sin esto el fallback no encuentra nunca nada —ni siquiera
+        # para descartarlo— y seria codigo muerto.
+        botones = (self.visible(self.page.get_by_role("button")) if visibles
+                   else self.page.get_by_role("button", include_hidden=True))
         try:
             cuantos = await botones.count()
         except Exception:
@@ -619,14 +822,24 @@ class Rappi(PlataformaBase):
         textos = []
         for i in range(cuantos):
             try:
-                textos.append(plano(await botones.nth(i).inner_text()))
+                if visibles:
+                    crudo = await botones.nth(i).inner_text()
+                else:
+                    crudo = await botones.nth(i).text_content() or ""
             except Exception:
-                textos.append("")
+                crudo = ""
+            textos.append(plano(crudo))
 
         for txt in self.TXT_CONFIRMAR:
             for i, t in enumerate(textos):
                 if plano(txt) in t:
-                    await self.clickear(botones.nth(i), que=f"boton '{txt}'")
+                    if visibles:
+                        await self.clickear(botones.nth(i), que=f"boton '{txt}'")
+                    else:
+                        log.info("%s: el boton '%s' esta en el modal pero "
+                                 "Playwright no lo ve; lo clickeo por JS",
+                                 self.nombre, txt)
+                        await self.clickear_por_js(botones.nth(i))
                     return True
         return False
 
