@@ -111,14 +111,14 @@
   .item {
     background: var(--panel); border: 1px solid var(--borde);
     border-radius: var(--radio); padding: 13px 16px; margin-bottom: 8px;
-    /* Los tres botones se agrandan juntos cuando marcás un chip ("Apagar
-       hoy · solo PedidosYa"), asi que la fila tiene que aguantar el cambio
-       de ancho sin romperse: el nombre no baja de 160px (si no se partia en
-       tres lineas y la fila pegaba un salto), y las otras dos columnas
-       pueden achicarse por debajo de su ancho natural — los chips y los
-       botones envuelven en dos filas en vez de pisarse. Con `auto` en la
-       columna de los chips, los botones no tenian a donde achicarse y
-       terminaban DIBUJADOS ENCIMA de los chips. */
+    /* Los botones ya no cambian de ancho al marcar un chip (el alcance es
+       una marca de tamano fijo, ver .acotado), pero los nombres de producto
+       si varian y la fila tiene que aguantarlo: el nombre no baja de 160px
+       (si no se partia en tres lineas y la fila pegaba un salto), y las
+       otras dos columnas pueden achicarse por debajo de su ancho natural —
+       los chips y los botones envuelven en dos filas en vez de pisarse. Con
+       `auto` en la columna de los chips, los botones no tenian a donde
+       achicarse y terminaban DIBUJADOS ENCIMA de los chips. */
     display: grid;
     grid-template-columns: minmax(160px, 1fr) minmax(0, auto) minmax(0, auto);
     gap: 14px;
@@ -179,6 +179,17 @@
   @keyframes late { 50% { opacity: .3; } }
   .acciones { display: flex; gap: 6px; flex-wrap: wrap;
               justify-content: flex-end; }
+  /* El botón va a MENOS portales de los que tiene el producto (marcaste un
+     chip, o hay una tienda en pausa). Antes esto se decía alargando la
+     etiqueta y la fila entera pegaba un salto de ancho. La marca es
+     absoluta y de tamaño fijo: no ocupa lugar, no mueve nada, y cuál es el
+     portal lo dicen el chip marcado y el title del botón. */
+  .acciones button.acotado { position: relative; }
+  .acciones button.acotado::after {
+    content: ''; position: absolute; top: 4px; right: 4px;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--acento); box-shadow: 0 0 0 2px #5b9dff33;
+  }
 
   /* ---- Botones ---- */
   button {
@@ -510,7 +521,7 @@
 <main>
   <div id="panel-busqueda" class="solo-dashboard">
     <input id="buscador" type="search" autocomplete="off"
-           placeholder="Buscar un producto…  (por el nombre de cualquiera de los dos portales)">
+           placeholder="Buscar un producto… (por el nombre de cualquiera de los dos portales)">
     <button id="btn-limpiar" title="Borrar la búsqueda (Esc)">✕</button>
     <span id="resultado-busqueda"></span>
   </div>
@@ -524,13 +535,10 @@
             title="Esconde lo que está apagado y confirmado">Solo los prendidos</button>
     <span id="cuenta-prendidos"></span>
   </div>
-  <div id="pista-chips" class="pista solo-dashboard">
-    Sin tocar nada, el botón de un producto actúa sobre <b>todos</b> sus
-    portales. Clickeá el chip <b>PedidosYa</b> o <b>Rappi</b> para acotarlo a
-    ese solo (el chip queda marcado y el botón lo dice); volvé a clickearlo
-    para soltarlo. Sirve cuando hay que apagar en un portal antes que en el
-    otro.
-  </div>
+  <!-- Acá vivía #pista-chips, tres oraciones fijas explicando que los chips
+       acotan la acción. La mecánica no cambió: lo que se sacó es el cartel.
+       Lo dicen los chips mismos (el marcado lleva contorno y brillo), la
+       marca del botón acotado y los title, que se abren a pedido. -->
   <div id="panel-inicio" class="carta solo-dashboard" style="display:none"></div>
   <div id="panel-alertas" class="solo-dashboard" style="display:none"></div>
   <div id="panel-novedades" class="solo-dashboard" style="display:none"></div>
@@ -1184,11 +1192,15 @@ function pintarNovedades(novedades) {
 
 // Si la TIENDA entera (no un producto) esta tomando pedidos. Se arma con
 // s.tiendas, que el backend cachea (leerlo en Rappi implica navegar a otra
-// pantalla, no se hace en cada poll de 3 segundos). Cada plataforma puede
-// no tener el dato todavia (recien arrancado) o nunca (falta el ajuste de
-// nombre de tienda en Rappi): en los dos casos se muestra "sin datos" y NO
-// un color inventado, porque no se pudo confirmar.
-function pintarTiendas(tiendas) {
+// pantalla, no se hace en cada poll de 3 segundos).
+//
+// LOS TRES "NO SE" SON TRES COSAS DISTINTAS y antes salian los tres con el
+// mismo ⚪, que no se podia ni leer ni accionar:
+//   ⚪  todavia no se leyo (recien arranco, o la ronda no llego)  -> esperar
+//   ⚙   falta un dato en Ajustes (sin eso no se va a leer nunca)  -> cargarlo
+//   ⚠   se leyo y no se pudo confirmar                            -> mirar el motivo
+// Ninguno inventa un color de abierta/cerrada: eso sigue siendo regla 8.
+function pintarTiendas(tiendas, faltaConfig = []) {
   const cont = document.getElementById('tiendas');
   cont.innerHTML = '';
   for (const plat of PLATS) {
@@ -1197,12 +1209,31 @@ function pintarTiendas(tiendas) {
     span.className = 'badge';
     span.style.marginLeft = '4px';
 
-    let punto = '⚪', texto = 'sin datos';
+    // Un dato de sucursal que falta lo dice el backend en falta_sucursal; en
+    // las tiendas que no entran ahi (la Rappi Comun) el motivo de la lectura
+    // es el que nombra el ajuste que falta.
+    const faltaDato = faltaConfig.includes(plat) ||
+                      /ajuste|falta/i.test((info && info.motivo) || '');
+
+    let punto, motivo;
     if (info && !info.error && info.abierta === true) {
-      punto = '🟢'; texto = 'abierta';
+      punto = '🟢'; motivo = info.detalle || 'La tienda está tomando pedidos';
     } else if (info && !info.error && info.abierta === false) {
-      punto = '🔴'; texto = 'cerrada';
+      punto = '🔴'; motivo = info.detalle || 'La tienda no está tomando pedidos';
+    } else if (faltaDato) {
+      punto = '⚙';
+      motivo = (info && info.motivo) ||
+               'Falta un dato de esta tienda en Ajustes: hasta cargarlo no ' +
+               'se puede leer si está abierta';
+    } else if (info) {
+      punto = '⚠';
+      motivo = info.error || info.motivo ||
+               'Se intentó leer y no se pudo confirmar si está abierta';
+    } else {
+      punto = '⚪';
+      motivo = 'Todavía no se leyó el estado de esta tienda';
     }
+
     // Una tienda en pausa se dice acá arriba, al lado de si está abierta:
     // es un estado que dura días y que explica por qué «Prender todo» no
     // hace nada ahí. Sin esto, el botón que no reacciona parece un bug.
@@ -1210,18 +1241,7 @@ function pintarTiendas(tiendas) {
     if (enPausa) span.classList.add('pausada');
     span.textContent = `${punto} ${NOMBRE_PLAT[plat] || plat}` +
                        (enPausa ? ' · en pausa' : '');
-    // El tooltip de un "sin datos" tiene que decir POR QUE: casi siempre es
-    // un dato que falta en Ajustes, y sin el motivo el usuario no tiene de
-    // dónde agarrarse (pasó con las dos tiendas de Rappi, 2026-07-30).
-    if (info && info.detalle) span.title = info.detalle;
-    else if (info && info.error) span.title = info.error;
-    else if (info && info.motivo) span.title = info.motivo;
-    else span.title = 'Todavía no se pudo leer el estado de esta tienda';
-    if (enPausa) {
-      span.title = 'Tienda en pausa: la app no la prende, y solo la apaga ' +
-                   'cuando la nombrás (su chip en un producto, o su fila en ' +
-                   '«Apagar todo»).\n' + span.title;
-    }
+    span.title = motivo;
     cont.appendChild(span);
   }
 }
@@ -1239,7 +1259,10 @@ function pintarSistema(s) {
 
   if (s.version) document.getElementById('version').textContent = 'v' + s.version;
 
-  pintarTiendas(s.tiendas || {});
+  // Las plataformas sin sucursal cargada: el badge de tienda las marca con
+  // ⚙ y no con el ⚪ de "todavía no se leyó", que son dos esperas distintas.
+  const faltaSucursal = s.falta_sucursal || [];
+  pintarTiendas(s.tiendas || {}, faltaSucursal);
 
   const el = document.getElementById('estado-sistema');
 
@@ -1248,13 +1271,19 @@ function pintarSistema(s) {
   // solo en el cartel. Va incluso en modo simulado —donde no hay pestaña
   // que congelar— porque esconder un estado según el modo hace que después
   // no se pueda probar que se muestra.
+  //
+  // Dice lo que está pasando, no el nombre de la bandera que lo prendió:
+  // «CONGELADO» era la palabra del código y no explicaba nada solo.
   const congelado = VERIFICANDO.size
-    ? 'CONGELADO: verificando ' +
+    ? 'Esperando el código de ' +
       [...VERIFICANDO].map(p => NOMBRE_PLAT[p] || p).join(' y ')
     : '';
 
   if (s.simulado) {
-    el.textContent = congelado ? 'MODO SIMULADO · ' + congelado : 'MODO SIMULADO';
+    // Idem: «MODO SIMULADO» es el nombre de STOCKSWITCH_SIMULADO, una
+    // variable de entorno de desarrollo, asomando en la barra de estado.
+    const prueba = 'Modo prueba: no toca los portales';
+    el.textContent = congelado ? prueba + ' · ' + congelado : prueba;
     el.className = 'badge alerta';
   } else {
     // Una plataforma sin sucursal cargada figura como sesión caída, pero el
@@ -1610,10 +1639,10 @@ function fila(item) {
     pill.className = 'pill' + (elegido ? ' sel' : '') + (duda ? ' dudoso' : '') +
                      (PAUSADAS.has(plat) ? ' tienda-pausada' : '');
     pill.dataset.plat = plat;
+    // Que la tienda esté en pausa se dice UNA vez: la marca gris del chip.
+    // Antes lo decían también este title y el title del botón, tres veces
+    // lo mismo en una fila que se mira tres segundos.
     pill.title = (est.detalle || '') +
-      (PAUSADAS.has(plat)
-        ? '  [tienda en pausa: no se prende, y solo se apaga si marcás ' +
-          'este chip]' : '') +
       (elegido ? '  (click para soltarlo: vuelve a actuar sobre todos)'
                : '  (click para actuar SOLO acá)');
     pill.innerHTML =
@@ -1669,31 +1698,32 @@ function fila(item) {
     return seleccion.size ? van : van.filter(p => !PAUSADAS.has(p));
   }
 
-  // El botón DICE sobre qué portal va a actuar. Antes solo decía "Apagar
-  // hoy" y para saber a dónde iba había que interpretar la opacidad de los
-  // chips: el usuario no tenía forma de saber que se podía apagar en un
-  // solo portal, y esa era justamente la función que pedía.
+  // El botón muestra sobre qué portal va a actuar SIN crecer.
+  //
+  // Antes lo decía alargando su propia etiqueta ("Apagar hoy · solo
+  // PedidosYa y Rappi Turbo", "· sin Rappi Común"): una etiqueta más ancha
+  // que la tarjeta, que empujaba los tres botones y hacía saltar la fila
+  // justo cuando se la está mirando tres segundos con alguien esperando.
+  // Ahora la etiqueta es fija y el alcance va en tres lugares que no
+  // ocupan ancho: el punto de «acotado» (marca de tamaño fijo, dibujada
+  // arriba a la derecha del botón), el chip marcado —que ya dice CUÁL— y
+  // el title, que se abre a pedido y ahí sí lo nombra entero.
   function refrescarBotones() {
     for (const b of div.querySelectorAll('.acciones button:not(.pausa)')) {
       const van = destino(b.dataset.accion);
       const nombres = van.map(p => NOMBRE_PLAT[p]);
-      // Cuando va a todos los portales que tiene el producto, aclararlo no
-      // informa nada: es lo que el botón hace siempre. En cualquier otro
-      // caso el botón dice a dónde va — nombrando lo que ENTRA o lo que
-      // queda AFUERA, lo que sea más corto: con tres portales, "· solo
-      // PedidosYa y Rappi Turbo" es una etiqueta más ancha que la tarjeta.
-      const afuera = donde.filter(p => !van.includes(p));
-      const solo = !van.length || !afuera.length ? ''
-        : van.length <= afuera.length
-          ? ' · solo ' + nombres.join(' y ')
-          : ' · sin ' + afuera.map(p => NOMBRE_PLAT[p]).join(' ni ');
-      // Lo que se cayó por estar en pausa se nombra: un botón que va a
-      // menos portales de los que marcaste tiene que decir por qué.
+      // Lo que se cayó por estar en pausa: un botón que va a menos portales
+      // de los que marcaste tiene que poder decir por qué (en el title).
       const caidas = elegidos().filter(p => !van.includes(p));
       const enPausa = caidas.map(p => NOMBRE_PLAT[p]).join(' y ');
 
       b.disabled = van.length === 0;
-      b.textContent = b.dataset.etiqueta + solo;
+      b.textContent = b.dataset.etiqueta;
+      // Va a menos portales de los que tiene el producto. Es lo que marca
+      // el punto, y lo que las pruebas miran en vez de leer la etiqueta.
+      b.classList.toggle('acotado', van.length > 0 && van.length < donde.length);
+      b.dataset.alcance = van.join(' ');
+
       if (!van.length) {
         b.title = caidas.length
           ? `${enPausa} está en pausa` +
@@ -1705,7 +1735,7 @@ function fila(item) {
       } else {
         b.title = 'Actúa sobre ' + nombres.join(' y ') +
           (caidas.length
-            ? `. Dejo afuera ${enPausa}: está en pausa` +
+            ? `. Dejo afuera ${enPausa}` +
               (b.dataset.accion === 'prender'
                 ? '.' : ' (clickeá su chip si querés incluirla).')
             : seleccion.size
@@ -1797,6 +1827,11 @@ function fila(item) {
   return div;
 }
 
+// Cada etiqueta se tiene que entender sin saber cómo está hecha la app:
+// «apagado (afuera)» era la palabra interna de apagado_ajeno —«afuera» no
+// quiere decir nada si no conocés las reglas del proyecto— y «FALLÓ» en
+// mayúsculas gritaba y encima parecía que esperaba algo tuyo, cuando la app
+// lo reintenta sola.
 function etiqueta(e) {
   return {
     prendido: 'disponible',
@@ -1806,8 +1841,8 @@ function etiqueta(e) {
     apagado_indefinido: 'apagado',
     // Apagado en el portal, no por la app. Se distingue porque la app no
     // lo sostiene: si el portal lo revive, no lo vuelve a apagar sola.
-    apagado_ajeno: 'apagado (afuera)',
-    fallo: 'FALLÓ',
+    apagado_ajeno: 'apagado en el portal',
+    fallo: 'no se pudo',
     desconocido: 'sin leer',
   }[e] || e;
 }
@@ -1898,18 +1933,9 @@ async function pintarCierre(mensaje = '') {
   const panel = panelCierre();
   panel.innerHTML = `
     <h2>Apagar todo</h2>
-    <div class="ayuda">
-      Apaga o prende la carta entera de un portal. Podés hacer uno solo:
-      la cola respeta el orden en que apretás, así que si PedidosYa tiene
-      que apagarse antes que Rappi, apretá PedidosYa y después Rappi.
-      <br>Salteo lo que ya está como quiere quedar, lo que está en pausa y
-      lo que ya está en la cola. Se puede cambiar en Ajustes.
-      <br><b>Indefinido</b> apaga la carta entera hasta que la prendas vos
-      (el apagado por hoy vuelve solo mañana). <b>Pausar tienda</b> es para
-      cuando una tienda se desactiva unos días: la app no la prende más, y
-      solo la toca cuando la nombrás — los botones de <i>esta misma fila</i>.
-      Los de un producto y los de «Todas» la dejan afuera.
-    </div>
+    <!-- Acá vivían tres párrafos de ayuda fija, el bloque de texto más
+         largo de la app. Nada de eso cambió de comportamiento: lo que hace
+         cada botón está en su title, que se abre a pedido. -->
     <div id="filas-cierre"></div>
     <div id="resultado-cierre"></div>`;
   document.getElementById('resultado-cierre').textContent = mensaje;
@@ -1947,14 +1973,22 @@ async function pintarCierre(mensaje = '') {
     fila.className = 'fila-cierre';
     fila.dataset.destino = clave;
 
-    // Una tienda en pausa se dice en el título de su fila: es el estado de
-    // la fila entera, no un detalle del botón.
+    // Una tienda en pausa se dice UNA sola vez, y es acá: el título de la
+    // fila. Antes lo decían también el contador de al lado y el title del
+    // botón de pausa, tres veces lo mismo en una fila de cuatro elementos.
+    // Las filas de combo («Ambos Rappi», «Todas») nombran cuál de sus
+    // tiendas está en pausa, que es la que el botón va a dejar afuera.
     const filaEnPausa = plats.length === 1 && PAUSADAS.has(plats[0]);
     if (filaEnPausa) fila.classList.add('en-pausa');
+    const pausadasAca = plats.filter(p => PAUSADAS.has(p));
 
     const quien = document.createElement('div');
     quien.className = 'quien-cierre';
-    quien.textContent = titulo + (filaEnPausa ? ' · en pausa' : '');
+    quien.textContent = titulo + (
+      filaEnPausa ? ' · en pausa'
+      : pausadasAca.length
+        ? ` · ${pausadasAca.map(p => NOMBRE_PLAT[p]).join(' y ')} en pausa`
+        : '');
     fila.appendChild(quien);
 
     // Los números que vienen del backend son "si nombrás esta tienda". Una
@@ -1969,6 +2003,9 @@ async function pintarCierre(mensaje = '') {
     const bApagar = document.createElement('button');
     bApagar.className = 'off grande';
     bApagar.textContent = 'Apagar todo';
+    bApagar.title = 'Apagar toda la carta de ' + titulo + '. Salteo lo que ' +
+                    'ya está como querés, lo pausado y lo que ya está en la ' +
+                    'cola. Cómo apaga se elige en Ajustes.';
     bApagar.onclick = () => correrMasivo('apagar', plats, titulo, bApagar);
     fila.appendChild(bApagar);
 
@@ -1991,18 +2028,17 @@ async function pintarCierre(mensaje = '') {
     const bPrender = document.createElement('button');
     bPrender.className = 'on grande';
     bPrender.textContent = 'Prender todo';
+    bPrender.title = 'Prender toda la carta de ' + titulo + '. Una tienda en ' +
+                     'pausa no se prende nunca desde acá.';
     bPrender.onclick = () => correrMasivo('prender', plats, titulo, bPrender);
     fila.appendChild(bPrender);
 
+    // Solo los números. La pausa la dice el título de la fila.
     const cuenta = document.createElement('span');
     cuenta.className = 'cuantos';
-    const pausadasAca = plats.filter(p => PAUSADAS.has(p));
     cuenta.textContent =
       `${suma(paraApagar)} para apagar · ${suma(paraIndef)} para indefinido · ` +
-      `${suma(paraPrender)} para prender` +
-      (pausadasAca.length && plats.length > 1
-        ? ` · en pausa: ${pausadasAca.map(p => NOMBRE_PLAT[p]).join(', ')}`
-        : '');
+      `${suma(paraPrender)} para prender`;
     fila.appendChild(cuenta);
 
     // Pausar la TIENDA entera. Solo en las filas de una sola tienda:
@@ -2019,8 +2055,10 @@ async function pintarCierre(mensaje = '') {
       // Sin emoji: no todas las PCs tienen el glifo y ahí sale un
       // cuadradito, que en un botón parece un error de la app.
       bPausar.textContent = enPausa ? 'Reactivar tienda' : 'Pausar tienda';
-      bPausar.title = enPausa
-        ? 'Volver a dejar que la app prenda en ' + titulo
+      // Sin title cuando ya está en pausa: eso lo dice el título de la fila
+      // y el propio botón. El de pausar sí lo lleva, porque lo que pasa
+      // después de apretarlo no se deduce de la palabra «Pausar».
+      bPausar.title = enPausa ? ''
         : 'La app deja de prender en ' + titulo + ', y solo la toca desde ' +
           'los botones de esta fila. Para cuando la tienda se desactiva ' +
           'por unos días.';
@@ -2168,9 +2206,9 @@ async function pintarAjustes() {
     return;
   }
 
+  // Sin el cartel de «se guardan en la base, que vive afuera de la carpeta
+  // de la app»: es un detalle de implementación, no algo que se decida acá.
   panel.innerHTML = `<h2>Ajustes</h2>
-    <div class="ayuda">Se guardan en la base, que vive afuera de la carpeta
-      de la app: un autoupdate no se los lleva puestos.</div>
     <div id="cuerpo-ajustes"></div>
     <div class="pie-ajustes">
       <button id="btn-guardar-ajustes" class="on">Guardar</button>
@@ -2371,13 +2409,9 @@ async function pintarCola(mensaje = mensajeCola) {
 
   panel.innerHTML = `
     <h2>La cola${ops.length ? ` · ${ops.length}` : ''}</h2>
-    <div class="ayuda">
-      Lo que todavía falta hacer, en el orden en que se va a hacer. La ✕ lo
-      saca.
-      <br>La que <b>está corriendo</b> no se corta a la mitad (cortar un click
-      a la mitad deja el portal con un diálogo abierto): termina el intento
-      que ya está en el navegador, pero no se reintenta.
-    </div>
+    <!-- Los dos párrafos de ayuda que estaban acá los dice sola la lista:
+         el orden es el orden en que se va a hacer, y lo que la ✕ hace en
+         cada caso está en su title (que sí cambia si está corriendo). -->
     <div id="filas-cola"></div>
     <div id="resultado-cola"></div>`;
   document.getElementById('resultado-cola').textContent = mensaje;
@@ -2556,10 +2590,10 @@ function pintarCarta() {
   const panel = panelCarta();
   panel.innerHTML = `
     <h2>Carta</h2>
-    <div class="ayuda">
-      Lo que muestran los portales hoy, cruzado con lo que tiene cargado la app.
-      Lo que no es claramente el mismo plato queda separado, con un botón cada uno.
-    </div>
+    <!-- Sin el párrafo de «lo que muestran los portales hoy, cruzado con lo
+         que tiene cargado la app»: los títulos de los grupos («A confirmar»,
+         «Emparejados solos», «Solo en …») ya lo dicen. La ayuda de «Vincular
+         a mano» se queda: esa explica una acción que no es evidente. -->
     <button id="btn-leer-carta">${carta ? 'Volver a leer los portales' : 'Leer los portales'}</button>
     <button id="btn-deshacer"${catalogo && catalogo.deshacer ? '' : ' disabled'}>
       ${catalogo && catalogo.deshacer

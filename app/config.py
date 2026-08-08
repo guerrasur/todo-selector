@@ -88,8 +88,11 @@ OPCIONES = (
         titulo="«Prender todo» prende solo lo que apagó la app",
         defecto=True,
         grupo="Apagar todo",
-        ayuda="Con esto prendido, lo que figura «apagado (afuera)» queda como "
-              "está: si alguien lo apagó desde el portal, fue a propósito.",
+        # La etiqueta va tal cual la muestra la pantalla: era «apagado
+        # (afuera)» y en la 6.3 pasó a «apagado en el portal», porque
+        # «afuera» no se entiende sin conocer las reglas del proyecto.
+        ayuda="Con esto prendido, lo que figura «apagado en el portal» queda "
+              "como está: si alguien lo apagó desde el portal, fue a propósito.",
     ),
 
     # ---------------- Tiendas en pausa ----------------
