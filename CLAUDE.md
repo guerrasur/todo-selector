@@ -32,6 +32,26 @@ El worker navegaba esa pestaña en trece lugares, así que hacerla era una
 carrera contra la app. Ahora hay un tercer estado además de «ok» y «caída»:
 la plataforma se **congela** y nadie toca su pestaña. Ver la regla 16.
 
+**La pantalla no explica cómo funciona** (2026-08-08, v6.3). La app se usa con
+un cliente esperando: la ayuda estática que explicaba mecánicas se sacó del
+flujo visual (no se reescribió más corta). Se fueron `#pista-chips`, los tres
+párrafos de «Apagar todo», los dos de «La cola», el de Ajustes y el de Carta;
+lo que hace cada botón vive en su `title`. Se quedó la de «Vincular a mano»,
+que explica una acción no evidente. **Ninguna regla de negocio cambió.**
+Las tres reglas que dejó, y que valen para lo que se agregue:
+1. **Ninguna ayuda estática ocupando espacio permanente**: o se elimina, o va
+   a un `title` que se abre a pedido.
+2. **Nada de términos internos en pantalla.** `MODO SIMULADO` era el nombre de
+   `STOCKSWITCH_SIMULADO`; `apagado (afuera)` era `apagado_ajeno` («afuera» no
+   se entiende sin conocer las reglas del proyecto) y ahora es `apagado en el
+   portal`. Una etiqueta se tiene que explicar sola.
+3. **Cada dato se dice una vez**, y los botones no muestran su alcance
+   alargando la etiqueta: el punto de `.acotado` no ocupa ancho, y el detalle
+   va en el `title`. Las pruebas leen `data-alcance`, no el texto del botón.
+También se distinguen los tres «no sé» del badge de tienda, que salían todos
+con el mismo ⚪: ⚪ sin leer, ⚙ falta un dato en Ajustes, ⚠ no se pudo
+confirmar. Se arreglan distinto, así que no pueden verse igual.
+
 El catálogo ya no se mantiene a mano: la pantalla **Carta** lee los dos
 portales y el usuario vincula o separa desde ahí (`app/catalogo.py`). En
 cuanto toca algo, `seed.py` deja de pisar los alias.
@@ -78,8 +98,8 @@ catálogo, no porque algo propague por atrás.
 **Los chips ACOTAN, no habilitan** (2026-08-03). Arrancan sin marcar y el
 botón actúa sobre **todos** los portales del producto, que es el caso de
 todos los días. Clickeás un chip y la acción va **solo ahí** (el chip queda
-con contorno y brillo, y el botón dice «· solo PedidosYa»); lo clickeás de
-nuevo y lo soltás. Antes venían los tres marcados y el click sacaba: marcar
+con contorno y brillo, y el botón se marca con el punto de «acotado»); lo
+clickeás de nuevo y lo soltás. Antes venían los tres marcados y el click sacaba: marcar
 de arranque lo que iba a pasar igual no informa nada. Lo marcado **no** se
 suelta solo al mandar la acción — si se soltara, el botón siguiente saldría
 a los tres portales sin que se note.

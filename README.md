@@ -163,11 +163,13 @@ clickeás de nuevo.
 
 - El chip marcado queda con **contorno y brillo** de acento, para que se vea
   de una sobre qué portales va a salir la acción.
-- **El botón lo dice**: con un chip marcado pasa a decir `Apagar hoy · solo
-  PedidosYa`, y sin nada marcado (o con todos) dice `Apagar hoy` a secas.
-  Cuando lo que queda afuera es menos que lo que entra, lo dice al revés
-  (`Apagar hoy · sin Rappi Común`): con tres portales, «solo PedidosYa y Rappi
-  Turbo» es una etiqueta más ancha que la tarjeta.
+- **El botón lo muestra sin crecer**: cuando va a menos portales de los que
+  tiene el producto le aparece un punto de acento arriba a la derecha, y el
+  `title` los nombra. Hasta la 6.3 lo decía alargando su propia etiqueta
+  (`Apagar hoy · solo PedidosYa`, `Apagar hoy · sin Rappi Común`), y con tres
+  portales esa etiqueta era más ancha que la tarjeta: los tres botones se
+  agrandaban juntos y la fila pegaba un salto justo cuando se la está mirando
+  tres segundos con alguien esperando.
 - Lo marcado **se queda puesto** hasta que lo sueltes: no se borra al apretar
   el botón, porque el botón siguiente saldría a todos los portales sin que se
   note. Y tampoco se pierde solo con el refresco de la pantalla, que es un bug
@@ -287,8 +289,8 @@ pidieron desactivar Rappi Común, 2026-08-04):
 - lo que **está en pausa** tampoco;
 - lo que **ya está en la cola** tampoco, así que apretarlo dos veces no duplica
   nada;
-- **Prender todo** no toca lo que está `apagado (afuera)`: si lo apagó alguien
-  desde el portal, fue a propósito.
+- **Prender todo** no toca lo que está `apagado en el portal`: si lo apagó
+  alguien desde el portal, fue a propósito.
 
 Por defecto **relee el portal antes de decidir** (~35 s), para que "ya está
 apagado" sea un hecho y no una suposición sobre una lectura vieja. Todo esto se
@@ -311,6 +313,46 @@ que sin tocar nada se comporta igual que siempre.
 
 Cambiar de sucursal **no pide reiniciar**: las pestañas se enteran y navegan
 solas al menú nuevo en la próxima operación.
+
+## La pantalla no explica cómo funciona (6.3)
+
+La app se usa de dos maneras: se corta un producto y hay que apagarlo en tres
+segundos con un cliente esperando, o se la revisa una vez por día para ver qué
+está prendido. En las dos, un párrafo explicando la mecánica es algo que hay
+que saltear con la vista para llegar a lo que importa.
+
+Los textos de ayuda que explicaban cómo funciona la app **salieron del flujo
+visual**. No se reescribieron más cortos: se sacaron. Lo que se fue:
+
+- el cartel de los chips arriba del dashboard (`#pista-chips`, tres oraciones);
+- los tres párrafos de «Apagar todo», que eran el bloque de texto más largo de
+  la app;
+- los dos de «La cola» — el orden de la lista ya dice que es una cola;
+- el de Ajustes sobre dónde se guarda la base, que es un detalle interno;
+- el de Carta sobre qué está cruzando, que lo dicen los títulos de los grupos.
+
+**Nada de eso cambió de comportamiento.** Lo que hace cada botón sigue estando
+en su `title`, que se abre a pedido y no ocupa lugar. La ayuda de «Vincular a
+mano» **se quedó**: esa explica una acción que no es evidente, no una mecánica
+que ya sabés.
+
+En la misma línea:
+
+- **Los términos internos salieron de la pantalla.** `MODO SIMULADO` era el
+  nombre de la variable de entorno `STOCKSWITCH_SIMULADO` asomando en la barra
+  de estado: ahora dice «Modo prueba: no toca los portales». `CONGELADO:
+  verificando Rappi` era la palabra del código: ahora dice «Esperando el código
+  de Rappi». Y `apagado (afuera)` —el nombre de `apagado_ajeno`, donde
+  «afuera» no quiere decir nada si no conocés las reglas del proyecto— pasó a
+  `apagado en el portal`. `FALLÓ` en mayúsculas pasó a `no se pudo`: gritaba, y
+  encima parecía que esperaba algo tuyo cuando la app lo reintenta sola.
+- **Cada dato se dice una sola vez.** Que una tienda esté en pausa se anunciaba
+  tres veces en la fila de un producto (el chip, el `title` del chip y el
+  `title` del botón): queda la marca gris del chip. En «Apagar todo» lo decían
+  el título de la fila, el contador y el botón: queda el título de la fila, que
+  ahora también nombra cuál de las tiendas de un combo está en pausa.
+- **Los botones dejaron de crecer**, ver «Apagar un producto en un solo
+  portal».
 
 ## Buscador
 
@@ -365,7 +407,7 @@ Hay tres formas de estar apagado, y se distinguen a propósito:
 | En pantalla | Qué significa |
 |---|---|
 | `apagado hoy` / `apagado` | Lo apagó la app. **Lo sostiene**: si el portal lo revive, lo vuelve a apagar sola. |
-| `apagado (afuera)` | Estaba apagado en el portal y no fue la app. Lo muestra pero **no lo toca**. |
+| `apagado en el portal` | Estaba apagado en el portal y no fue la app. Lo muestra pero **no lo toca**. |
 | `sin leer` | Todavía no se leyó (o el nombre del catálogo no coincide con el del portal). |
 
 La diferencia importa: la ronda de reverificación reencola un apagado cuando
@@ -805,8 +847,18 @@ al portal con tu cuenta):
      ponelo en el ajuste correspondiente (hay uno para Turbo y otro para
      Común; ver «brandId … en Conectividad»).
 
-El badge nunca inventa: ante cualquier duda queda ⚪ «sin datos», y ahora el
-tooltip dice el motivo.
+El badge nunca inventa: ante cualquier duda no muestra 🟢 ni 🔴, y el tooltip
+dice el motivo. Desde la 6.3 las tres dudas se distinguen entre sí, porque no
+se arreglan igual:
+
+| | Qué pasó | Qué hacer |
+|---|---|---|
+| ⚪ | Todavía no se leyó (recién arrancó, o la ronda no llegó) | Esperar |
+| ⚙ | Falta un dato de esa tienda en Ajustes | Cargarlo, o no se va a leer nunca |
+| ⚠ | Se leyó y no se pudo confirmar | Mirar el motivo en el tooltip |
+
+Antes los tres salían con el mismo ⚪, así que «falta cargar el `brandId`» y
+«esperá diez segundos» se veían idénticos.
 
 ## 3. El mapeo de nombres
 

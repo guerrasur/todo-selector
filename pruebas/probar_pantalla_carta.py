@@ -466,9 +466,18 @@ async def probar_seleccion_de_plataforma(pagina):
     revisar("sel" not in (await chip_py.get_attribute("class")) and
             "sel" not in (await chip_rappi.get_attribute("class")),
             "los chips arrancan sin marcar")
+    # El alcance ya NO se lee de la etiqueta del boton (crecia hasta no
+    # entrar en la tarjeta): sale de data-alcance, y se ve por la marca
+    # .acotado + el chip marcado. La etiqueta es fija.
     revisar(await boton.is_enabled() and
-            "solo" not in await boton.inner_text(),
+            (await boton.get_attribute("data-alcance")).split()
+            == ["pedidosya", "rappi"],
             "y aun asi el boton anda: sin marcar nada va a los dos portales")
+    revisar("acotado" not in (await boton.get_attribute("class")),
+            "y sin marcar nada no lleva la marca de acotado")
+    revisar((await boton.inner_text()).strip() == "Apagar hoy",
+            f"la etiqueta del boton es fija "
+            f"({(await boton.inner_text()).strip()})")
 
     # Sin tocar ningun chip, la accion tiene que salir a los DOS portales.
     antes = await pagina.evaluate("fetch('/api/historial').then(r => r.json())")
@@ -494,11 +503,18 @@ async def probar_seleccion_de_plataforma(pagina):
     revisar("sel" in (await chip_py.get_attribute("class")),
             "y SIGUE marcado despues de que la lista se repinte sola")
 
-    # El boton tiene que DECIR sobre que portal va a actuar. Antes decia
-    # "Apagar hoy" y para saberlo habia que interpretar la opacidad de los
-    # chips: el usuario no se enteraba de que existia apagar en uno solo.
-    revisar("solo PedidosYa" in await boton.inner_text(),
-            f"el boton dice a donde va ({(await boton.inner_text()).strip()})")
+    # El boton tiene que mostrar que va a UN portal solo, y hacerlo SIN
+    # crecer: la etiqueta queda igual, lo dicen la marca .acotado, el chip
+    # marcado y el title.
+    revisar((await boton.get_attribute("data-alcance")) == "pedidosya",
+            f"el boton va a uno solo "
+            f"({await boton.get_attribute('data-alcance')})")
+    revisar("acotado" in (await boton.get_attribute("class")),
+            "y lo muestra con la marca de acotado")
+    revisar((await boton.inner_text()).strip() == "Apagar hoy",
+            f"sin alargar la etiqueta ({(await boton.inner_text()).strip()})")
+    revisar("PedidosYa" in (await boton.get_attribute("title") or ""),
+            f"y el title lo nombra ({await boton.get_attribute('title')})")
 
     antes = await pagina.evaluate("fetch('/api/historial').then(r => r.json())")
     await boton.click()
@@ -517,9 +533,9 @@ async def probar_seleccion_de_plataforma(pagina):
     revisar("sel" in (await fila.locator(".pill[data-plat='pedidosya']")
                       .get_attribute("class")),
             "despues de mandar la accion el chip sigue marcado")
-    revisar("solo PedidosYa" in await fila.locator(
-                "button", has_text="Apagar hoy").inner_text(),
-            "y el boton sigue diciendo que va a uno solo")
+    revisar(await fila.locator("button", has_text="Apagar hoy")
+            .get_attribute("data-alcance") == "pedidosya",
+            "y el boton sigue yendo a uno solo")
 
     # Se suelta clickeandolo de nuevo, y ahi vuelve a ir a los dos.
     await fila.locator(".pill[data-plat='pedidosya']").click()
@@ -528,12 +544,18 @@ async def probar_seleccion_de_plataforma(pagina):
     revisar("sel" not in (await fila.locator(".pill[data-plat='pedidosya']")
                           .get_attribute("class")),
             "volver a clickearlo lo suelta, y tambien sobrevive al repintado")
-    revisar("solo" not in await fila.locator("button", has_text="Apagar hoy")
-            .inner_text(),
+    boton = fila.locator("button", has_text="Apagar hoy")
+    revisar((await boton.get_attribute("data-alcance")).split()
+            == ["pedidosya", "rappi"],
             "y el boton vuelve a actuar sobre los dos")
+    revisar("acotado" not in (await boton.get_attribute("class")),
+            "y suelta la marca de acotado")
 
-    revisar(await pagina.locator("#pista-chips").count() == 1,
-            "la pantalla explica que los chips se pueden clickear")
+    # Y no queda NINGUN cartel fijo explicando la mecanica de los chips: es
+    # lo que se saco en la 6.3. La pantalla se mira tres segundos con
+    # alguien esperando; el que la usa ya sabe como funciona.
+    revisar(await pagina.locator("#pista-chips").count() == 0,
+            "no hay ayuda estatica de los chips ocupando el dashboard")
 
 
 async def probar_aviso_de_apagado_sin_confirmar(pagina):
@@ -635,9 +657,13 @@ async def probar_verificacion_manual(pagina):
     revisar("invalida" in texto or "empezar de nuevo" in texto,
             "y avisa por qué no hay que recargar")
 
+    # El badge dice lo que esta pasando, no el nombre interno del estado:
+    # «CONGELADO» era la palabra del codigo y no se explicaba sola.
     estado = await pagina.locator("#estado-sistema").inner_text()
-    revisar("CONGELADO" in estado,
+    revisar("Esperando el código" in estado and "Rappi" in estado,
             f"el badge de arriba también lo dice ({estado})")
+    revisar("MODO SIMULADO" not in estado and "CONGELADO" not in estado,
+            f"y sin terminos internos de la app ({estado})")
     revisar(await boton.is_disabled(),
             "y el botón de congelar queda apagado: ya está congelada")
 
@@ -764,6 +790,17 @@ async def probar_falta_solo_la_sucursal(pagina):
     revisar(await panel.locator("[data-clave='rappi_store_id']").count() == 1,
             "pero si pide los datos de la sucursal")
 
+    # Y el badge de tienda de arriba lo distingue de "todavia no se leyo":
+    # los dos salian con el mismo ⚪ y se arreglan distinto (uno se espera,
+    # el otro no se va a leer nunca hasta que cargues el dato).
+    badges = await pagina.locator("#tiendas").inner_text()
+    revisar("⚙" in badges and "⚪" not in badges,
+            f"el badge de tienda marca que FALTA UN DATO, no que no se leyo "
+            f"({badges.strip()!r})")
+    titulo_badge = await pagina.locator("#tiendas .badge").first.get_attribute("title")
+    revisar("Ajustes" in (titulo_badge or ""),
+            f"y el tooltip dice donde se arregla ({titulo_badge})")
+
     # Se dejan puestos de nuevo para las pruebas que siguen.
     await panel.locator("[data-clave='pedidosya_menu_id']").fill(
         catalogo_ejemplo.SUCURSAL["pedidosya_menu_id"])
@@ -825,18 +862,24 @@ async def probar_pausar_tienda(pagina):
     revisar(await fila.locator(".pill[data-plat='pedidosya'] .marca-pausa")
             .count() == 1,
             "y el chip del producto tambien")
+    # Y una sola vez: ni el title del chip ni el del boton lo repiten.
+    revisar("pausa" not in
+            (await fila.locator(".pill[data-plat='pedidosya']")
+             .get_attribute("title") or ""),
+            "y lo dice UNA vez: el title del chip ya no lo repite")
+
     prender = fila.locator("button", has_text="Prender")
-    revisar("solo Rappi" in await prender.inner_text(),
+    revisar((await prender.get_attribute("data-alcance")) == "rappi",
             f"«Prender» deja afuera la tienda en pausa "
-            f"({(await prender.inner_text()).strip()})")
+            f"({await prender.get_attribute('data-alcance')})")
 
     # Y apagar TAMPOCO va solo: el botón de un producto no nombra ninguna
     # tienda. Es el pedido del 2026-08-04 — apretó «Apagar hoy» y se puso a
     # apagar en la tienda pausada, que ya estaba apagada indefinidamente.
     apagar = fila.locator("button", has_text="Apagar hoy")
-    revisar("solo Rappi" in await apagar.inner_text(),
+    revisar((await apagar.get_attribute("data-alcance")) == "rappi",
             f"«Apagar hoy» tampoco toca la tienda en pausa "
-            f"({(await apagar.inner_text()).strip()})")
+            f"({await apagar.get_attribute('data-alcance')})")
 
     # Salvo que la NOMBRES con su chip: ahí sí, que es como se apaga algo
     # suelto en una tienda desactivada.
@@ -844,9 +887,9 @@ async def probar_pausar_tienda(pagina):
     await pagina.wait_for_timeout(300)
     fila = pagina.locator(".item").filter(has_text="Milanesa con pure").first
     apagar = fila.locator("button", has_text="Apagar hoy")
-    revisar("solo PedidosYa" in await apagar.inner_text(),
+    revisar((await apagar.get_attribute("data-alcance")) == "pedidosya",
             f"marcando su chip, apagar SÍ va a la tienda en pausa "
-            f"({(await apagar.inner_text()).strip()})")
+            f"({await apagar.get_attribute('data-alcance')})")
     revisar(await fila.locator("button", has_text="Prender").is_disabled(),
             "pero prender no: ni nombrándola")
     await fila.locator(".pill[data-plat='pedidosya']").click()
