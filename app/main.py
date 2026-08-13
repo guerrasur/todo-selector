@@ -17,7 +17,7 @@ from .backup import hacer_backup, iniciar_backups_periodicos
 from .database import init_db, get_db, SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
 from .seed import sembrar
-from .worker import worker
+from .worker import worker, MENU_NO_CARGO
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -506,8 +506,16 @@ def alertas(db: Session = Depends(get_db)):
         # tampoco cargó ahí, así que técnicamente lo está, pero el cartel de
         # «logueate de nuevo» le diría que haga justo lo contrario de lo que
         # tiene que hacer. Dos carteles que se contradicen es peor que uno.
+        # Y por el mismo motivo tampoco sale como caída la que fallo porque
+        # el menú no cargó: ahí el portal contestó y no hubo ni un campo de
+        # password, así que mandarla a loguearse es mandarla a perder el
+        # tiempo con lo único que se sabe que está sano (2026-08-13).
         "sesiones_caidas": [p for p, ok in worker.sesion_ok.items()
-                            if ok is False and p not in congeladas],
+                            if ok is False and p not in congeladas
+                            and worker.motivo_sesion.get(p) != MENU_NO_CARGO],
+        "menu_no_cargo": [p for p, ok in worker.sesion_ok.items()
+                          if ok is False and p not in congeladas
+                          and worker.motivo_sesion.get(p) == MENU_NO_CARGO],
         "sin_confirmar": salida,
         # Apagado en una tienda de Rappi y prendido en la hermana. Es el
         # mismo tipo de problema que el de arriba —algo que se sigue

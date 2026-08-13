@@ -103,6 +103,23 @@ MSG_VERIFICACION = ("verificación en dos pasos en curso: la pestaña es tuya "
 # arregla reintentando: reintentar tres veces por producto solo llena la cola
 # de errores identicos.
 NO_ACTIVA = "no_activa"
+
+# Un asegurar_sesion() que devuelve False NO quiere decir "sesion caida".
+# El metodo falla por dos caminos que se arreglan distinto: encontro el campo
+# de password (hay que loguearse) o el menu no aparecio en 15 s (loguearse no
+# cambia nada). Hasta ahora los dos salian como «logueate de nuevo», que es
+# afirmar justo lo que el propio metodo ya vio que no era (regla 8).
+#
+# Con las dos tiendas de Rappi se ve solo: entran con la MISMA cuenta, asi
+# que "rappi: OK" y "rappi_comun: REQUIERE LOGIN" en el mismo arranque no
+# puede ser la sesion. El usuario se fue a pelear con un login que estaba
+# sano mientras el problema era otro (log del 2026-08-13).
+MENU_NO_CARGO = "menu_no_cargo"
+MSG_SESION_CAIDA = "sesion caida: logueate en la ventana del navegador"
+MSG_MENU_NO_CARGO = ("el portal abrio pero el menu no termino de cargar: la "
+                     "sesion esta viva, loguearse de nuevo no cambia nada")
+MSG_NO_SE_PUDO_MIRAR = ("no se pudo leer la pestaña para saber que paso: "
+                        "mirala en el navegador")
 # El nombre del catalogo llega a mas de un producto del portal. Tampoco se
 # arregla reintentando: hay que corregir el alias en la pantalla Carta. Y
 # sobre todo, no hay que clickear ninguno de los dos (ver NombreAmbiguo).
@@ -123,6 +140,11 @@ class Worker:
         self.browser = None
         self.plataformas = {}       # nombre -> instancia
         self.sesion_ok = {}         # nombre -> bool
+        # nombre -> por que fallo la ultima verificacion de sesion. Solo
+        # cambia lo que se DICE (el mensaje y el cartel de la pantalla): la
+        # cola sigue mirando sesion_ok, asi que reintentos y esperas quedan
+        # exactamente como estaban.
+        self.motivo_sesion = {}
         self.ultimo_refresco = {}   # nombre -> datetime del ultimo reload
         self.corriendo = False
         self.ultimo_chequeo = None
@@ -267,7 +289,14 @@ class Worker:
             try:
                 ok = await plat.asegurar_sesion()
                 self.sesion_ok[nombre] = ok
-                log.info("Sesion %s: %s", nombre, "OK" if ok else "REQUIERE LOGIN")
+                if ok:
+                    self.motivo_sesion.pop(nombre, None)
+                    log.info("Sesion %s: OK", nombre)
+                else:
+                    # "REQUIERE LOGIN" era el titulo que mandaba al usuario a
+                    # loguearse sin que nadie hubiera visto un login.
+                    log.info("Sesion %s: %s", nombre,
+                             await self._motivo_de_sesion_fallida(nombre, plat))
             except Exception as e:
                 self.sesion_ok[nombre] = False
                 log.error("Error verificando sesion %s: %s", nombre, e)
@@ -295,6 +324,7 @@ class Worker:
         """
         plat = self.plataformas.pop(nombre, None)
         self.sesion_ok.pop(nombre, None)
+        self.motivo_sesion.pop(nombre, None)
         self.ultimo_refresco.pop(nombre, None)
         self.reintentar_desde.pop(nombre, None)
         self.verificacion.pop(nombre, None)
@@ -718,13 +748,53 @@ class Worker:
             # verificando, y encima con sonido y el titulo parpadeando.
             if await self._detectar_verificacion(plataforma, plat):
                 return False, MSG_VERIFICACION
-            return False, "sesion caida: logueate en la ventana del navegador"
+            return False, await self._motivo_de_sesion_fallida(plataforma, plat)
 
         # Volvio la sesion: lo que estaba esperando puede salir ya.
         self.reintentar_desde.pop(plataforma, None)
+        self.motivo_sesion.pop(plataforma, None)
         return True, ""
 
     # ---------- Verificacion manual (la pestaña es del usuario) ----------
+
+    async def _motivo_de_sesion_fallida(self, plataforma: str, plat) -> str:
+        """Despues de un asegurar_sesion() fallido: ¿es la sesion o es el menu?
+
+        No congela, no navega y no recarga: mira lo que ya hay en la pestaña
+        y arma el mensaje. Lo unico que decide es que se le dice al usuario,
+        y eso importa porque los dos casos se arreglan distinto — uno con el
+        login y el otro no se arregla con el login para nada.
+
+        Si ni siquiera se puede mirar la pestaña, no afirma ninguna de las
+        dos (regla 8): lo dice asi y manda a mirarla.
+        """
+        try:
+            hay_password = await plat.page.locator(
+                'input[type="password"]').count() > 0
+        except Exception as e:
+            log.warning("%s: no pude mirar la pestaña para saber si es la "
+                        "sesion o el menu: %s", plataforma, _resumen(e, 120))
+            self.motivo_sesion[plataforma] = ""
+            return MSG_NO_SE_PUDO_MIRAR
+
+        if hay_password:
+            self.motivo_sesion[plataforma] = ""
+            return MSG_SESION_CAIDA
+
+        # Esto es para el log, no para la pantalla: cuando el menu no carga,
+        # lo que hay que mirar son los ids con los que se armo la URL. Una
+        # tienda que responde pero no muestra productos suele ser un id que
+        # no le corresponde a esta cuenta, no un problema de sesion.
+        ids = ", ".join(f"{clave}={valor}" for clave, valor in (
+            ("brandId", getattr(plat, "brand_id", None)),
+            ("storeId", getattr(plat, "store_id", None)),
+            ("menuId", getattr(plat, "menu_id", None))) if valor)
+        log.warning("%s: el menu no cargo, y NO hay campo de password, asi que "
+                    "la sesion esta viva. Revisar los ids de Ajustes contra lo "
+                    "que muestra esa pestaña. URL: %s%s",
+                    plataforma, plat.page.url, f" ({ids})" if ids else "")
+        self.motivo_sesion[plataforma] = MENU_NO_CARGO
+        return MSG_MENU_NO_CARGO
 
     async def _detectar_verificacion(self, plataforma: str, plat) -> bool:
         """Despues de un asegurar_sesion() fallido: ¿es la pantalla del codigo?

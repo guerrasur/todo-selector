@@ -106,6 +106,19 @@ que el **botón manual funcione aunque la detección automática no reconozca la
 pantalla** — que es el caso para el que está hecho, porque los textos de esa
 pantalla todavía no se confirmaron contra el portal real.
 
+Desde el 2026-08-13 cubre además el otro «no es lo que parece» del mismo
+archivo: **un menú que no carga no es una sesión caída**. `asegurar_sesion()`
+devuelve `False` por dos motivos que se arreglan distinto —el campo de
+contraseña, o el menú que no apareció en 15 s— y los dos salían como
+«logueate de nuevo». Con las dos tiendas de Rappi quedó a la vista: entran
+con la **misma cuenta**, así que «rappi: OK» y «rappi_comun: REQUIERE LOGIN»
+en el mismo arranque no puede ser el login. Se prueba que sin campo de
+contraseña el mensaje no mande a loguearse, que una sesión caída de verdad
+siga diciendo lo de siempre, que si no se pudo ni mirar la pestaña no se
+afirme ninguna de las dos (regla 8), que la pantalla reciba cada caso en su
+propio aviso, y que el motivo **no** le cambie nada a la cola (sigue mirando
+`sesion_ok`).
+
 La pantalla está cubierta aparte, en `probar_pantalla_carta.py`: que el cartel
 dé los pasos concretos, que diga que lo encolado está esperando y no perdido,
 y que una plataforma congelada **no** salga además como sesión caída (dos

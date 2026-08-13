@@ -683,7 +683,7 @@ async function cargar() {
     fetch('/api/novedades').then(r => r.json()).catch(() => ({ novedades: [] })),
     fetch('/api/alertas').then(r => r.json())
       .catch(() => ({ sin_confirmar: [], sesiones_caidas: [], sin_espejo: [],
-                      verificacion: [] })),
+                      verificacion: [], menu_no_cargo: [] })),
   ]);
 
   dudosos = new Map((alertas.sin_confirmar || [])
@@ -1020,8 +1020,10 @@ function pintarAlertas(alertas) {
   const dudas = alertas.sin_confirmar || [];
   const desparejos = alertas.sin_espejo || [];
   const verif = alertas.verificacion || [];
+  const sinMenu = alertas.menu_no_cargo || [];
 
-  if (!caidas.length && !dudas.length && !desparejos.length && !verif.length) {
+  if (!caidas.length && !dudas.length && !desparejos.length && !verif.length
+      && !sinMenu.length) {
     panel.style.display = 'none';
     return;
   }
@@ -1030,7 +1032,8 @@ function pintarAlertas(alertas) {
   // Ámbar si lo único que pasa es que estás verificando (nada salió mal:
   // la app está haciendo lo que le pediste), rojo si además hay algo que
   // puede costar plata.
-  const hayProblemas = caidas.length || dudas.length || desparejos.length;
+  const hayProblemas = caidas.length || dudas.length || desparejos.length
+                       || sinMenu.length;
   panel.className = 'aviso ' + (hayProblemas ? 'grave' : 'congelado');
   panel.innerHTML = '';
   const cont = document.createElement('div');
@@ -1049,6 +1052,22 @@ function pintarAlertas(alertas) {
     t.append(b, ' Andá a la ventana del navegador que abrió la app, ' +
                 'logueate en esa pestaña y apretá «Revalidar sesión». ' +
                 'Lo que hayas pedido queda encolado y sale solo: no se pierde.');
+    cont.appendChild(t);
+  }
+
+  // Esto NO es una sesión caída, y decirlo importa: el portal contestó y no
+  // pidió contraseña, así que loguearse de nuevo no cambia nada. Lo que
+  // pasó es que la pestaña no llegó a mostrar los productos.
+  if (sinMenu.length) {
+    const t = document.createElement('div');
+    t.style.marginBottom = (dudas.length || desparejos.length) ? '10px' : '0';
+    const b = document.createElement('b');
+    b.textContent = 'No cargó el menú de ' +
+      sinMenu.map(p => NOMBRE_PLAT[p] || p).join(' y ') + '.';
+    t.append(b, ' La sesión está bien: no hace falta que te loguees. ' +
+                'Mirá esa pestaña en el navegador —si muestra otra tienda o ' +
+                'queda vacía, revisá los ids en Ajustes— y apretá ' +
+                '«Revalidar sesión». Lo que hayas pedido queda encolado.');
     cont.appendChild(t);
   }
 
