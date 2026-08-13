@@ -41,7 +41,7 @@ from app import config                                       # noqa: E402
 import catalogo_ejemplo                                      # noqa: E402
 from app.database import SessionLocal, init_db               # noqa: E402
 from app.models import Producto, Operacion, Preferencia      # noqa: E402
-from app.worker import Worker                                # noqa: E402
+from app.worker import Worker, MENU_NO_CARGO                 # noqa: E402
 from plataformas.rappi import Rappi                          # noqa: E402
 
 catalogo_ejemplo.usar_catalogo()
@@ -65,9 +65,14 @@ class PaginaFalsa:
     la pestaña. Por eso lo que se mira es este registro y no el resultado.
     """
 
-    def __init__(self, url="https://partners.rappi.com/login", cuerpo=""):
+    def __init__(self, url="https://partners.rappi.com/login", cuerpo="",
+                 password=False):
         self.url = url
         self.cuerpo = cuerpo
+        # Si la pantalla tiene campo de contraseña. Es la unica evidencia de
+        # que la sesion se cayo de verdad: sin esto, cualquier fallo de carga
+        # se hacia pasar por "logueate de nuevo".
+        self.password = password
         self.tocada = []          # cada recarga / navegacion / cierre
 
     async def reload(self, **kw):
@@ -85,6 +90,26 @@ class PaginaFalsa:
 
     async def inner_text(self, selector):
         return self.cuerpo
+
+    def locator(self, selector):
+        # Como el de Playwright: locator() es sincronico y count() no.
+        hay = self.password and selector == 'input[type="password"]'
+        return LocalizadorFalso(1 if hay else 0)
+
+
+class LocalizadorFalso:
+    def __init__(self, cuantos):
+        self.cuantos = cuantos
+
+    async def count(self):
+        return self.cuantos
+
+
+class PaginaMuda(PaginaFalsa):
+    """Una pestaña que ni se deja mirar (el proceso murio, quedo colgada)."""
+
+    def locator(self, selector):
+        raise RuntimeError("Target page, context or browser has been closed")
 
 
 class PlataformaFalsa:
@@ -455,6 +480,69 @@ def la_pantalla_recibe_lo_que_necesita(db):
             "una plataforma congelada no sale además como sesión caída")
 
 
+def menu_que_no_carga_no_es_sesion_caida(db):
+    """El bug del 2026-08-13: dos tiendas, una cuenta, y una decia «logueate».
+
+    `asegurar_sesion()` devuelve False por dos motivos que se arreglan
+    distinto, y los dos salian como sesion caida. Con las dos tiendas de
+    Rappi quedo a la vista: entran con la MISMA cuenta, asi que «rappi: OK» y
+    «rappi_comun: REQUIERE LOGIN» en el mismo arranque no puede ser el login.
+    """
+    print("\n== Un menú que no carga no es una sesión caída ==")
+
+    menu = "https://partners.rappi.com/menu?brandId=Y&storeIds=X&storeId=X"
+
+    # Caso 1: el portal contesto, no hay campo de password, no hay menu.
+    sin_menu = PlataformaFalsa("rappi_comun", page=PaginaFalsa(menu, ""),
+                               sesion=False)
+    sin_menu.store_id, sin_menu.brand_id = "X", "Y"
+    w = worker_con({"rappi_comun": sin_menu})
+    motivo = asyncio.run(w._motivo_de_sesion_fallida("rappi_comun", sin_menu))
+
+    revisar("loguearse de nuevo no cambia nada" in motivo,
+            "sin campo de password, el mensaje NO manda a loguearse")
+    revisar(w.motivo_sesion.get("rappi_comun") == MENU_NO_CARGO,
+            "y queda anotado como «el menú no cargó»")
+
+    # Caso 2: la sesion caida de verdad sigue diciendo lo de siempre.
+    caida = PlataformaFalsa("rappi", page=PaginaFalsa(
+        "https://partners.rappi.com/login", "", password=True), sesion=False)
+    w2 = worker_con({"rappi": caida})
+    motivo2 = asyncio.run(w2._motivo_de_sesion_fallida("rappi", caida))
+
+    revisar("logueate" in motivo2,
+            "con el campo de password sí manda a loguearse, como siempre")
+    revisar(w2.motivo_sesion.get("rappi") != MENU_NO_CARGO,
+            "y esa no sale como «el menú no cargó»")
+
+    # Caso 3: no se pudo ni mirar la pestaña. No se afirma ninguna de las dos.
+    muda = PlataformaFalsa("rappi", page=PaginaMuda(menu, ""), sesion=False)
+    w3 = worker_con({"rappi": muda})
+    motivo3 = asyncio.run(w3._motivo_de_sesion_fallida("rappi", muda))
+
+    revisar("no se pudo leer la pestaña" in motivo3,
+            "si no se pudo mirar, no se afirma ni una cosa ni la otra (regla 8)")
+    revisar(w3.motivo_sesion.get("rappi") != MENU_NO_CARGO,
+            "y tampoco se la cuenta como menú que no cargó")
+
+    # Y lo que ve la pantalla: el cartel de «logueate» sale solo para la que
+    # de verdad lo necesita. Es el mismo corte que hace /api/alertas.
+    todas = {"rappi": False, "rappi_comun": False, "pedidosya": True}
+    motivos = {"rappi": "", "rappi_comun": MENU_NO_CARGO}
+    caidas = [p for p, ok in todas.items()
+              if ok is False and motivos.get(p) != MENU_NO_CARGO]
+    sin_menu_ui = [p for p, ok in todas.items()
+                   if ok is False and motivos.get(p) == MENU_NO_CARGO]
+
+    revisar(caidas == ["rappi"], "a la pantalla va como caída solo la que lo está")
+    revisar(sin_menu_ui == ["rappi_comun"],
+            "y la otra sale en su propio aviso, sin mandar a loguearse")
+
+    # La cola no cambia: sigue mirando sesion_ok, no el motivo.
+    revisar(w.sesion_ok.get("rappi_comun") is not True,
+            "el motivo no le regala una sesión OK a la cola")
+
+
 def deteccion_pide_dos_evidencias(db):
     """La deteccion de rappi.py, contra una pagina de mentira."""
     print("\n== La detección pide dos evidencias, no una ==")
@@ -499,6 +587,7 @@ def main():
         ajustes_no_le_cierran_la_pestana(db)
         lee_al_terminar(db)
         la_pantalla_recibe_lo_que_necesita(db)
+        menu_que_no_carga_no_es_sesion_caida(db)
         deteccion_pide_dos_evidencias(db)
     finally:
         db.close()
