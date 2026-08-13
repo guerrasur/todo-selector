@@ -14,6 +14,7 @@ py pruebas/probar_pantalla_carta.py   la pantalla entera, de punta a punta
 py pruebas/probar_primer_arranque.py  cómo arranca una instalación nueva
 py pruebas/probar_rappi_sync.py       las dos tiendas de Rappi (Turbo y Común)
 py pruebas/probar_rappi_conectividad.py  el badge de tienda abierta/cerrada
+py pruebas/probar_backup.py           la copia de seguridad de la base
 ```
 
 Las que usan navegador necesitan Playwright instalado
@@ -188,6 +189,19 @@ carta ni con la sucursal de otro. Comprueba que no haya ni un producto cargado,
 que la pantalla pida los dos pasos en orden, que "Leer mi carta" esté bloqueado
 hasta decir qué local sos, que no se guarde media sucursal, y que el panel se
 vaya cuando ya no hace falta.
+
+**`probar_backup.py`** cubre la copia de seguridad diaria de la base
+(`app/backup.py`), que corre sola al arrancar y cada 3 horas. Lo que importa
+no es que copie sino que la copia **sirva el día que haga falta**: se
+comprueba que el archivo abra como base SQLite y tenga las tablas de la app,
+no que exista y pese algo. Cubre que el del día no se rehaga porque sí, que
+sí se rehaga cuando quedó más viejo que el umbral (envejeciendo el archivo
+con `os.utime`, sin tocar el reloj), que la poda deje exactamente los 30 más
+nuevos y no un rango al azar, y que los `.tmp` de una corrida que se cortó en
+el medio se limpien y no queden haciéndose pasar por un backup. También que
+con la base todavía inexistente devuelva `None` en vez de dejar un archivo
+vacío. Como las demás, usa una carpeta temporal: no lee ni escribe tu base
+real.
 
 ## La carta de ejemplo
 

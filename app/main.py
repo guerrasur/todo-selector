@@ -13,6 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import catalogo, cierre, config
+from .backup import hacer_backup, iniciar_backups_periodicos
 from .database import init_db, get_db, SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
 from .seed import sembrar
@@ -133,6 +134,15 @@ def _destrabar_operaciones_colgadas():
 async def arrancar():
     silenciar_ruido_de_refresco()
     init_db()
+    # Va despues de init_db (la base ya esta con las columnas al dia) y antes
+    # de todo lo demas, que ya escribe. Si el backup falla, la app arranca
+    # igual: no tener la copia de hoy es peor que nada, no un motivo para
+    # dejar al usuario sin la pantalla.
+    try:
+        hacer_backup()
+        iniciar_backups_periodicos()
+    except Exception as e:
+        log.warning("No se pudo hacer el backup de la base: %s", e)
     _destrabar_operaciones_colgadas()
     sembrar()
     config.recargar()
