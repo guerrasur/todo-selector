@@ -2701,12 +2701,27 @@ function cerrarPaneles(salvo) {
 const RUTA_DE = { ajustes: '/ajustes', carta: '/carta' };
 let pantallaActual = 'dashboard';   // lo lee pintarInicio() para no reaparecer
 
+// Los paneles que deciden ELLOS si se ven: el de primer arranque y los dos
+// avisos (los pinta cargar(), y se esconden solos cuando no hay nada que
+// decir), y los dos que abre un botón (Apagar todo y la cola).
+//
+// Son `.solo-dashboard`, así que el bucle de abajo los apagaba al salir —
+// bien— y les BORRABA el display al volver, que es otra cosa: reaparecían
+// vacíos. Con «Apagar todo» y la cola quedaba a la vista, porque nadie los
+// vuelve a esconder: dos cajas vacías en la pantalla hasta que las abrías y
+// las cerrabas a mano. Encima justo después de que cerrarPaneles() los
+// acababa de cerrar, tres líneas más arriba (visto el 2026-08-14, viene de
+// antes de la v6.5).
+const PANELES_PROPIOS = ['panel-inicio', 'panel-alertas', 'panel-novedades',
+                         'panel-cierre', 'panel-cola'];
+
 function mostrarPantalla(cual) {
   pantallaActual = cual;
   cerrarPaneles();
   const esDashboard = cual === 'dashboard';
   for (const el of document.querySelectorAll('.solo-dashboard')) {
-    el.style.display = esDashboard ? '' : 'none';
+    if (!esDashboard) { el.style.display = 'none'; continue; }
+    if (!PANELES_PROPIOS.includes(el.id)) el.style.display = '';
   }
   for (const el of document.querySelectorAll('.solo-pantalla')) {
     el.style.display = esDashboard ? 'none' : '';
@@ -2719,11 +2734,14 @@ function mostrarPantalla(cual) {
 }
 
 function irAlDashboard() {
-  // El contenido del dashboard (panel-inicio, alertas, novedades, lista) se
-  // sigue calculando en segundo plano aunque no se vea (ver pintarInicio):
-  // no hace falta forzar un cargar() extra, mostrarPantalla ya deja todo
-  // visible con lo último que se pintó.
+  // La lista y el buscador vuelven con lo último que se pintó (se sigue
+  // calculando en segundo plano aunque no se vea, ver pintarInicio). Los
+  // tres paneles que deciden solos si se ven (PANELES_PROPIOS) ya no se
+  // muestran de prepo, así que hay que repintarlos ahora: si no, un aviso
+  // que estaba abierto —«hay que loguearse en Rappi»— no se vería hasta el
+  // próximo tick, y ese es justo el cartel que no puede tardar.
   mostrarPantalla('dashboard');
+  cargar();
 }
 
 // Atrás/adelante del navegador: la URL ya cambió sola, solo hay que pintar
