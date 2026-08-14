@@ -73,6 +73,24 @@ que había. El selector de Rappi tiene un `TODO-SELECTOR`: los dos caminos
 (header adentro del `menu-category`, o el más cercano arriba) están vistos
 en el DOM pero no confirmados como par contra el portal real.
 
+**El orden de las categorías se arrastra** (2026-08-14, v6.7). No había
+ningún orden: los grupos salían por el id del primer producto de cada uno.
+El título se agarra con el mouse y el grupo entero se mueve; el orden vive
+en `preferencias` (`Preferencia.ORDEN_CATEGORIAS`, lista JSON de nombres) y
+sale por `/api/estado-sistema`. Dos cosas que importan del código:
+
+- **Va con mousedown/mousemove/mouseup y NO con el drag-and-drop de HTML5.**
+  No es preferencia de estilo: contra esta pantalla Chromium no dispara ni
+  `dragstart` sobre el título —un div de control al lado, mismo contenedor y
+  mismos estilos computados, sí arrastra— así que no hay forma de probarlo
+  en este repo, y lo que no se puede probar se rompe sin que nadie se
+  entere. Está anotado en `index.html`, arriba de `hacerArrastrable`.
+- **Regla 7 otra vez, y acá muerde doble**: `ORDEN_CATEGORIAS` vive afuera
+  del repintado, y `arrastrando` lo FRENA mientras dura el gesto — un
+  repintado en el medio le saca de abajo del mouse el elemento que estás
+  moviendo. Los 5 px de umbral son para que un click sin querer no reordene
+  la pantalla.
+
 **El portal cambió todos los nombres de golpe** (2026-08-14, v6.5,
 `catalogo.reiniciar`). El vínculo con el portal es el TEXTO del nombre,
 exacto: no hay ids, ni posiciones, ni categorías. Cuando el dueño renombró y

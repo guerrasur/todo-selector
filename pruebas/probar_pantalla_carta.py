@@ -1294,6 +1294,126 @@ async def probar_categorias(pagina):
             f"y dejándola vacía vuelven las de los portales ({texto!r})")
 
 
+async def arrastrar_titulo(pagina, cual: str, hasta: str, donde: str = "arriba"):
+    """Agarra el título de un grupo y lo suelta arriba del de otro.
+
+    Con el mouse de verdad y no con `drag_to`: la pantalla mueve los grupos
+    con mousedown/mousemove/mouseup y no con el drag-and-drop de HTML5, que
+    contra esta página Chromium no dispara ni en headless ni con el
+    elemento a la vista (ver el comentario en index.html).
+    """
+    origen = pagina.locator(f'.categoria[data-categoria="{cual}"]')
+    await origen.scroll_into_view_if_needed()
+
+    a = await origen.bounding_box()
+    # El GRUPO destino, no solo su título: lo que decide si el arrastrado va
+    # antes o después es en qué mitad del grupo soltás.
+    b = await pagina.evaluate("""(cat) => {
+        const titulos = [...document.querySelectorAll('#lista .categoria')];
+        const h = titulos.find(x => x.dataset.categoria === cat);
+        let arriba = h.getBoundingClientRect().top, abajo = arriba;
+        for (let n = h.nextElementSibling;
+             n && !n.classList.contains('categoria'); n = n.nextElementSibling) {
+          abajo = n.getBoundingClientRect().bottom;
+        }
+        return {x: h.getBoundingClientRect().x, arriba, abajo};
+    }""", hasta)
+
+    y = b["arriba"] + 2 if donde == "arriba" else b["abajo"] - 4
+    await pagina.mouse.move(a["x"] + 40, a["y"] + a["height"] / 2)
+    await pagina.mouse.down()
+    # Primero unos píxeles, que es lo que distingue un arrastre de un click.
+    await pagina.mouse.move(a["x"] + 40, a["y"] + a["height"] / 2 - 12, steps=3)
+    await pagina.mouse.move(b["x"] + 40, y, steps=12)
+    await pagina.mouse.up()
+
+
+async def probar_orden_de_categorias(pagina):
+    """Arrastrar un título cambia el orden de los grupos, y queda guardado.
+
+    Hasta la 6.6 no había ningún orden: los grupos salían en el orden en que
+    se había vinculado el PRIMER producto de cada uno, o sea por id. «Bebidas
+    arriba de Ensaladas» sin que nadie lo decidiera (pedido del 2026-08-14).
+
+    Lo que importa acá, además de que se mueva: que **sobreviva al
+    repintado** (la lista se repinta sola cada 3 s, regla 7) y que esté en la
+    base y no en el navegador.
+    """
+    print("\n== El orden de las categorías se arrastra ==")
+    from app.database import SessionLocal
+    from app.models import Producto
+
+    db = SessionLocal()
+    try:
+        for nombre, categoria in (("Empanada de carne", "Empanadas"),
+                                  ("Gaseosa cola", "Bebidas")):
+            p = db.query(Producto).filter_by(nombre=nombre).first()
+            p.categoria = categoria
+            p.categoria_manual = True
+        db.commit()
+    finally:
+        db.close()
+
+    await pagina.reload()
+    await pagina.wait_for_selector(".categoria", timeout=10000)
+
+    async def titulos():
+        return await pagina.evaluate(
+            """[...document.querySelectorAll('#lista .categoria.movible')]
+                 .map(h => h.dataset.categoria)""")
+
+    antes = await titulos()
+    revisar(len(antes) >= 2, f"hay al menos dos grupos para ordenar ({antes})")
+    revisar(all(t is not None for t in antes),
+            "todos los títulos de categoría son arrastrables")
+
+    # El último se arrastra sobre el primero: tiene que quedar primero. Se
+    # hace así y no con nombres fijos para no depender de en qué orden el
+    # catálogo de ejemplo haya cargado los productos.
+    ultimo, primero = antes[-1], antes[0]
+    await arrastrar_titulo(pagina, ultimo, primero)
+    await pagina.wait_for_timeout(1200)
+
+    despues = await titulos()
+    revisar(despues[0] == ultimo,
+            f"el grupo arrastrado queda primero ({antes} -> {despues})")
+    revisar(sorted(despues) == sorted(antes),
+            "y no se pierde ni se duplica ningún grupo")
+
+    # El repintado de los 3 segundos no puede devolverlo a donde estaba: ese
+    # es el error que ya costó caro con los chips de plataforma (regla 7).
+    await pagina.wait_for_timeout(4000)
+    revisar(await titulos() == despues,
+            "el repintado automático no lo devuelve a donde estaba")
+
+    # Y vive en la base, no en este navegador: recargar lo mantiene.
+    await pagina.reload()
+    await pagina.wait_for_selector(".categoria", timeout=10000)
+    revisar(await titulos() == despues, "y sobrevive a recargar la pantalla")
+
+    guardado = await pagina.evaluate(
+        "fetch('/api/estado-sistema').then(r => r.json())")
+    revisar(guardado["orden_categorias"][0] == ultimo,
+            f"queda guardado del lado del server ({guardado['orden_categorias']})")
+
+    # Y al final de todo, que es el caso que hace falta poder hacer: soltando
+    # en la mitad de ABAJO del último grupo. Sin eso no habría forma de
+    # mandar un grupo al último lugar, solo de subir a los demás.
+    orden = await titulos()
+    await arrastrar_titulo(pagina, orden[0], orden[-1], donde="abajo")
+    await pagina.wait_for_timeout(1200)
+    revisar(await titulos() == orden[1:] + [orden[0]],
+            f"y se puede mandar un grupo al final ({orden} -> {await titulos()})")
+
+    # Un click suelto en el título NO puede reordenar nada: se aprieta sin
+    # querer todo el tiempo, y la pantalla se usa con un cliente esperando.
+    orden = await titulos()
+    titulo = pagina.locator(f'.categoria[data-categoria="{orden[-1]}"]')
+    await titulo.click()
+    await pagina.wait_for_timeout(800)
+    revisar(await titulos() == orden, "un click sin arrastrar no mueve nada")
+
+
 async def probar_volver_de_una_pantalla(pagina):
     """Volver de Ajustes/Carta no puede dejar cajas vacías en el dashboard.
 
@@ -1347,6 +1467,7 @@ async def main():
 
         await probar_sin_platos_del_dia(pagina)
         await probar_categorias(pagina)
+        await probar_orden_de_categorias(pagina)
         await probar_volver_de_una_pantalla(pagina)
         await probar_buscador(pagina)
         await probar_vista_de_prendidos(pagina)

@@ -127,6 +127,16 @@ class Preferencia(Base):
     # arranque y terminabas ignorandolo.
     NOVEDADES_IGNORADAS = "novedades_ignoradas"
 
+    # En que orden van los titulos de la pantalla. Lista JSON de nombres de
+    # categoria, arrastrados por el usuario. Sin esto el orden lo decidia el
+    # id del primer producto de cada grupo, o sea el orden en que se fueron
+    # vinculando: "Bebidas" arriba de "Ensaladas" sin ningun motivo.
+    #
+    # Guarda los NOMBRES y no ids: las categorias no son una tabla, son el
+    # texto de Producto.categoria. Una que se queda sin productos no molesta
+    # (no se dibuja) y si vuelve, vuelve a su lugar.
+    ORDEN_CATEGORIAS = "orden_categorias"
+
     # Los ajustes de la pantalla de configuracion viven aca tambien, con el
     # prefijo "cfg_" para no mezclarse con estas dos marcas. Ver app/config.py.
 
