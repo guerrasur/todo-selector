@@ -193,6 +193,9 @@ const TAPA_RECORTE = TAPA === "recorte";
 // Los tres arman la misma jerarquia de ancestros del portal real.
 const TAPA_ANCESTRO = TAPA === "ancestro" || TAPA_MUCHOS || TAPA_RECORTE;
 const DIALOGO = params.get("dialogo") || "";
+// ?categorias=dos  la carta agrupada en dos categorias de verdad, con el
+//                  header de cada una adentro de su <li menu-category>.
+const DOS_CATEGORIAS = params.get("categorias") === "dos";
 const DIALOGO_INVISIBLE = DIALOGO === "invisible";
 const DIALOGO_TARDE = DIALOGO === "tarde";
 // Los dos nuevos son variantes del portal de floating-ui, que es el dialogo
@@ -225,6 +228,45 @@ const guardar = () =>
 // <ul data-testid="menu-categories"> / <li data-testid="menu-category"> del
 // portal real, que son ANCESTROS del toggle: sin esa jerarquia no hay forma
 // de reproducir el "encima=ul[data-testid=menu-categories]" del log.
+// ?categorias=dos: la carta partida en DOS grupos, cada uno con su
+// <li data-testid="menu-category"> y su header ADENTRO, que es como agrupa
+// el portal. Con una sola categoria cualquier cosa acierta; con dos hay que
+// sacar la de cada producto de verdad.
+const GRUPOS = [
+  ["Aguas", [0, 1, 3, 4]],
+  ["Gaseosas", [2]],
+];
+
+function contenedoresPorCategoria() {
+  const lista = document.getElementById("lista");
+  lista.innerHTML = "";
+  const ul = document.createElement("ul");
+  ul.setAttribute("data-testid", "menu-categories");
+
+  const cuerpos = {};
+  for (const [nombre] of GRUPOS) {
+    const li = document.createElement("li");
+    li.setAttribute("data-testid", "menu-category");
+    const h = document.createElement("div");
+    h.setAttribute("data-testid", "collapsible-panel-header");
+    h.setAttribute("role", "button");
+    h.textContent = nombre;
+    const cuerpo = document.createElement("div");
+    cuerpo.className = "cat-cuerpo";
+    li.append(h, cuerpo);
+    ul.appendChild(li);
+    cuerpos[nombre] = cuerpo;
+  }
+  lista.appendChild(ul);
+
+  return (i) => {
+    for (const [nombre, indices] of GRUPOS) {
+      if (indices.includes(i)) return cuerpos[nombre];
+    }
+    return cuerpos[GRUPOS[0][0]];
+  };
+}
+
 function contenedor() {
   const lista = document.getElementById("lista");
   lista.innerHTML = "";
@@ -255,7 +297,12 @@ function contenedor() {
 }
 
 function pintar() {
-  const lista = contenedor();
+  // Con ?categorias=dos cada tarjeta va a la de su grupo; si no, todas al
+  // mismo contenedor de siempre.
+  const donde = DOS_CATEGORIAS ? contenedoresPorCategoria() : (() => {
+    const uno = contenedor();
+    return () => uno;
+  })();
   PRODUCTOS.forEach(([nombre, pid, extra], i) => {
     const apagado = apagados.has(pid);
     const tarjeta = document.createElement("div");
@@ -334,7 +381,7 @@ function pintar() {
       tarjeta.appendChild(label);
     }
 
-    lista.appendChild(tarjeta);
+    donde(i).appendChild(tarjeta);
   });
 }
 

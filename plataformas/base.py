@@ -1168,6 +1168,24 @@ class PlataformaBase(ABC):
         """
         return []
 
+    async def categorias_de_productos(self) -> dict:
+        """{nombre_remoto: categoria} tal como agrupa ESTE portal.
+
+        Se llena con lo que dejo la ultima lectura (listar_productos o
+        leer_todos): la categoria se ve al pasar, asi que sacarla no cuesta
+        una segunda vuelta por la carta, que son minutos.
+
+        **{} es una respuesta valida y quiere decir "no se"**, no "no tienen
+        categoria" (regla 8). Una plataforma que todavia no sabe leerlas —o
+        una lectura que no llego a hacerse— devuelve vacio, y el que llama
+        deja lo que ya sabia en vez de pisarlo con nada. Lo mismo un
+        producto que no esta en el diccionario.
+
+        Los dos portales agrupan distinto y los nombres no coinciden: aca
+        cada uno dice el SUYO, sin traducirlo ni elegir por el usuario.
+        """
+        return {}
+
     async def leer_todos(self) -> dict:
         """{nombre_remoto: disponible} de TODA la carta, de una pasada.
 

@@ -52,6 +52,27 @@ También se distinguen los tres «no sé» del badge de tienda, que salían todo
 con el mismo ⚪: ⚪ sin leer, ⚙ falta un dato en Ajustes, ⚠ no se pudo
 confirmar. Se arreglan distinto, así que no pueden verse igual.
 
+**Las categorías se leían y se tiraban** (2026-08-14, v6.6). La app leía de
+los portales solo los NOMBRES, así que toda la carta cargada desde la
+pantalla Carta salía bajo «SIN CATEGORÍA» (las que había venían del
+`seed.py` escrito a mano, que está vacío). Ahora la lectura las trae de la
+pasada que ya hacía: PedidosYa recorre las categorías una por una para poder
+leer la carta entera —el dato estaba ahí, en `_categoria_de`— y en Rappi
+están todas en la misma pantalla (una pasada de JS, `JS_CATEGORIAS`).
+
+Los dos portales agrupan distinto, y por eso son **dos datos**:
+`EstadoItem.categoria_portal` es un hecho de allá y se refresca siempre;
+`Producto.categoria` es cómo se agrupa la PANTALLA y, en cuanto el usuario
+la escribe (`categoria_manual`), la lectura no la toca nunca más. Sin esa
+marca, cada lectura le deshacía el orden hecho a mano. La pantalla muestra
+las dos («Empanadas · Para picar») y agrupa por la de PedidosYa (mismo
+`carta.ORDEN` que el nombre canónico). `categorias_de_productos()` es un
+método NUEVO en `base.py` (regla 1: no se tocaron los 4 del contrato) y
+devolver `{}` es «no sé», no «no tienen»: una lectura que falla no borra las
+que había. El selector de Rappi tiene un `TODO-SELECTOR`: los dos caminos
+(header adentro del `menu-category`, o el más cercano arriba) están vistos
+en el DOM pero no confirmados como par contra el portal real.
+
 **El portal cambió todos los nombres de golpe** (2026-08-14, v6.5,
 `catalogo.reiniciar`). El vínculo con el portal es el TEXTO del nombre,
 exacto: no hay ids, ni posiciones, ni categorías. Cuando el dueño renombró y

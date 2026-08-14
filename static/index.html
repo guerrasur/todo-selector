@@ -129,6 +129,18 @@
   .nombre { font-weight: 550; letter-spacing: -.005em; }
   .nombre.editable { cursor: text; }
   .nombre.editable:hover { text-decoration: underline dotted var(--tenue); }
+  /* En qué categoría lo tiene cada portal. Va en la celda de abajo del
+     nombre (columna 1 de la fila siguiente del grid), chica y tenue: es
+     contexto para encontrarlo, no un dato que compita con el estado.
+     `margin-top: -10px` come el `gap` del grid: sin eso queda flotando a
+     14 px del nombre y parece de otro producto. */
+  .item .cats {
+    grid-column: 1; margin-top: -10px;
+    font-size: 11.5px; color: var(--tenue); overflow-wrap: anywhere;
+  }
+  .item .cats.nada { font-style: italic; opacity: .7; }
+  .cats.editable { cursor: text; }
+  .cats.editable:hover { text-decoration: underline dotted var(--tenue); }
   .plats { display: flex; gap: 8px; flex-wrap: wrap; }
   /* Un chip sin marcar NO esta apagado: es el estado normal, y ademas es
      donde se lee el estado del producto en ese portal. Va al 100% de
@@ -1863,11 +1875,64 @@ function fila(item) {
   acc.append(bHoy, bIndef, bOn);
   div.appendChild(acc);
 
+  // Abajo del nombre: en qué categoría lo tiene CADA portal. Los dos
+  // agrupan distinto y los nombres no coinciden, así que mostrar una sola
+  // sería esconder dónde está de verdad tu plato. Va último y en su propia
+  // fila del grid (ver .item .cats), que es la celda de abajo del nombre.
+  div.appendChild(categoriasDe(item));
+
   // Deja las etiquetas y el disabled como corresponda. Corre también en
   // cada repintado, no solo al clickear un chip.
   refrescarBotones();
 
   return div;
+}
+
+// «Bebidas · Gaseosas»: la de cada portal, sin repetir la que es igual en
+// los dos. Se clickea para escribir la tuya, como el nombre.
+function categoriasDe(item) {
+  const cats = document.createElement('div');
+  cats.className = 'cats editable';
+
+  const porPortal = item.categorias || {};
+  const vistas = [];
+  for (const plat of PLATS) {
+    const c = porPortal[plat];
+    if (c && !vistas.includes(c)) vistas.push(c);
+  }
+
+  const propia = item.categoria_manual && item.categoria;
+  cats.textContent = propia ? item.categoria
+                   : vistas.length ? vistas.join(' · ')
+                   : 'sin categoría';
+  if (!propia && !vistas.length) cats.classList.add('nada');
+
+  // Quién dice qué, con nombre y apellido: con «Bebidas · Gaseosas» a secas
+  // no se sabe cuál es de cuál, y son justo los que no coinciden.
+  const dice = PLATS.filter(p => porPortal[p])
+                    .map(p => `${NOMBRE_PLAT[p]}: ${porPortal[p]}`).join('  ·  ');
+  cats.title = (propia
+    ? 'La escribiste vos, así que la lectura de los portales no la toca. '
+    : 'Sale de los portales y se actualiza sola en cada lectura. ') +
+    (dice ? `En los portales: ${dice}. ` : '') +
+    'Click para escribir la tuya (vacío = vuelve a mandar el portal).';
+
+  cats.onclick = async () => {
+    const nueva = prompt('¿En qué grupo querés verlo? (vacío = como lo ' +
+                         'agrupa el portal)', item.categoria || '');
+    if (nueva === null) return;
+    const r = await fetch('/api/categoria', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ producto_id: item.id, categoria: nueva.trim() }),
+    });
+    if (!r.ok) {
+      const detalle = await r.json().catch(() => ({}));
+      alert('No se pudo: ' + (detalle.detail || r.status));
+    }
+    cargar();
+  };
+  return cats;
 }
 
 // Cada etiqueta se tiene que entender sin saber cómo está hecha la app:

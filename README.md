@@ -488,6 +488,39 @@ afirmar sobre algo que no se está viendo. Ese caso tiene su propio aviso, el de
 leída contra la otra del día anterior, y el cartel llegó a decir que 11
 productos se seguían vendiendo cuando en realidad era 1.
 
+## Las categorías salen de los portales (6.6)
+
+Hasta la 6.5 la app leía de los portales **solo los nombres**, así que todo lo
+que se cargaba desde la pantalla Carta quedaba bajo «SIN CATEGORÍA»: las
+categorías que había venían del catálogo escrito a mano de `app/seed.py`, que
+está vacío. Ahora la lectura las trae, de la misma pasada que ya hacía (en
+PedidosYa hay que recorrer las categorías una por una para leer la carta
+entera, y en Rappi están todas en la misma pantalla), así que no cuesta ni un
+minuto más.
+
+**Los dos portales agrupan distinto**, y eso no se esconde:
+
+- Abajo del nombre del producto se ven **las dos**: «Empanadas · Para picar».
+  El tooltip dice cuál es de cuál. Si en los dos se llama igual, se muestra una.
+- La lista se **agrupa** por la de PedidosYa, que es de donde ya sale el nombre
+  canónico (el mismo orden de `carta.ORDEN`, para no agregar una regla nueva).
+  Un producto que solo está en Rappi se agrupa con la de Rappi.
+- **Clickeás la categoría y escribís la tuya.** Desde ese momento es tuya: la
+  lectura no la vuelve a pisar. Dejándola vacía vuelve a mandar el portal, que
+  es cómo te arrepentís sin tener que acordarte de cómo se llamaba.
+
+Lo que ve cada portal y lo que ves vos son dos datos distintos y se guardan
+aparte (`EstadoItem.categoria_portal` y `Producto.categoria`): el primero es un
+hecho de allá y se refresca en cada lectura; el segundo es cómo querés ver tu
+carta. Una lectura que no pudo leer las categorías **no borra** las que había
+(regla 8): `{}` es «no sé», no «no tienen».
+
+Aparecen después de la primera lectura de estado (el botón **Leer estado
+real**, o la ronda automática): es la que entra a los portales.
+
+`POST /api/categoria` para cambiarla; `GET /api/productos` las devuelve en
+`categorias` (por portal) y en `categoria` (la de la pantalla).
+
 ## La pantalla Carta
 
 El botón **Actualizar carta** (arriba a la derecha) muestra lo que dicen los
