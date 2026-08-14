@@ -205,6 +205,16 @@ cuál es de cuál, que la lista se agrupe con la de PedidosYa, que la que
 escribís a mano sea la que se ve, y que dejándola vacía vuelvan las de los
 portales.
 
+Desde el 2026-08-14 cubre el **orden de las categorías**: que el grupo
+arrastrado quede donde lo soltaste, que se pueda mandar uno al final
+(soltando en la mitad de abajo del último, que es el caso sin el cual solo se
+podría subir a los demás), que el repintado automático **no** lo devuelva a
+donde estaba (regla 7), que sobreviva a recargar porque vive en la base, y
+que un click sin arrastrar no mueva nada. Se maneja con el mouse de verdad
+(mousedown/mousemove/mouseup) y no con `drag_to`: la pantalla no usa el
+drag-and-drop de HTML5, justamente porque contra esta página Chromium no lo
+dispara.
+
 Y el botón rojo del final de **Ajustes**
 («Desvincular las cartas y empezar de cero»), de punta a punta y en ese orden:
 que el primer click **no** borre sino que abra la confirmación con los números

@@ -594,6 +594,10 @@ def estado_sistema(db: Session = Depends(get_db)):
         # confundir con "falta_sucursal": esto es solo lectura.
         "tiendas": worker.estado_tiendas,
         "falta_sucursal": falta_sucursal,
+        # En qué orden van los títulos de la lista. Viene acá y no en
+        # /api/productos porque eso devuelve una lista pelada, y los dos se
+        # piden en el mismo tick del repintado.
+        "orden_categorias": catalogo.orden_categorias(db),
         "catalogo_vacio": db.query(Producto).count() == 0,
         "operaciones_pendientes": pendientes,
         "ultimo_chequeo": (worker.ultimo_chequeo.isoformat()
@@ -975,6 +979,24 @@ def renombrar(data: RenombrarIn, db: Session = Depends(get_db)):
     catalogo.marcar_manual(db)
     db.commit()
     return {"ok": True, "producto": _ver_producto(producto)}
+
+
+class OrdenCategoriasIn(BaseModel):
+    orden: list[str]
+
+
+@app.post("/api/categorias/orden")
+def guardar_orden_categorias(data: OrdenCategoriasIn,
+                             db: Session = Depends(get_db)):
+    """En qué orden van los títulos de la pantalla.
+
+    Lo manda la pantalla cuando arrastrás un título. Hasta ahora el orden lo
+    decidía el id del primer producto de cada grupo —o sea, el orden en que
+    los fuiste vinculando—, que no es un orden: es una casualidad.
+    """
+    orden = catalogo.guardar_orden_categorias(db, data.orden)
+    db.commit()
+    return {"ok": True, "orden": orden}
 
 
 class CategoriaIn(BaseModel):

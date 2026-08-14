@@ -565,6 +565,43 @@ def _absorber(db, destino: Producto, origen: Producto):
     db.flush()
 
 
+# ---------- El orden de los titulos de la pantalla ----------
+
+def orden_categorias(db) -> list:
+    """En que orden van los grupos. [] = como venga."""
+    marca = db.query(Preferencia).get(Preferencia.ORDEN_CATEGORIAS)
+    if marca is None or not marca.valor:
+        return []
+    try:
+        return [c for c in json.loads(marca.valor) if isinstance(c, str)]
+    except ValueError:
+        return []
+
+
+def guardar_orden_categorias(db, orden: list):
+    """El orden que dejo el usuario arrastrando los titulos.
+
+    Se guardan los nombres tal cual, sin validarlos contra el catalogo: una
+    categoria que hoy no tiene productos no se dibuja, pero si vuelve tiene
+    que volver a su lugar. Borrarla de la lista seria perder el orden por
+    haber pausado el ultimo producto que la usaba.
+    """
+    marca = db.query(Preferencia).get(Preferencia.ORDEN_CATEGORIAS)
+    if marca is None:
+        marca = Preferencia(clave=Preferencia.ORDEN_CATEGORIAS)
+        db.add(marca)
+
+    limpio, vistos = [], set()
+    for nombre in orden:
+        nombre = (nombre or "").strip()
+        if nombre and nombre not in vistos:
+            vistos.add(nombre)
+            limpio.append(nombre)
+
+    marca.valor = json.dumps(limpio, ensure_ascii=False)
+    return limpio
+
+
 # ---------- Novedades: algo que aparecio en un portal donde no estaba ----------
 
 def _ignoradas(db) -> set:

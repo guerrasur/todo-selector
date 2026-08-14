@@ -518,6 +518,20 @@ carta. Una lectura que no pudo leer las categorías **no borra** las que había
 Aparecen después de la primera lectura de estado (el botón **Leer estado
 real**, o la ronda automática): es la que entra a los portales.
 
+**El orden de los grupos se arrastra** (6.7). Hasta la 6.6 no había ninguno:
+los grupos salían en el orden en que se había vinculado el *primer* producto
+de cada uno, o sea por id — «Bebidas» arriba de «Ensaladas» sin que nadie lo
+decidiera. Ahora agarrás el título (aparece una manija ⠿ al pasar por encima)
+y lo movés: el grupo entero se mueve con vos y lo que ves mientras arrastrás
+es el resultado. Soltarlo en la mitad de arriba de otro grupo lo deja encima;
+en la mitad de abajo, debajo — así se puede mandar uno al último lugar.
+
+Queda guardado en la base y no en el navegador (es cómo mirás tu carta, no
+una preferencia de esta máquina), sobrevive al repintado y a recargar. Un
+click sin arrastrar no mueve nada. Una categoría nueva aparece al final, que
+es donde se la ve, en vez de meterse en el medio; y una que se queda sin
+productos no pierde su lugar para cuando vuelva.
+
 `POST /api/categoria` para cambiarla; `GET /api/productos` las devuelve en
 `categorias` (por portal) y en `categoria` (la de la pantalla).
 

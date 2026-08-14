@@ -108,6 +108,21 @@
     margin: 30px 0 10px; font-size: 11.5px; font-weight: 650;
     letter-spacing: .09em; text-transform: uppercase; color: var(--tenue);
   }
+  /* El título se arrastra para cambiar el orden de los grupos. La manija
+     («⠿») aparece al pasar por encima: un ícono fijo al lado de cada título
+     es ruido permanente para algo que se usa una vez cada tanto, y sin nada
+     no habría forma de descubrir que se puede mover. */
+  .categoria.movible { cursor: grab; user-select: none; }
+  .categoria.movible::before {
+    content: '⠿'; margin-right: 7px; opacity: 0;
+    letter-spacing: 0; transition: opacity .12s;
+  }
+  .categoria.movible:hover::before { opacity: .55; }
+  /* El que estás moviendo: se marca él, no un hueco. Lo que se ve mientras
+     arrastrás ya es el resultado, así que no hace falta una línea de «acá
+     va a caer». */
+  .categoria.moviendo { color: var(--acento); cursor: grabbing; }
+  .categoria.moviendo::before { opacity: 1; }
   .item {
     background: var(--panel); border: 1px solid var(--borde);
     border-radius: var(--radio); padding: 13px 16px; margin-bottom: 8px;
@@ -713,6 +728,11 @@ function actualizarParpadeoTitulo(hayCaidas) {
 let dudosos = new Map();
 
 async function cargar() {
+  // Con un título agarrado, repintar la lista le saca de abajo del mouse el
+  // elemento que estás moviendo: el gesto se corta solo y no se entiende por
+  // qué. El tick siguiente (3 s) lo pinta igual, así que no se pierde nada.
+  if (arrastrando) return;
+
   const [productos, sistema, novedades, alertas] = await Promise.all([
     fetch('/api/productos').then(r => r.json()),
     fetch('/api/estado-sistema').then(r => r.json()),
@@ -1309,6 +1329,10 @@ function pintarSistema(s) {
   PAUSADAS = new Set(s.pausadas || []);
   VERIFICANDO = new Set(Object.keys(s.verificacion || {}));
   REINTENTA_FALLIDAS = s.reintenta_fallidas || 0;
+  // El orden en que arrastraste los títulos. NO se pisa mientras estás
+  // arrastrando uno: el repintado llega cada 3 segundos y el server todavía
+  // puede estar contestando con el orden viejo (regla 7).
+  if (!arrastrando) ORDEN_CATEGORIAS = s.orden_categorias || [];
   nombrarPlataformas();
   actualizarBotonVerificacion();
 
@@ -1466,6 +1490,162 @@ function aplicarFiltro(texto) {
 // queda guardada, porque es cómo querés mirar la carta y no algo que se
 // elige de nuevo cada vez que abrís la app.
 
+// ------------------------------------------- El orden de las categorías
+//
+// Hasta la 6.6 no había ninguno: los grupos salían en el orden en que se
+// fue vinculando el PRIMER producto de cada uno, o sea por id. Por eso
+// «Bebidas» quedaba arriba de «Ensaladas» sin que nadie lo hubiera decidido.
+//
+// Se arrastra el título y queda guardado en la base (no en localStorage:
+// es cómo mirás tu carta, no una preferencia de este navegador).
+//
+// REGLA 7, y acá muerde de verdad: la lista se repinta sola cada 3 segundos.
+// Si el orden viviera en el repintado, soltarías el título y volvería solo a
+// donde estaba; y si el repintado corriera EN MEDIO del arrastre, le sacaría
+// de abajo del mouse el elemento que estás moviendo. Por eso son dos cosas
+// separadas: `ORDEN_CATEGORIAS` vive acá afuera, y `arrastrando` frena el
+// repintado mientras dura el gesto.
+let ORDEN_CATEGORIAS = [];
+let arrastrando = false;
+
+// Los grupos en el orden elegido: primero los que están en la lista
+// guardada, y atrás los que no (una categoría nueva del portal aparece al
+// final, que es donde se la ve, en vez de meterse en el medio).
+function ordenarCategorias(nombres) {
+  const puesto = new Map(ORDEN_CATEGORIAS.map((c, i) => [c, i]));
+  return [...nombres].sort((a, b) => {
+    const pa = puesto.has(a) ? puesto.get(a) : Infinity;
+    const pb = puesto.has(b) ? puesto.get(b) : Infinity;
+    // Empate = las dos son nuevas: se quedan como venían (sort estable).
+    return pa - pb;
+  });
+}
+
+async function guardarOrdenCategorias(orden) {
+  ORDEN_CATEGORIAS = orden;
+  try {
+    await fetch('/api/categorias/orden', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orden }),
+    });
+  } catch (e) {
+    alert('No pude guardar el orden: ' + e);
+  }
+  cargar();
+}
+
+// Arrastrar el título mueve el grupo entero, y se ve moverse: los nodos se
+// reacomodan bajo el mouse en vez de dibujar una línea de "acá va a caer".
+// Lo que ves mientras arrastrás es el resultado.
+//
+// Va con eventos de mouse y NO con el drag-and-drop de HTML5 (draggable +
+// dragstart). El de HTML5 es menos código, pero no hay forma de probarlo:
+// contra esta misma pantalla, Chromium no dispara ni `dragstart` sobre el
+// título —un div de control al lado, en el mismo contenedor y con los
+// mismos estilos computados, sí arrastra— y una función que no se puede
+// probar en este repo es una que se rompe sin que nadie se entere. Con
+// mousedown/mousemove/mouseup el gesto es el mismo para el usuario y la
+// prueba lo maneja como una persona.
+let arrastre = null;      // {categoria, y0, movido} mientras dura el gesto
+
+// Cada grupo dibujado: su título y las filas que le siguen. Corta en el
+// primer título que no sea movible («En pausa» es un título más, pero no es
+// una categoría y no se ordena).
+function bloquesDeCategorias() {
+  const bloques = [];
+  for (const nodo of document.getElementById('lista').children) {
+    const esTitulo = nodo.classList.contains('categoria');
+    if (esTitulo && !nodo.classList.contains('movible')) break;
+    if (esTitulo) bloques.push({ categoria: nodo.dataset.categoria, nodos: [nodo] });
+    else if (bloques.length) bloques[bloques.length - 1].nodos.push(nodo);
+  }
+  return bloques;
+}
+
+function altoDelBloque(bloque) {
+  const primero = bloque.nodos[0].getBoundingClientRect();
+  const ultimo = bloque.nodos[bloque.nodos.length - 1].getBoundingClientRect();
+  return { arriba: primero.top, abajo: ultimo.bottom };
+}
+
+function hacerArrastrable(h, categoria) {
+  h.dataset.categoria = categoria;
+  h.classList.add('movible');
+  h.title = 'Arrastralo para cambiar el orden de los grupos';
+  h.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();          // que no arranque a seleccionar texto
+    arrastre = { categoria, y0: e.clientY, movido: false };
+    document.addEventListener('mousemove', moverArrastre);
+    document.addEventListener('mouseup', soltarArrastre);
+  });
+}
+
+function moverArrastre(e) {
+  if (!arrastre) return;
+
+  // Un click no es un arrastre: hasta que no te movés unos píxeles no pasa
+  // nada, así que apretar sin querer no reordena la pantalla.
+  if (!arrastre.movido) {
+    if (Math.abs(e.clientY - arrastre.y0) < 5) return;
+    arrastre.movido = true;
+    arrastrando = true;                    // frena el repintado (regla 7)
+  }
+
+  const bloques = bloquesDeCategorias();
+  const mio = bloques.find(b => b.categoria === arrastre.categoria);
+  if (!mio) return;
+  mio.nodos[0].classList.add('moviendo');
+
+  // Sobre qué grupo está el mouse, y si está en su mitad de arriba o de
+  // abajo: eso decide si el mío va antes o después. Con la mitad se llega a
+  // todas las posiciones, incluida la última.
+  const destino = bloques.find(b => {
+    const { arriba, abajo } = altoDelBloque(b);
+    return e.clientY >= arriba && e.clientY <= abajo;
+  });
+  if (!destino || destino.categoria === arrastre.categoria) return;
+
+  const { arriba, abajo } = altoDelBloque(destino);
+  const antes = e.clientY < (arriba + abajo) / 2;
+  const lista = document.getElementById('lista');
+  const ancla = antes ? destino.nodos[0] : destino.nodos[destino.nodos.length - 1];
+
+  // Ya está donde tiene que estar: moverlo nodo por nodo en cada mousemove
+  // hace parpadear la pantalla para nada.
+  const posicion = [...lista.children];
+  const yaEsta = antes
+    ? posicion.indexOf(mio.nodos[mio.nodos.length - 1]) + 1 === posicion.indexOf(ancla)
+    : posicion.indexOf(ancla) + 1 === posicion.indexOf(mio.nodos[0]);
+  if (yaEsta) return;
+
+  for (const nodo of (antes ? mio.nodos : [...mio.nodos].reverse())) {
+    if (antes) lista.insertBefore(nodo, ancla);
+    else lista.insertBefore(nodo, ancla.nextSibling);
+  }
+}
+
+function soltarArrastre() {
+  document.removeEventListener('mousemove', moverArrastre);
+  document.removeEventListener('mouseup', soltarArrastre);
+
+  const gesto = arrastre;
+  arrastre = null;
+  arrastrando = false;
+  for (const h of document.querySelectorAll('.categoria.moviendo')) {
+    h.classList.remove('moviendo');
+  }
+  if (!gesto || !gesto.movido) return;     // fue un click, no un arrastre
+
+  // El orden que quedó en pantalla es el que se guarda. Las categorías que
+  // ahora no se ven (sin productos, o filtradas por el buscador) se quedan
+  // atrás con el orden que ya tenían: no se pierden por no estar a la vista.
+  const enPantalla = bloquesDeCategorias().map(b => b.categoria);
+  const resto = ORDEN_CATEGORIAS.filter(c => !enPantalla.includes(c));
+  guardarOrdenCategorias([...enPantalla, ...resto]);
+}
+
 const VISTAS = ['todos', 'primero', 'solo'];
 let vista = 'todos';
 try {
@@ -1580,9 +1760,15 @@ function porCategoria(cont, items) {
   const grupos = {};
   for (const p of items) (grupos[p.categoria || 'Sin categoría'] ||= []).push(p);
 
-  for (const [cat, delGrupo] of Object.entries(grupos)) {
-    cont.appendChild(titulo(cat));
-    for (const item of delGrupo) cont.appendChild(fila(item));
+  // En el orden que dejaste arrastrando los títulos. Sin nada guardado sale
+  // como venía: el orden en que se fue cargando cada grupo.
+  const categorias = ordenarCategorias(Object.keys(grupos));
+
+  for (const cat of categorias) {
+    const h = titulo(cat);
+    hacerArrastrable(h, cat);
+    cont.appendChild(h);
+    for (const item of grupos[cat]) cont.appendChild(fila(item));
   }
   return items.length;
 }
