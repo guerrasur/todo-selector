@@ -358,6 +358,70 @@ class Rappi(PlataformaBase):
                 nombres.append(alt.strip())
         return nombres
 
+    # De donde sale el nombre de la categoria de una tarjeta. Los dos
+    # caminos estan VISTOS en el DOM (el <li data-testid="menu-category">
+    # aparecio en el log del 2026-08-05 como ancestro del toggle, y el
+    # header pegajoso `collapsible-panel-header` en el del 2026-08-03), pero
+    # no estan confirmados como PAR contra el portal real: falta ver si el
+    # header vive adentro del contenedor de su categoria o solo arriba de
+    # ella. Por eso se prueban los dos, en ese orden.
+    #
+    # TODO-SELECTOR: confirmar contra el portal cual de los dos es. Mientras
+    # tanto no se afirma nada de mas: un producto sin categoria simplemente
+    # no entra en el diccionario, y la app deja lo que ya sabia (regla 8).
+    JS_CATEGORIAS = """
+        () => {
+          const HEADER = '[data-testid="collapsible-panel-header"]';
+          const cabeceras = [...document.querySelectorAll(HEADER)];
+
+          const categoriaDe = (el) => {
+            // 1. El header que vive adentro del contenedor de la categoria.
+            const cont = el.closest('[data-testid="menu-category"]');
+            if (cont) {
+              const propio = cont.querySelector(HEADER);
+              if (propio && propio.innerText.trim()) return propio.innerText;
+            }
+            // 2. Si no, el header mas cercano ARRIBA en el documento: es
+            // como se ve en pantalla, un titulo y abajo sus tarjetas.
+            let mejor = null;
+            for (const h of cabeceras) {
+              if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+                mejor = h;
+              }
+            }
+            return mejor ? mejor.innerText : '';
+          };
+
+          const salida = {};
+          for (const img of document.querySelectorAll(
+                 'img[data-testid="catalog-item-image"]')) {
+            const nombre = (img.getAttribute('alt') || '').trim();
+            if (!nombre || salida[nombre]) continue;
+            // La primera linea: el header trae el nombre y abajo la cuenta
+            // de productos o el chevron de plegarlo.
+            const cat = (categoriaDe(img).split('\\n')[0] || '').trim();
+            if (cat) salida[nombre] = cat;
+          }
+          return salida;
+        }"""
+
+    async def categorias_de_productos(self) -> dict:
+        """{nombre: categoria} leyendo los titulos de la carta.
+
+        Es una sola pasada de JS sobre el DOM que ya esta cargado, asi que
+        no cuesta otra recorrida como en PedidosYa: aca la carta entera esta
+        en la misma pantalla.
+        """
+        await self.ir_al_menu()
+        try:
+            return await self.page.evaluate(self.JS_CATEGORIAS)
+        except Exception as e:
+            # Un error leyendo esto no puede voltear la lectura de la carta:
+            # la categoria es un lujo, saber que esta prendido no.
+            log.warning("%s: no pude leer las categorias del menu: %s",
+                        self.nombre, e)
+            return {}
+
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         # De paso resuelve el TODO-SELECTOR de _tarjeta(): con esto vemos
         # por fin el HTML completo de la tarjeta de Rappi.

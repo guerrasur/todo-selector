@@ -1214,6 +1214,125 @@ async def probar_sin_platos_del_dia(pagina):
     revisar(estado == 404, f"el endpoint ya no existe (dio {estado})")
 
 
+async def probar_categorias(pagina):
+    """Las dos categorías a la vista, y la tuya por encima de las dos.
+
+    El caso (2026-08-14): los portales renombraron y recategorizaron todo, y
+    encima cada uno agrupa distinto. La pantalla muestra las dos —una sola
+    sería esconderle al usuario dónde está de verdad su plato— y agrupa por
+    la de PedidosYa, que es de donde ya sale el nombre canónico.
+    """
+    print("\n== Las categorías de los dos portales ==")
+    from app.database import SessionLocal
+    from app.models import Producto
+
+    # En modo simulado no hay portales que leer: se deja escrito lo que
+    # habría dejado la lectura (worker._guardar_estados, cubierto aparte en
+    # probar_estados.py).
+    db = SessionLocal()
+    try:
+        p = db.query(Producto).filter_by(nombre="Empanada de carne").first()
+        for e in p.estados:
+            e.categoria_portal = ("Empanadas" if e.plataforma == "pedidosya"
+                                  else "Para picar")
+        p.categoria = "Empanadas"
+        p.categoria_manual = False
+        db.commit()
+        producto_id = p.id
+    finally:
+        db.close()
+
+    await pagina.reload()
+    await pagina.wait_for_selector(".item", timeout=10000)
+
+    fila = pagina.locator(".item").filter(has_text="Empanada de carne").first
+    cats = fila.locator(".cats")
+    revisar(await esperar(cats, 5000), "la fila del producto muestra la categoría")
+
+    texto = await cats.inner_text()
+    revisar("Empanadas" in texto and "Para picar" in texto,
+            f"muestra la de los DOS portales, que no coinciden ({texto!r})")
+
+    titulo = await cats.get_attribute("title")
+    revisar("PedidosYa: Empanadas" in (titulo or "")
+            and "Rappi: Para picar" in (titulo or ""),
+            "y el título dice cuál es de cuál")
+
+    revisar(await pagina.locator(".categoria", has_text="EMPANADAS").count() >= 1,
+            "y la lista se agrupa con la de PedidosYa")
+
+    # La tuya manda sobre las dos, y la lectura no la vuelve a pisar.
+    r = await pagina.evaluate(
+        """id => fetch('/api/categoria', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify({producto_id: id,
+                                     categoria: 'Lo que más sale'}),
+           }).then(r => r.json())""", producto_id)
+    revisar(r.get("manual") is True,
+            "al escribirla a mano queda marcada como tuya")
+
+    await pagina.reload()
+    await pagina.wait_for_selector(".item", timeout=10000)
+    fila = pagina.locator(".item").filter(has_text="Empanada de carne").first
+    texto = await fila.locator(".cats").inner_text()
+    revisar(texto.strip() == "Lo que más sale",
+            f"y es la que se ve, en vez de las del portal ({texto!r})")
+
+    # Vaciarla es como se vuelve atrás: manda el portal de nuevo.
+    await pagina.evaluate(
+        """id => fetch('/api/categoria', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify({producto_id: id, categoria: ''}),
+           })""", producto_id)
+    await pagina.reload()
+    await pagina.wait_for_selector(".item", timeout=10000)
+    fila = pagina.locator(".item").filter(has_text="Empanada de carne").first
+    texto = await fila.locator(".cats").inner_text()
+    revisar("Empanadas" in texto and "Para picar" in texto,
+            f"y dejándola vacía vuelven las de los portales ({texto!r})")
+
+
+async def probar_volver_de_una_pantalla(pagina):
+    """Volver de Ajustes/Carta no puede dejar cajas vacías en el dashboard.
+
+    Los paneles del dashboard son `.solo-dashboard`, y `mostrarPantalla` les
+    borraba el `display` al volver: los dos que abre un botón —«Apagar todo»
+    y la cola— reaparecían VACÍOS y ahí se quedaban, porque nadie los vuelve
+    a esconder. Encima justo después de que `cerrarPaneles()` los acababa de
+    cerrar. Se vio el 2026-08-14 en una captura del usuario; venía de antes.
+    """
+    print("\n== Volver de una pantalla no deja cajas vacías ==")
+
+    await pagina.click("#btn-ajustes")
+    await pagina.wait_for_selector("#panel-ajustes:visible", timeout=5000)
+    await pagina.click("#btn-volver")
+    await pagina.wait_for_selector("#lista:visible", timeout=5000)
+
+    async def vacios_a_la_vista():
+        return await pagina.evaluate("""
+            ['panel-inicio','panel-alertas','panel-novedades',
+             'panel-cierre','panel-cola']
+              .filter(id => {
+                 const el = document.getElementById(id);
+                 return getComputedStyle(el).display !== 'none'
+                        && !(el.innerText || '').trim();
+              })""")
+
+    revisar(await vacios_a_la_vista() == [],
+            "al volver no queda ningún panel visible y vacío")
+
+    # Y tampoco aparecen solas en el próximo repintado.
+    await pagina.wait_for_timeout(4000)
+    quedaron = await vacios_a_la_vista()
+    revisar(quedaron == [], f"ni después del repintado ({quedaron})")
+
+    # Lo que sí tiene que volver: la lista de productos.
+    revisar(await pagina.locator("#lista .item").first.is_visible(),
+            "y la lista de productos vuelve a verse")
+
+
 async def main():
     servidor = levantar_app()
     for _ in range(100):                      # esperar a que levante
@@ -1227,6 +1346,8 @@ async def main():
         await pagina.goto(BASE)
 
         await probar_sin_platos_del_dia(pagina)
+        await probar_categorias(pagina)
+        await probar_volver_de_una_pantalla(pagina)
         await probar_buscador(pagina)
         await probar_vista_de_prendidos(pagina)
         await probar_seleccion_de_plataforma(pagina)

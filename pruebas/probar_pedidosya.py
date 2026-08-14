@@ -123,6 +123,22 @@ async def escenario(navegador, query: str, titulo: str):
     revisar(todos.get("Gaseosa cola") is True,
             "leer_todos() llega tambien a la categoria que estaba abierta")
 
+    # En que categoria vive cada uno sale de ESA misma recorrida: es la
+    # unica forma de leer la carta entera en este portal, asi que la
+    # categoria se ve al pasar. Hasta el 2026-08-14 se tiraba, y la
+    # pantalla mostraba la carta entera bajo "SIN CATEGORIA".
+    cats = await plat.categorias_de_productos()
+    revisar(cats.get("Gaseosa cola") == "Bebidas" and
+            cats.get("Budin de pan") == "Platos" and
+            cats.get("Tarta de choclo") == "Tartas",
+            "categorias_de_productos() dice en cual esta cada uno")
+    revisar(len(cats) == 12, f"y las trae de las 3 categorias ({len(cats)})")
+
+    # Sin ninguna lectura previa no se inventa nada: {} es "no se" (regla 8).
+    otra = PedidosYaLocal(pagina)
+    revisar(await otra.categorias_de_productos() == {},
+            "sin haber leido todavia, no afirma ninguna categoria")
+
     await pagina.close()
 
 

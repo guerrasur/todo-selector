@@ -468,6 +468,48 @@ async def el_popup_llega_tarde(navegador):
     await pagina.close()
 
 
+async def la_categoria_de_cada_producto(navegador):
+    """En que grupo lo tiene el portal, que es lo que agrupa la pantalla.
+
+    Hasta el 2026-08-14 la app leia solo los nombres y tiraba la categoria,
+    asi que la carta entera salia bajo "SIN CATEGORIA". Se prueban los dos
+    caminos, porque cual de los dos usa el portal real todavia no esta
+    confirmado (ver TODO-SELECTOR en rappi.py).
+    """
+    print("\n== K) La categoria de cada producto ==")
+
+    # Camino 1: cada categoria es un <li menu-category> con su header
+    # ADENTRO. Con dos grupos, mandar cualquiera de los dos no alcanza.
+    plat, pagina = await abrir_plataforma(navegador, "?categorias=dos")
+    cats = await plat.categorias_de_productos()
+
+    revisar(cats.get("Villavicencio con gas 500 ml") == "Aguas",
+            f"el agua sale en su categoria ({cats.get('Villavicencio con gas 500 ml')})")
+    revisar(cats.get("Gaseosa cola 500 ml") == "Gaseosas",
+            f"y la gaseosa en la suya, que es OTRA ({cats.get('Gaseosa cola 500 ml')})")
+    revisar(len(set(cats.values())) == 2,
+            f"no mete todo en la misma bolsa ({sorted(set(cats.values()))})")
+    await pagina.close()
+
+    # Camino 2: un solo header pegajoso arriba de las tarjetas, sin
+    # contenedor propio. Ahi la categoria es la del titulo mas cercano
+    # ARRIBA, que es como se lee en pantalla.
+    plat, pagina = await abrir_plataforma(navegador, "")
+    cats = await plat.categorias_de_productos()
+    revisar(cats and all(c == "Bebidas" for c in cats.values()),
+            f"sin contenedor propio, la saca del titulo de arriba ({sorted(set(cats.values()))})")
+
+    # Y lo que no se puede leer NO se inventa: sin ningun header, {} es la
+    # respuesta honesta y el que llama deja lo que ya sabia (regla 8).
+    await pagina.evaluate("""
+        document.querySelectorAll('[data-testid=\"collapsible-panel-header\"]')
+                .forEach(h => h.remove())""")
+    vacio = await plat.categorias_de_productos()
+    revisar(vacio == {},
+            f"sin titulos no inventa ninguna categoria ({vacio})")
+    await pagina.close()
+
+
 async def main():
     servidor = servir()
     try:
@@ -483,6 +525,7 @@ async def main():
             await el_toggle_no_esta_en_su_pila(navegador)
             await el_popup_esta_pero_no_se_ve(navegador)
             await el_popup_llega_tarde(navegador)
+            await la_categoria_de_cada_producto(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()

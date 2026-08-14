@@ -57,6 +57,65 @@ def poner(db, nombre, valor, plataforma="rappi"):
     db.commit()
 
 
+def categoria_del_portal(db):
+    """La categoria se lee de los portales, y la tuya no se pisa nunca.
+
+    EL CASO (2026-08-14): la app leia solo los nombres, asi que toda la
+    carta cargada desde los portales salia bajo "SIN CATEGORIA". Ahora la
+    lectura la trae — pero los dos portales agrupan distinto, y hay que
+    tener claro cual manda y que pasa cuando la escribis vos.
+    """
+    print("\n== La categoria sale de los portales ==")
+
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    p.categoria = ""
+    p.categoria_manual = False
+    db.commit()
+
+    # Rappi primero: es el unico que la sabe, asi que manda.
+    Worker._guardar_estados("rappi", {"Flan casero": True},
+                            categorias={"Flan casero": "Postres Rappi"})
+    db.expire_all()
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    revisar(p.categoria == "Postres Rappi",
+            f"con una sola categoria conocida, esa agrupa ({p.categoria})")
+
+    # Ahora la sabe PedidosYa, que es el que manda (carta.ORDEN): la de la
+    # pantalla pasa a ser la suya, y la de Rappi NO se pierde.
+    Worker._guardar_estados("pedidosya", {"Flan casero": True},
+                            categorias={"Flan casero": "Dulces"})
+    db.expire_all()
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    revisar(p.categoria == "Dulces",
+            f"cuando PedidosYa la sabe, manda la de PedidosYa ({p.categoria})")
+    guardadas = {e.plataforma: e.categoria_portal for e in p.estados}
+    revisar(guardadas.get("rappi") == "Postres Rappi" and
+            guardadas.get("pedidosya") == "Dulces",
+            f"y se guarda la de CADA portal, que no coinciden ({guardadas})")
+
+    # Una lectura que no pudo leer las categorias no borra las que habia.
+    Worker._guardar_estados("pedidosya", {"Flan casero": True}, categorias={})
+    db.expire_all()
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    revisar(next(e.categoria_portal for e in p.estados
+                 if e.plataforma == "pedidosya") == "Dulces",
+            "una lectura sin categorias no borra la que ya sabiamos (regla 8)")
+
+    # Y la que escribis vos no la toca nadie.
+    p.categoria = "Los que se venden solos"
+    p.categoria_manual = True
+    db.commit()
+    Worker._guardar_estados("pedidosya", {"Flan casero": True},
+                            categorias={"Flan casero": "Otra cosa"})
+    db.expire_all()
+    p = db.query(Producto).filter_by(nombre="Flan casero").first()
+    revisar(p.categoria == "Los que se venden solos",
+            f"la categoria escrita a mano no la pisa la lectura ({p.categoria})")
+    revisar(next(e.categoria_portal for e in p.estados
+                 if e.plataforma == "pedidosya") == "Otra cosa",
+            "pero la del portal se sigue actualizando: son dos cosas distintas")
+
+
 def apagado_que_no_se_puede_confirmar(db):
     """EL BUG DEL 2026-07-28: la pantalla decia apagado y el portal vendia.
 
@@ -604,6 +663,7 @@ def main():
                 "lo que apago la app si entra")
 
         sostener_y_pausa(db)
+        categoria_del_portal(db)
         apagado_que_no_se_puede_confirmar(db)
         verificacion_rapida_no_pelea_con_el_usuario(db)
         lo_que_fallo_vuelve_solo(db)

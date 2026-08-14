@@ -72,12 +72,15 @@ def _foto(db) -> str:
     for p in db.query(Producto).all():
         productos.append({
             "id": p.id, "nombre": p.nombre, "categoria": p.categoria,
+            "categoria_manual": bool(p.categoria_manual),
             "orden": p.orden, "activo": bool(p.activo),
             "pausado": bool(p.pausado),
             "alias": [{"plataforma": a.plataforma, "remoto": a.nombre_remoto}
                       for a in p.alias],
             "estados": [{"plataforma": e.plataforma, "estado": e.estado,
-                         "detalle": e.detalle} for e in p.estados],
+                         "detalle": e.detalle,
+                         "categoria_portal": e.categoria_portal or ""}
+                        for e in p.estados],
         })
     return json.dumps(productos, ensure_ascii=False)
 
@@ -130,6 +133,9 @@ def deshacer(db) -> str | None:
     for p in productos:
         db.add(Producto(
             id=p["id"], nombre=p["nombre"], categoria=p["categoria"],
+            # .get: las fotos sacadas antes de que existiera la columna no
+            # la traen, y deshacer tiene que seguir funcionando con ellas.
+            categoria_manual=p.get("categoria_manual", False),
             orden=p["orden"], activo=p["activo"], pausado=p["pausado"],
         ))
     db.flush()
@@ -141,7 +147,8 @@ def deshacer(db) -> str | None:
                                    nombre_remoto=a["remoto"]))
         for e in p["estados"]:
             db.add(EstadoItem(producto_id=p["id"], plataforma=e["plataforma"],
-                              estado=e["estado"], detalle=e["detalle"]))
+                              estado=e["estado"], detalle=e["detalle"],
+                              categoria_portal=e.get("categoria_portal", "")))
 
     db.query(HistorialCatalogo).filter_by(id=paso_id).delete(
         synchronize_session=False)
@@ -544,6 +551,7 @@ def _absorber(db, destino: Producto, origen: Producto):
             est.estado = estado_viejo.estado
             est.detalle = estado_viejo.detalle
             est.verificado_en = estado_viejo.verificado_en
+            est.categoria_portal = estado_viejo.categoria_portal
         log.info("'%s' se lleva %s ('%s') de '%s'", destino.nombre,
                  NOMBRE_PLATAFORMA.get(plat, plat), suyo, origen.nombre)
 
@@ -795,8 +803,12 @@ def separar(db, producto_id: int, plataforma: str,
 
     # La pausa viaja con el producto: si el plato estaba en pausa, sus dos
     # mitades siguen estandolo. Si no, separar lo devolvia solo a la lista.
+    # La categoria viaja con el producto igual que la pausa, y si la habias
+    # escrito vos sigue siendo tuya: la mitad que se va no tiene por que
+    # volver a mandarla el portal.
     nuevo = Producto(nombre=_nombre_libre(db, remoto, plataforma=plataforma),
                      categoria=producto.categoria, orden=producto.orden,
+                     categoria_manual=producto.categoria_manual,
                      pausado=producto.pausado)
     db.add(nuevo)
     db.flush()
@@ -810,6 +822,7 @@ def separar(db, producto_id: int, plataforma: str,
         estado_nuevo.estado = viejo_estado.estado
         estado_nuevo.detalle = viejo_estado.detalle
         estado_nuevo.verificado_en = viejo_estado.verificado_en
+        estado_nuevo.categoria_portal = viejo_estado.categoria_portal
         db.delete(viejo_estado)
 
     alias_viejo = (db.query(AliasPlataforma)

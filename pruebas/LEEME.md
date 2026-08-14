@@ -34,6 +34,12 @@ backdrop) y corre la clase `PedidosYa` de verdad contra él. Dos escenarios:
 El HTML acepta parámetros para cambiar la dificultad: `?popup=cerrable|pegado`
 y `?handler=hijo|host` (dónde vive el listener de la categoría).
 
+Desde el 2026-08-14 cubre además **la categoría de cada producto**: que
+`categorias_de_productos()` diga en cuál está cada uno saliendo del mismo
+recorrido que ya hace para leer la carta (no una segunda vuelta, que son
+minutos), que las traiga de las tres categorías, y que sin haber leído
+todavía no afirme ninguna — `{}` es «no sé», no «no tienen» (regla 8).
+
 **`probar_rappi_menu.py`** levanta `portal_rappi_menu.html` y corre la clase
 `Rappi` de verdad contra él. Reproduce las cuatro trampas que el log del
 2026-08-03 dejó ver:
@@ -53,6 +59,15 @@ y `?handler=hijo|host` (dónde vive el listener de la categoría).
   elija nunca por posición (la 3ª es "Personalizar", que no apaga nada), y que
   un diálogo que no se pudo resolver no quede abierto tapando el intento
   siguiente.
+
+Desde el 2026-08-14 cubre también **de qué categoría es cada producto**, por
+los dos caminos que se ven en el DOM del portal y que todavía no están
+confirmados como par (ver el TODO-SELECTOR en `rappi.py`): con
+`?categorias=dos` la carta viene partida en dos grupos, cada uno con su
+`<li data-testid="menu-category">` y su header adentro —con una sola
+categoría cualquier cosa acierta—, y sin ese parámetro queda el header
+pegajoso suelto arriba de las tarjetas. Y que sin ningún título no se
+invente ninguna categoría.
 
 Y con `?tapa=ancestro`, las tres trampas del 2026-08-05, que son las que
 explicaban el «Rappi Turbo no apaga y se queda trabada»:
@@ -98,6 +113,13 @@ pero que **quede avisado**, que es el bug del 2026-07-28: la pantalla decía
 También cubre el bug del 2026-08-03: la verificación de 2 minutos reencolaba
 un apagado sobre algo que **el usuario acababa de prender**. Ahora corta si el
 estado ya no es un apagado propio, y ni siquiera va a mirar el portal.
+
+Desde el 2026-08-14 cubre además la **categoría leída del portal**: que con
+un solo portal que la sepa mande esa, que cuando PedidosYa la sabe mande la
+de PedidosYa (`carta.ORDEN`) sin perder la de Rappi, que una lectura sin
+categorías no borre las que había, y que la que escribís vos no la pise
+nunca la lectura — pero que la del portal se siga actualizando igual, porque
+son dos cosas distintas.
 
 **`probar_verificacion.py`** cubre el modo *«esta pestaña es mía»*: cuando
 Rappi pide el código de verificación en dos pasos, el usuario tiene que
@@ -177,7 +199,13 @@ deseleccionaba solo. La lista se repinta cada pocos segundos, y la selección
 vivía en una variable local del repintado; si tardabas más que el refresco en
 apretar el botón, la acción salía a los dos portales sin decir nada.
 
-Desde el 2026-08-14 cubre también el botón rojo del final de **Ajustes**
+Desde el 2026-08-14 cubre las **categorías en la pantalla**: que la fila
+muestre la de los dos portales («Empanadas · Para picar»), que el título diga
+cuál es de cuál, que la lista se agrupe con la de PedidosYa, que la que
+escribís a mano sea la que se ve, y que dejándola vacía vuelvan las de los
+portales.
+
+Y el botón rojo del final de **Ajustes**
 («Desvincular las cartas y empezar de cero»), de punta a punta y en ese orden:
 que el primer click **no** borre sino que abra la confirmación con los números
 a la vista, que «Mejor no» salga sin consecuencias, que después de borrar la

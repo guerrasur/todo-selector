@@ -1255,7 +1255,20 @@ class Worker:
                     salida[nombre] = {"error": _resumen(e)}
                     continue
 
-            salida[nombre] = self._guardar_estados(nombre, leidos, sostener)
+                # La categoria sale de la misma pasada (PedidosYa ya recorrio
+                # las categorias para poder leer; Rappi las tiene todas en la
+                # misma pantalla), asi que va adentro del mismo bloqueo y no
+                # cuesta otra vuelta por la carta. Que falle no puede voltear
+                # la lectura: saber que esta prendido es lo que importa.
+                try:
+                    categorias = await plat.categorias_de_productos()
+                except Exception as e:
+                    log.warning("%s: no pude leer las categorias: %s",
+                                nombre, _resumen(e))
+                    categorias = {}
+
+            salida[nombre] = self._guardar_estados(nombre, leidos, sostener,
+                                                   categorias)
             log.info("Estado real de %s: %s prendidos, %s apagados, "
                      "%s del catalogo no aparecieron",
                      nombre, salida[nombre]["prendidos"],
@@ -1300,9 +1313,60 @@ class Worker:
             db.close()
 
     @staticmethod
+    def _categoria_preferida(producto) -> str:
+        """Con cual de las categorias del portal se agrupa en la pantalla.
+
+        Los dos portales agrupan distinto y los nombres no coinciden, asi
+        que hay que elegir una: la de PedidosYa, que es de donde ya sale el
+        nombre canonico (mismo orden que carta.ORDEN, para no agregar una
+        regla nueva que recordar). Un producto que solo esta en Rappi se
+        agrupa con la de Rappi, que es la unica que tiene.
+        """
+        from .carta import ORDEN
+
+        por_plataforma = {e.plataforma: (e.categoria_portal or "")
+                          for e in producto.estados}
+        for plat in ORDEN:
+            if por_plataforma.get(plat):
+                return por_plataforma[plat]
+        # Una plataforma que ORDEN no conozca todavia igual sirve.
+        return next((c for c in por_plataforma.values() if c), "")
+
+    @staticmethod
+    def _guardar_categoria(producto, est, categoria):
+        """La del portal se refresca siempre; la de la pantalla, si no es tuya.
+
+        Son dos cosas distintas y por eso no se pisan igual: la del portal
+        es un hecho de alla, y la de la pantalla es como querés ver TU carta.
+        En cuanto la editas a mano (`categoria_manual`), la lectura no la
+        toca nunca mas — si no, cada lectura te deshacia el orden.
+        """
+        if categoria:
+            est.categoria_portal = categoria[:80]
+
+        if producto.categoria_manual:
+            return
+
+        preferida = Worker._categoria_preferida(producto)[:60]
+        if preferida and producto.categoria != preferida:
+            producto.categoria = preferida
+
+    @staticmethod
     def _guardar_estados(plataforma: str, leidos: dict,
-                         sostener: bool = False) -> dict:
+                         sostener: bool = False, categorias: dict = None) -> dict:
         """Vuelca al catalogo lo que se leyo del portal.
+
+        `categorias` es {nombre_remoto: categoria} tal como agrupa ESE
+        portal, y se trata distinto del estado a proposito:
+
+          - `EstadoItem.categoria_portal` es un HECHO del portal: se
+            refresca siempre que la lectura lo traiga.
+          - `Producto.categoria` es como agrupa LA PANTALLA, y es del
+            usuario: se rellena si esta vacia y no se pisa nunca mas. Si no,
+            cada lectura le deshacia el orden que se armo a mano.
+
+        Un nombre que no vino en `categorias` no se toca (regla 8): "no lo
+        leimos" no es "no tiene categoria".
 
         `sostener` cambia que pasa con lo que la app apago y el portal
         muestra disponible:
@@ -1317,6 +1381,8 @@ class Worker:
             ronda viene a cazar.
         """
         from .catalogo import nombre_remoto as remoto_de
+
+        categorias = categorias or {}
 
         db = SessionLocal()
         try:
@@ -1333,6 +1399,12 @@ class Worker:
                             if e.plataforma == plataforma), None)
                 if est is None:
                     continue
+
+                # La categoria va ANTES del corte de "operacion en vuelo" y
+                # del de "no aparecio": es un dato de la carta, no del
+                # estado, y no tiene por que esperar a que el producto este
+                # quieto para actualizarse.
+                Worker._guardar_categoria(producto, est, categorias.get(remoto))
 
                 # Una operacion en vuelo manda sobre la lectura.
                 if est.estado in EstadoItem.EN_CURSO:

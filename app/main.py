@@ -195,6 +195,16 @@ def listar_productos(db: Session = Depends(get_db)):
             "id": p.id,
             "nombre": p.nombre,
             "categoria": p.categoria,
+            # True = la escribiste vos y la lectura no la toca (la pantalla
+            # lo dice en el título, para que se entienda por qué esa no
+            # cambia cuando el portal recategoriza).
+            "categoria_manual": bool(p.categoria_manual),
+            # Cómo agrupa CADA portal a este producto. No coinciden entre
+            # sí, así que se muestran las dos: elegir una sola por el
+            # usuario sería esconderle dónde está de verdad su plato.
+            "categorias": {plat: (est.categoria_portal or "")
+                           for plat, est in estados.items()
+                           if est.categoria_portal},
             "pausado": bool(p.pausado),
             "alias": alias,
             "estados": {
@@ -965,6 +975,37 @@ def renombrar(data: RenombrarIn, db: Session = Depends(get_db)):
     catalogo.marcar_manual(db)
     db.commit()
     return {"ok": True, "producto": _ver_producto(producto)}
+
+
+class CategoriaIn(BaseModel):
+    producto_id: int
+    categoria: str
+
+
+@app.post("/api/categoria")
+def cambiar_categoria(data: CategoriaIn, db: Session = Depends(get_db)):
+    """Cambia con qué título se agrupa el producto en la pantalla.
+
+    No toca los portales ni cómo agrupan ellos: eso se lee y se muestra
+    aparte. Desde que la tocás una vez, la lectura no vuelve a pisarla —
+    si no, cada lectura te deshacía el orden que armaste a mano.
+
+    Con la categoría vacía vuelve a mandar el portal: es la forma de
+    arrepentirse sin tener que acordarse de cómo se llamaba.
+    """
+    producto = db.query(Producto).get(data.producto_id)
+    if producto is None:
+        raise HTTPException(404, "producto no encontrado")
+
+    categoria = data.categoria.strip()[:60]
+    catalogo.guardar_paso(db, f"categoría de '{producto.nombre}': "
+                              f"'{producto.categoria}' -> '{categoria}'")
+
+    producto.categoria = categoria
+    producto.categoria_manual = bool(categoria)
+    db.commit()
+    return {"ok": True, "categoria": producto.categoria,
+            "manual": bool(producto.categoria_manual)}
 
 
 @app.post("/api/deshacer")

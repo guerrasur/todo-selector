@@ -129,6 +129,18 @@
   .nombre { font-weight: 550; letter-spacing: -.005em; }
   .nombre.editable { cursor: text; }
   .nombre.editable:hover { text-decoration: underline dotted var(--tenue); }
+  /* En qué categoría lo tiene cada portal. Va en la celda de abajo del
+     nombre (columna 1 de la fila siguiente del grid), chica y tenue: es
+     contexto para encontrarlo, no un dato que compita con el estado.
+     `margin-top: -10px` come el `gap` del grid: sin eso queda flotando a
+     14 px del nombre y parece de otro producto. */
+  .item .cats {
+    grid-column: 1; margin-top: -10px;
+    font-size: 11.5px; color: var(--tenue); overflow-wrap: anywhere;
+  }
+  .item .cats.nada { font-style: italic; opacity: .7; }
+  .cats.editable { cursor: text; }
+  .cats.editable:hover { text-decoration: underline dotted var(--tenue); }
   .plats { display: flex; gap: 8px; flex-wrap: wrap; }
   /* Un chip sin marcar NO esta apagado: es el estado normal, y ademas es
      donde se lee el estado del producto en ese portal. Va al 100% de
@@ -1863,11 +1875,64 @@ function fila(item) {
   acc.append(bHoy, bIndef, bOn);
   div.appendChild(acc);
 
+  // Abajo del nombre: en qué categoría lo tiene CADA portal. Los dos
+  // agrupan distinto y los nombres no coinciden, así que mostrar una sola
+  // sería esconder dónde está de verdad tu plato. Va último y en su propia
+  // fila del grid (ver .item .cats), que es la celda de abajo del nombre.
+  div.appendChild(categoriasDe(item));
+
   // Deja las etiquetas y el disabled como corresponda. Corre también en
   // cada repintado, no solo al clickear un chip.
   refrescarBotones();
 
   return div;
+}
+
+// «Bebidas · Gaseosas»: la de cada portal, sin repetir la que es igual en
+// los dos. Se clickea para escribir la tuya, como el nombre.
+function categoriasDe(item) {
+  const cats = document.createElement('div');
+  cats.className = 'cats editable';
+
+  const porPortal = item.categorias || {};
+  const vistas = [];
+  for (const plat of PLATS) {
+    const c = porPortal[plat];
+    if (c && !vistas.includes(c)) vistas.push(c);
+  }
+
+  const propia = item.categoria_manual && item.categoria;
+  cats.textContent = propia ? item.categoria
+                   : vistas.length ? vistas.join(' · ')
+                   : 'sin categoría';
+  if (!propia && !vistas.length) cats.classList.add('nada');
+
+  // Quién dice qué, con nombre y apellido: con «Bebidas · Gaseosas» a secas
+  // no se sabe cuál es de cuál, y son justo los que no coinciden.
+  const dice = PLATS.filter(p => porPortal[p])
+                    .map(p => `${NOMBRE_PLAT[p]}: ${porPortal[p]}`).join('  ·  ');
+  cats.title = (propia
+    ? 'La escribiste vos, así que la lectura de los portales no la toca. '
+    : 'Sale de los portales y se actualiza sola en cada lectura. ') +
+    (dice ? `En los portales: ${dice}. ` : '') +
+    'Click para escribir la tuya (vacío = vuelve a mandar el portal).';
+
+  cats.onclick = async () => {
+    const nueva = prompt('¿En qué grupo querés verlo? (vacío = como lo ' +
+                         'agrupa el portal)', item.categoria || '');
+    if (nueva === null) return;
+    const r = await fetch('/api/categoria', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ producto_id: item.id, categoria: nueva.trim() }),
+    });
+    if (!r.ok) {
+      const detalle = await r.json().catch(() => ({}));
+      alert('No se pudo: ' + (detalle.detail || r.status));
+    }
+    cargar();
+  };
+  return cats;
 }
 
 // Cada etiqueta se tiene que entender sin saber cómo está hecha la app:
@@ -2701,12 +2766,27 @@ function cerrarPaneles(salvo) {
 const RUTA_DE = { ajustes: '/ajustes', carta: '/carta' };
 let pantallaActual = 'dashboard';   // lo lee pintarInicio() para no reaparecer
 
+// Los paneles que deciden ELLOS si se ven: el de primer arranque y los dos
+// avisos (los pinta cargar(), y se esconden solos cuando no hay nada que
+// decir), y los dos que abre un botón (Apagar todo y la cola).
+//
+// Son `.solo-dashboard`, así que el bucle de abajo los apagaba al salir —
+// bien— y les BORRABA el display al volver, que es otra cosa: reaparecían
+// vacíos. Con «Apagar todo» y la cola quedaba a la vista, porque nadie los
+// vuelve a esconder: dos cajas vacías en la pantalla hasta que las abrías y
+// las cerrabas a mano. Encima justo después de que cerrarPaneles() los
+// acababa de cerrar, tres líneas más arriba (visto el 2026-08-14, viene de
+// antes de la v6.5).
+const PANELES_PROPIOS = ['panel-inicio', 'panel-alertas', 'panel-novedades',
+                         'panel-cierre', 'panel-cola'];
+
 function mostrarPantalla(cual) {
   pantallaActual = cual;
   cerrarPaneles();
   const esDashboard = cual === 'dashboard';
   for (const el of document.querySelectorAll('.solo-dashboard')) {
-    el.style.display = esDashboard ? '' : 'none';
+    if (!esDashboard) { el.style.display = 'none'; continue; }
+    if (!PANELES_PROPIOS.includes(el.id)) el.style.display = '';
   }
   for (const el of document.querySelectorAll('.solo-pantalla')) {
     el.style.display = esDashboard ? 'none' : '';
@@ -2719,11 +2799,14 @@ function mostrarPantalla(cual) {
 }
 
 function irAlDashboard() {
-  // El contenido del dashboard (panel-inicio, alertas, novedades, lista) se
-  // sigue calculando en segundo plano aunque no se vea (ver pintarInicio):
-  // no hace falta forzar un cargar() extra, mostrarPantalla ya deja todo
-  // visible con lo último que se pintó.
+  // La lista y el buscador vuelven con lo último que se pintó (se sigue
+  // calculando en segundo plano aunque no se vea, ver pintarInicio). Los
+  // tres paneles que deciden solos si se ven (PANELES_PROPIOS) ya no se
+  // muestran de prepo, así que hay que repintarlos ahora: si no, un aviso
+  // que estaba abierto —«hay que loguearse en Rappi»— no se vería hasta el
+  // próximo tick, y ese es justo el cartel que no puede tardar.
   mostrarPantalla('dashboard');
+  cargar();
 }
 
 // Atrás/adelante del navegador: la URL ya cambió sola, solo hay que pintar

@@ -231,6 +231,29 @@ class PedidosYa(PlataformaBase):
                 nombres.append(texto)
         return nombres
 
+    async def categorias_de_productos(self) -> dict:
+        """{nombre: categoria} de lo que dejo la ultima lectura.
+
+        No recorre nada: `listar_productos` y `leer_todos` ya pasan por
+        todas las categorias —es la unica forma de leer la carta entera en
+        este portal— y anotan en cual aparecio cada producto. Volver a
+        recorrerlas aca serian otros dos minutos por la misma informacion.
+
+        Si todavia no se leyo nada, devuelve {}: "no se", no "no tienen".
+        """
+        if not self._categoria_de:
+            return {}
+
+        nombres = await self.categorias()
+        salida = {}
+        for producto, indice in self._categoria_de.items():
+            # El mapa es de indices y los nombres se releen ahora: si el
+            # local reordeno el menu entre la lectura y esto, un indice
+            # puede quedar fuera de rango. Se saltea en vez de inventar.
+            if 0 <= indice < len(nombres) and nombres[indice]:
+                salida[producto] = nombres[indice]
+        return salida
+
     async def categorias(self) -> list[str]:
         """Los nombres de las categorias del menu, en orden."""
         cats = self.page.locator(self.SELECTOR_CATEGORIAS)
@@ -337,6 +360,12 @@ class PedidosYa(PlataformaBase):
             for nombre in await self._nombres_visibles():
                 if nombre not in nombres:
                     nombres.append(nombre)
+                # En que categoria vive cada uno se ve al pasar, y hasta
+                # ahora se tiraba: la pantalla mostraba la carta entera bajo
+                # "SIN CATEGORIA". El primero que lo muestra manda, igual
+                # que arriba con el nombre: un producto que aparece en dos
+                # categorias es del portal, no nuestro.
+                self._categoria_de.setdefault(nombre, indice)
         return nombres
 
     async def leer_todos(self) -> dict:

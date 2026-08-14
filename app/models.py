@@ -16,6 +16,13 @@ class Producto(Base):
     id = Column(Integer, primary_key=True)
     nombre = Column(String(120), nullable=False, unique=True)
     categoria = Column(String(60), default="")   # como las agrupes vos
+
+    # True = la escribiste vos, asi que la lectura de los portales no la
+    # toca nunca mas. Con False, `categoria` la mantiene la lectura con la
+    # del portal que manda (PedidosYa primero, ver carta.ORDEN): los dos
+    # portales agrupan distinto y hay que elegir uno para la pantalla.
+    categoria_manual = Column(Boolean, default=False)
+
     orden = Column(Integer, default=0)
     activo = Column(Boolean, default=True)       # False = no lo mostramos en la UI
 
@@ -88,6 +95,19 @@ class EstadoItem(Base):
 
     estado = Column(String(30), default=DESCONOCIDO)
     detalle = Column(Text, default="")            # mensaje de error si fallo
+
+    # En que categoria agrupa ESTE portal a este producto. Es un dato del
+    # portal, no una decision del usuario: se refresca en cada lectura.
+    #
+    # Va aca y no en Producto porque los dos portales agrupan distinto y los
+    # nombres no coinciden (el usuario lo dijo el 2026-08-14: "cada portal
+    # tiene categorias que no coinciden del todo"). El que agrupa la
+    # pantalla es Producto.categoria, que se rellena con esto la primera vez
+    # y despues es del usuario.
+    #
+    # "" quiere decir "no lo sabemos", igual que en el resto de la app: una
+    # lectura que no pudo leer las categorias no las borra (regla 8).
+    categoria_portal = Column(String(80), default="")
     verificado_en = Column(DateTime, nullable=True)
     actualizado_en = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
