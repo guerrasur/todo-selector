@@ -479,6 +479,30 @@
   }
   #estado-ajustes { font-size: 13px; color: var(--tenue); }
 
+  /* ---- Zona de peligro: lo único de la app que borra datos ----
+     Va al final de Ajustes, separada y en rojo. Un ajuste se cambia y se
+     vuelve a cambiar; esto no, así que no puede parecerse a los de arriba
+     ni quedar al lado de los botones que se usan todos los días. */
+  .peligro-zona {
+    margin-top: 30px; padding: 16px; border-radius: var(--radio-chico);
+    border: 1px solid var(--error-borde); background: var(--error-fondo);
+  }
+  .peligro-zona > h3 {
+    font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase;
+    color: #fda4af; margin: 0 0 12px; font-weight: 650;
+  }
+  .peligro-zona .cuenta { font-size: 13px; line-height: 1.65; margin-bottom: 14px; }
+  .peligro-zona .cuenta p { margin: 0 0 7px; }
+  .peligro-zona .cuenta p:last-child { margin-bottom: 0; }
+  .peligro-zona .cuenta .flojo { color: var(--tenue); }
+  .peligro-zona .acciones { display: flex; gap: 8px; align-items: center;
+                            flex-wrap: wrap; }
+  button.peligro {
+    background: #4a1220; border-color: #8a2440; color: #ffc2cd;
+  }
+  button.peligro:hover { background: #5f1729; border-color: #ad2c4e; }
+  button.peligro[disabled]:hover { background: #4a1220; border-color: #8a2440; }
+
   /* ---- Primer arranque ---- */
   #panel-inicio { border-left: 3px solid var(--curso); }
   #panel-inicio .grupo > h3 { color: var(--texto); }
@@ -2251,6 +2275,156 @@ async function pintarAjustes() {
 
   document.getElementById('btn-guardar-ajustes').onclick = guardarAjustes;
   document.getElementById('btn-restablecer').onclick = restablecerAjustes;
+
+  panel.appendChild(zonaPeligro());
+}
+
+// ------------------------------------------- Empezar la carta de cero
+//
+// El caso (2026-08-14): el dueño cambió los nombres y las categorías de los
+// ítems en los dos portales. El vínculo es por texto exacto, así que TODOS
+// los alias quedaron apuntando a nombres que ya no existen y arreglarlos de
+// a uno es más trabajo que rearmarlos.
+//
+// Vive acá, al final de Ajustes y en rojo, y no en la pantalla Carta: es lo
+// único de la app que borra datos del usuario, y no puede estar al lado de
+// los botones que se aprietan todos los días con un cliente esperando.
+//
+// Son DOS pasos a propósito, y el segundo trae los números contados de la
+// base: un "¿estás seguro?" pelado no deja ver si estás por borrar lo que
+// creías. Nada de esto ocupa lugar hasta que lo pedís (regla de la v6.3: la
+// ayuda estática se va al `title` o no existe).
+function zonaPeligro() {
+  const div = document.createElement('div');
+  div.className = 'peligro-zona';
+  const h = document.createElement('h3');
+  h.textContent = 'Empezar de cero';
+  const cuerpo = document.createElement('div');
+  div.append(h, cuerpo);
+  pintarBotonPeligro(cuerpo);
+  return div;
+}
+
+function pintarBotonPeligro(cont) {
+  cont.innerHTML = '';
+  const b = document.createElement('button');
+  b.className = 'peligro';
+  b.textContent = 'Desvincular las cartas y empezar de cero';
+  b.title = 'Borra los productos cargados y el nombre que tienen en cada ' +
+            'portal, y vuelve a leer las cartas para vincularlas de nuevo. ' +
+            'Es para cuando los portales cambiaron los nombres. No apaga ni ' +
+            'prende nada, y no toca estos ajustes.';
+  b.onclick = () => confirmarPeligro(cont, b);
+  cont.appendChild(b);
+}
+
+// Paso 2: qué se va a borrar exactamente, contado de la base.
+async function confirmarPeligro(cont, boton) {
+  boton.disabled = true;
+  const antes = boton.textContent;
+  boton.textContent = '…';
+
+  let previo;
+  try {
+    previo = await fetch('/api/catalogo/reiniciar/previo').then(r => r.json());
+  } catch (e) {
+    alert('No pude contar qué hay cargado: ' + e);
+    boton.disabled = false;
+    boton.textContent = antes;
+    return;
+  }
+
+  cont.innerHTML = '';
+  const cuenta = document.createElement('div');
+  cuenta.className = 'cuenta';
+  const acc = document.createElement('div');
+  acc.className = 'acciones';
+
+  const decir = (texto, flojo) => {
+    const p = document.createElement('p');
+    if (flojo) p.className = 'flojo';
+    p.textContent = texto;
+    cuenta.appendChild(p);
+  };
+
+  // Sin catálogo no hay nada que borrar, y ofrecerlo igual es ofrecer un
+  // botón que no hace nada (o peor: que gasta un paso de deshacer).
+  if (!previo.productos) {
+    decir('No hay ningún producto cargado: no hay nada para borrar.');
+    const b = document.createElement('button');
+    b.textContent = 'Listo';
+    b.onclick = () => pintarBotonPeligro(cont);
+    acc.appendChild(b);
+    cont.append(cuenta, acc);
+    return;
+  }
+
+  const porPortal = Object.entries(previo.vinculos_por_plataforma || {})
+    .map(([p, n]) => `${n} en ${NOMBRE_PLAT[p] || p}`).join(', ');
+
+  decir(`Se van a borrar ${previo.productos} producto(s) y ` +
+        `${previo.vinculos} vínculo(s) con los portales` +
+        (porPortal ? ` (${porPortal}).` : '.'));
+  if (previo.pausados) {
+    decir(`${previo.pausados} producto(s) están en pausa: esa marca también ` +
+          `se pierde y hay que volver a ponerla.`);
+  }
+  if (previo.en_cola) {
+    decir(`${previo.en_cola} operación(es) que están en la cola se cancelan.`);
+  }
+  // Lo que más miedo da es justamente lo que NO pasa. Va con todas las
+  // letras, porque el que aprieta esto tiene la tienda abierta.
+  decir('No apaga ni prende nada: la carta de los portales queda igual que ' +
+        'está ahora, y estos ajustes tampoco se tocan.');
+  decir('Después la app vuelve a leer los portales y elegís de nuevo qué ' +
+        'producto es cuál.');
+  decir('Se puede deshacer desde la pantalla Carta, y antes de borrar queda ' +
+        'una copia de la base.', true);
+
+  const si = document.createElement('button');
+  si.className = 'peligro';
+  si.textContent = 'Sí, borrar y volver a leer';
+  si.onclick = () => ejecutarPeligro(cont, si);
+
+  const no = document.createElement('button');
+  no.textContent = 'Mejor no';
+  no.onclick = () => pintarBotonPeligro(cont);
+
+  acc.append(si, no);
+  cont.append(cuenta, acc);
+}
+
+async function ejecutarPeligro(cont, boton) {
+  for (const b of cont.querySelectorAll('button')) b.disabled = true;
+  boton.textContent = 'Borrando…';
+
+  try {
+    const r = await fetch('/api/catalogo/reiniciar', { method: 'POST' });
+    if (!r.ok) {
+      const detalle = await r.json().catch(() => ({}));
+      alert('No se pudo: ' + (detalle.detail || r.status));
+      pintarBotonPeligro(cont);
+      return;
+    }
+  } catch (e) {
+    alert('No se pudo: ' + e);
+    pintarBotonPeligro(cont);
+    return;
+  }
+
+  // Lo de memoria también: `carta` es la lectura vieja (nombres que el
+  // portal ya no muestra) y `catalogo` lo que se acaba de borrar. Si no se
+  // limpian, la pantalla Carta pinta un segundo la carta de antes.
+  carta = null;
+  catalogo = null;
+
+  // El paso 2 no es opcional: es el motivo por el que borraste. Se va
+  // derecho a la Carta y la lectura arranca sola, igual que en el primer
+  // arranque (ver pasoCarta).
+  pintarBotonPeligro(cont);
+  mostrarPantalla('carta');
+  await leerCarta();
+  await cargar();
 }
 
 function filaAjuste(o) {

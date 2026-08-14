@@ -41,10 +41,17 @@ PLATAFORMAS = ["pedidosya", "rappi"]
 def sembrar():
     db = SessionLocal()
     try:
-        if db.query(Producto).count() == 0:
+        if db.query(Producto).count() == 0 and not es_manual(db):
             # Recien creada: _crear_todo ya deja los alias como manda el
             # catalogo, y como la sesion es autoflush=False, sincronizar
             # aca no veria lo que acaba de agregarse y los duplicaria.
+            #
+            # El `not es_manual` es por "empezar la carta de cero"
+            # (catalogo.reiniciar): vacio + manual es justo como queda una
+            # base despues de un reset, y sin esto una lista escrita a mano
+            # en PRODUCTOS volvia sola en el proximo arranque. Una
+            # instalacion nueva de verdad no tiene la marca (base sin
+            # preferencias), asi que sigue sembrando igual.
             _crear_todo(db)
         elif es_manual(db):
             # El usuario vinculo o separo productos desde la app. Desde ese

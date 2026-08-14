@@ -23,6 +23,7 @@ reinicio deshacia lo que el usuario habia vinculado.
 
 import json
 import logging
+from datetime import datetime
 
 from .carta import parecido
 from .models import (Producto, AliasPlataforma, EstadoItem, Preferencia,
@@ -146,6 +147,113 @@ def deshacer(db) -> str | None:
         synchronize_session=False)
     log.info("Deshecho: %s", descripcion)
     return descripcion
+
+
+# ---------- Empezar de cero ----------
+#
+# El caso que lo pidio (2026-08-14): el dueño cambio los nombres y las
+# categorias de los items en los dos portales. Como el vinculo es por TEXTO
+# EXACTO (ver nombre_remoto/buscar_por_remoto), cada alias quedo apuntando a
+# un nombre que ya no existe: la app no encuentra los productos, no puede
+# confirmar nada (regla 8) y arreglarlos de a uno es mas trabajo que
+# rearmarlos. Esto vacia el catalogo para que se lea de nuevo desde los
+# portales, que es exactamente el camino del primer arranque.
+#
+# Lo que NO toca, y no es un detalle: los ajustes (`cfg_*`, la sucursal y el
+# ritmo del worker) viven en la misma tabla `preferencias` que las dos marcas
+# del catalogo. Borrar "las preferencias" en bloque dejaria a la app sin
+# saber a que menu entrar, que es justo lo que el primer arranque tarda en
+# pedirte.
+
+
+def contar_para_reiniciar(db) -> dict:
+    """Que se va a borrar, contado de la base.
+
+    Es lo que dice el cartel de confirmacion. Un "¿seguro?" pelado no alcanza
+    para algo que borra el catalogo entero: el numero es lo que deja ver de
+    antemano si estas por borrar lo que creias.
+    """
+    from .models import Operacion
+
+    # El EstadoItem es lo que dice "este producto existe en este portal", asi
+    # que es el que cuenta los vinculos de verdad. El alias no sirve para
+    # contar: solo existe cuando el nombre del portal difiere del canonico.
+    por_plataforma = {}
+    for plat in PLATAFORMAS:
+        cuantos = db.query(EstadoItem).filter_by(plataforma=plat).count()
+        if cuantos:
+            por_plataforma[plat] = cuantos
+
+    return {
+        "productos": db.query(Producto).count(),
+        "vinculos": db.query(EstadoItem).count(),
+        "vinculos_por_plataforma": por_plataforma,
+        "pausados": db.query(Producto).filter(Producto.pausado == True).count(),  # noqa: E712
+        "en_cola": (db.query(Operacion)
+                    .filter(Operacion.estado.in_(Operacion.VIVAS)).count()),
+    }
+
+
+def reiniciar(db) -> dict:
+    """Borra el catalogo entero: productos, vinculos y estados leidos.
+
+    Queda deshacible con el boton de siempre: `guardar_paso` saca la foto
+    antes de tocar nada y `deshacer()` reinserta todo con los MISMOS ids, asi
+    que las operaciones del historial no quedan colgadas.
+
+    No apaga ni prende nada en ningun portal. Lo unico que se pierde es lo
+    que la app sabia: que nombre de portal era cada producto, en cuales
+    existia, cual estaba pausado y que se habia leido de cada uno. Lo que
+    estaba apagado sigue apagado en el portal — pero la app deja de saber que
+    lo apago ella, asi que la proxima lectura lo va a ver como apagado en el
+    portal y la ronda de cada 15 min no lo va a sostener.
+    """
+    from .models import Operacion
+
+    borrado = contar_para_reiniciar(db)
+
+    guardar_paso(db, f"empezar la carta de cero "
+                     f"({borrado['productos']} productos)")
+
+    # La cola viva apunta a productos que en un segundo no van a existir. El
+    # worker lo tolera (las marca "el producto ya no existe"), pero eso son
+    # 30 rojos por algo que el usuario acaba de pedir a proposito. CANCELADA
+    # es lo que son: no es un error, no se reintenta sola y no manda a mirar
+    # el portal (ver Operacion.CANCELADA).
+    ahora = datetime.now()
+    for op in (db.query(Operacion)
+               .filter(Operacion.estado.in_(Operacion.VIVAS)).all()):
+        op.estado = Operacion.CANCELADA
+        op.finalizada_en = ahora
+        op.detalle = "se empezó la carta de cero"
+
+    db.query(AliasPlataforma).delete(synchronize_session=False)
+    db.query(EstadoItem).delete(synchronize_session=False)
+    db.query(Producto).delete(synchronize_session=False)
+    db.flush()
+
+    # Mismo motivo que en deshacer(): el borrado masivo no pasa por el
+    # identity map, y la sesion sigue con los objetos viejos en memoria.
+    db.expunge_all()
+
+    # Los "no me avises mas de este" son nombres del portal, y son
+    # justamente los que cambiaron: sostenerlos esconderia los nombres
+    # NUEVOS que hay que vincular, que es lo contrario de lo que se pidio.
+    ignoradas = db.query(Preferencia).get(Preferencia.NOVEDADES_IGNORADAS)
+    if ignoradas is not None:
+        db.delete(ignoradas)
+
+    # Sigue mandando la base y no seed.py. Importa aca mas que nunca: un
+    # catalogo vacio es la condicion con la que `sembrar()` vuelve a crear
+    # productos, y resucitar una lista escrita a mano seria deshacer esto
+    # solo con reiniciar la app.
+    marcar_manual(db)
+
+    log.info("Catalogo reiniciado: se borraron %s productos y %s vinculos "
+             "(%s operaciones de la cola quedaron canceladas). Los ajustes "
+             "no se tocaron.", borrado["productos"], borrado["vinculos"],
+             borrado["en_cola"])
+    return borrado
 
 
 # ---------- Busqueda ----------

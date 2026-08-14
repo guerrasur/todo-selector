@@ -963,6 +963,95 @@ async def probar_apagar_todo(pagina):
             "y usan el apagado por hoy, que es el default del cierre")
 
 
+async def probar_empezar_de_cero(pagina):
+    """El botón rojo del final de Ajustes: borrar el catálogo y releerlo.
+
+    El caso (2026-08-14): el dueño cambió los nombres y las categorías de los
+    ítems en los dos portales. Como el vínculo es por texto exacto, TODOS los
+    alias quedaron apuntando a algo que ya no existe y arreglarlos de a uno
+    es más trabajo que rearmarlos.
+
+    Lo que se prueba no es el borrado —eso es una línea— sino las tres cosas
+    que lo hacen usable: que el primer click NO borre (hay confirmación con
+    los números a la vista), que los ajustes de sucursal sobrevivan (viven en
+    la misma tabla `preferencias` que las marcas del catálogo, y sin ellos la
+    app no sabe a qué menú entrar), y que después te deje leyendo los
+    portales, que es para lo que apretaste.
+    """
+    print("\n== Empezar la carta de cero ==")
+
+    await guardar_config(pagina, {"pedidosya_menu_id": "menu-de-prueba"})
+
+    antes = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    cuantos = len(antes["productos"])
+    revisar(cuantos > 0, f"hay catálogo cargado antes de empezar ({cuantos})")
+
+    await pagina.click("#btn-ajustes")
+    await pagina.wait_for_selector("#panel-ajustes:visible", timeout=5000)
+    zona = pagina.locator(".peligro-zona")
+    revisar(await esperar(zona, 5000),
+            "el botón rojo está al final de Ajustes, no en la pantalla Carta")
+
+    # Paso 1: el botón rojo no borra, abre la confirmación.
+    await zona.locator("button.peligro").click()
+    revisar(await esperar(zona.locator("button", has_text="Sí, borrar"), 5000),
+            "el primer click abre la confirmación, no borra")
+
+    texto = await zona.inner_text()
+    revisar(f"{cuantos} producto" in texto,
+            "la confirmación dice cuántos productos se van a borrar")
+    revisar("No apaga ni prende nada" in texto,
+            "y aclara lo que más miedo da: que no toca los portales")
+
+    sigue = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    revisar(len(sigue["productos"]) == cuantos,
+            "mirar la confirmación todavía no borró nada")
+
+    # "Mejor no" tiene que poder salir sin consecuencias.
+    await zona.locator("button", has_text="Mejor no").click()
+    revisar(await esperar(zona.locator("button.peligro"), 5000),
+            "«Mejor no» vuelve al botón, sin borrar")
+    sigue = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    revisar(len(sigue["productos"]) == cuantos, "y el catálogo sigue entero")
+
+    # Paso 2: borrar de verdad.
+    await zona.locator("button.peligro").click()
+    await zona.locator("button", has_text="Sí, borrar").click()
+
+    # Termina en la pantalla Carta, leyendo los portales: el segundo paso no
+    # es opcional, es el motivo por el que borraste.
+    revisar(await esperar(pagina.locator("#panel-carta:visible"), 15000),
+            "después de borrar queda en la pantalla Carta")
+    await pagina.wait_for_selector("#carta-cuerpo .grupo", timeout=20000)
+
+    despues = await pagina.evaluate("fetch('/api/catalogo').then(r => r.json())")
+    revisar(len(despues["productos"]) == 0, "no queda ningún producto cargado")
+
+    sistema = await pagina.evaluate(
+        "fetch('/api/estado-sistema').then(r => r.json())")
+    revisar(sistema["catalogo_vacio"] is True,
+            "la app se da por catálogo vacío, como en el primer arranque")
+    revisar(sistema["operaciones_pendientes"] == 0,
+            "y la cola quedó vacía: lo encolado apuntaba a lo que se borró")
+
+    cfg = await pagina.evaluate("fetch('/api/config').then(r => r.json())")
+    valores = {o["clave"]: o["valor"] for o in cfg["opciones"]}
+    revisar(valores["pedidosya_menu_id"] == "menu-de-prueba",
+            "los ajustes de sucursal NO se los llevó puestos")
+
+    # Con el catálogo vacío, la carta leída es toda para elegir: ni una fila
+    # puede venir marcada como ya resuelta.
+    revisar(await pagina.locator("#carta-cuerpo .par .hecho").count() == 0,
+            "ninguna fila viene ya vinculada: se elige todo de nuevo")
+    revisar(await pagina.locator("#carta-cuerpo .par button", has_text="Vincular")
+            .count() > 0,
+            "y las filas ofrecen vincular ítem por ítem")
+
+    # La red de seguridad: el paso de deshacer.
+    revisar(despues["deshacer"] is not None,
+            "queda un «Deshacer» por si te equivocaste de botón")
+
+
 async def guardar_config(pagina, cambios: dict):
     """POST /api/config desde la pagina, como lo hace el panel de Ajustes."""
     return await pagina.evaluate(
@@ -1244,6 +1333,12 @@ async def main():
         # tarda 2 segundos. Antes de las otras pruebas les dejaria el worker
         # ocupado y los estados en "apagando…" por varios minutos.
         await probar_apagar_todo(pagina)
+
+        # Y despues de todo: borra el catalogo, asi que no puede quedar nada
+        # atras que lo necesite. Encima llega con la cola llena de lo que
+        # acaba de encolar «Apagar todo», que es justo lo que tiene que
+        # cancelar.
+        await probar_empezar_de_cero(pagina)
 
         await navegador.close()
 

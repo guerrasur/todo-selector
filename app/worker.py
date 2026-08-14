@@ -180,6 +180,21 @@ class Worker:
         # "no encontrado").
         self.bloqueos = {}
 
+    def olvidar_catalogo(self):
+        """Se borro el catalogo: lo que teniamos en memoria ya no existe.
+
+        Todo esto son AFIRMACIONES sobre productos y sobre nombres de portal
+        que acaban de dejar de existir (`catalogo.reiniciar`). Sostenerlas es
+        el error de la regla 8 al reves: la pantalla seguiria avisando de un
+        producto borrado, ofreciendo vincular un nombre que el portal ya no
+        muestra, y diciendo "estado leído a las 20:14" de una carta que no
+        esta mas. La lectura que viene despues las rearma todas.
+        """
+        self.novedades = {}
+        self.no_encontrados = {}
+        self.ultima_carta = None
+        self.ultima_lectura = None
+
     def bloqueo(self, plataforma: str) -> asyncio.Lock:
         """Turno exclusivo sobre la pestaña de una plataforma."""
         if plataforma not in self.bloqueos:
@@ -1781,6 +1796,14 @@ class Worker:
             .first()
         )
         if est is None:
+            # Un EstadoItem es lo que dice "este producto existe en este
+            # portal": fabricarlo para un producto que ya no existe es
+            # inventar un vinculo. Pasa con una operacion que estaba en
+            # vuelo cuando se borro el catalogo ("empezar de cero"), o
+            # cuando la absorbio un vincular: el cambio en el portal ocurrio
+            # igual, pero no hay a quien anotarselo.
+            if db.query(Producto).get(producto_id) is None:
+                return
             est = EstadoItem(producto_id=producto_id, plataforma=plataforma)
             db.add(est)
 
@@ -1800,6 +1823,9 @@ class Worker:
             .first()
         )
         if est is None:
+            # Idem _set_estado: sin producto no hay a quien anotarle el fallo.
+            if db.query(Producto).get(producto_id) is None:
+                return
             est = EstadoItem(producto_id=producto_id, plataforma=plataforma)
             db.add(est)
         est.estado = EstadoItem.FALLO
