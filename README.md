@@ -314,6 +314,10 @@ que sin tocar nada se comporta igual que siempre.
 Cambiar de sucursal **no pide reiniciar**: las pestañas se enteran y navegan
 solas al menú nuevo en la próxima operación.
 
+Al final de todo, separado y en rojo, está lo único de esta pantalla que borra
+datos: **«Desvincular las cartas y empezar de cero»**, para cuando los portales
+cambiaron los nombres de media carta. Ver «Empezar la carta de cero».
+
 ## La pantalla no explica cómo funciona (6.3)
 
 La app se usa de dos maneras: se corta un producto y hay que apagarlo en tres
@@ -523,6 +527,59 @@ caso de la "Empanada de carne chica", que en Rappi tiene dos candidatos.
 **Importante:** en cuanto vinculás o separás algo, el catálogo pasa a
 manejarse desde la app y `app/seed.py` deja de pisar los nombres en cada
 arranque. Si no, un reinicio deshacía lo que acababas de decidir.
+
+## Empezar la carta de cero (6.5)
+
+El vínculo entre un producto de la app y un ítem del portal es **el texto del
+nombre**, exacto (ver «Modelo de nombres»). No hay ids del portal, ni
+posiciones, ni categorías: si el portal cambia los nombres, cada alias queda
+apuntando a algo que ya no existe, la app deja de encontrar los productos y no
+puede confirmar nada (sale como «no aparece», ver «Cuando la app no puede
+confirmar un apagado»).
+
+Cuando eso pasa **de a uno** se arregla en la pantalla Carta, vinculando el
+nombre nuevo. Cuando pasa con la carta entera —el dueño renombró y
+recategorizó todo en los dos portales— arreglarlo de a uno es más trabajo que
+rearmarlo. Para eso está el botón rojo del final de **Ajustes**:
+**«Desvincular las cartas y empezar de cero»**.
+
+Está ahí, separado y en rojo, y no en la pantalla Carta a propósito: es lo
+único de la app que borra datos, y no puede quedar al lado de los botones que
+se aprietan todos los días con un cliente esperando.
+
+Son dos pasos. El primero no borra nada: abre la confirmación, con los números
+contados de la base («se van a borrar 31 productos y 47 vínculos, 21 en
+PedidosYa y 26 en Rappi»). Un «¿estás seguro?» pelado no deja ver si estás por
+borrar lo que creías.
+
+**Qué borra:** los productos, los alias (el nombre en cada portal), los estados
+leídos, las pausas de producto, y los «no me avises más de este» (que son
+nombres viejos del portal: sostenerlos escondería los nuevos). Lo que está en
+la cola queda **cancelado**, no en error: lo pediste vos.
+
+**Qué NO toca:**
+
+- **Los portales.** No apaga ni prende nada. Lo que estaba apagado sigue
+  apagado — lo que se pierde es que la app sepa que lo apagó ella, así que la
+  próxima lectura lo va a ver como *apagado en el portal* y la ronda de cada
+  15 minutos no lo va a sostener.
+- **Los ajustes.** La sucursal y el ritmo viven en la misma tabla
+  `preferencias` que las marcas del catálogo; llevárselos puestos dejaría a la
+  app sin saber a qué menú entrar.
+- **El historial** de operaciones ya terminadas.
+
+**Dos redes de seguridad.** Antes de borrar se hace una copia de la base (si no
+se puede hacer, no borra nada), y el catálogo queda **deshacible** con el botón
+«Deshacer» de la pantalla Carta, que lo devuelve entero y con los mismos ids.
+
+Después del borrado la app te deja en la pantalla Carta leyendo los dos
+portales, que es para lo que apretaste: con el catálogo vacío todo lo leído
+queda para elegir, ítem por ítem, con los botones de siempre (**Vincular**,
+**Agregar**, **Vincular a mano**). Nada se vincula solo: los «emparejados
+solos» siguen siendo propuestas hasta que las confirmás.
+
+`GET /api/catalogo/reiniciar/previo` (qué se borraría) y
+`POST /api/catalogo/reiniciar` (hacerlo).
 
 ## Diagnóstico cuando algo "falla"
 

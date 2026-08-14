@@ -52,6 +52,31 @@ También se distinguen los tres «no sé» del badge de tienda, que salían todo
 con el mismo ⚪: ⚪ sin leer, ⚙ falta un dato en Ajustes, ⚠ no se pudo
 confirmar. Se arreglan distinto, así que no pueden verse igual.
 
+**El portal cambió todos los nombres de golpe** (2026-08-14, v6.5,
+`catalogo.reiniciar`). El vínculo con el portal es el TEXTO del nombre,
+exacto: no hay ids, ni posiciones, ni categorías. Cuando el dueño renombró y
+recategorizó la carta entera en los dos portales, todos los alias quedaron
+apuntando a algo que ya no existe, y arreglarlos de a uno es más trabajo que
+rearmarlos. El botón rojo del final de **Ajustes** («Desvincular las cartas y
+empezar de cero») borra el catálogo para releerlo. Lo que importa de ese
+código no es el borrado sino los bordes:
+
+- **Los ajustes NO se van con el catálogo.** La sucursal y el ritmo viven en
+  la MISMA tabla `preferencias` que `catalogo_manual` y
+  `novedades_ignoradas`. Borrar «las preferencias» en bloque deja a la app
+  sin saber a qué menú entrar.
+- **No apaga ni prende nada.** Lo apagado sigue apagado; lo que se pierde es
+  saber que lo apagó la app, así que pasa a ser `apagado_ajeno` y la ronda de
+  15 min no lo sostiene. Eso se dice en la confirmación, con esas palabras.
+- **La cola viva se cancela**, no se deja morir en ERROR: apuntaría a
+  productos borrados y serían 30 rojos por algo que el usuario pidió.
+- **Dos redes**: copia de la base antes de tocar (si falla, no borra) y el
+  paso de `guardar_paso`, que lo deja deshacible con el botón de siempre.
+- `seed.sembrar()` no resucita una lista escrita a mano: vacío + manual es
+  exactamente como queda una base reseteada.
+- `worker.olvidar_catalogo()`: `novedades`, `no_encontrados`, `ultima_carta`
+  y `ultima_lectura` son afirmaciones sobre lo que se acaba de borrar.
+
 El catálogo ya no se mantiene a mano: la pantalla **Carta** lee los dos
 portales y el usuario vincula o separa desde ahí (`app/catalogo.py`). En
 cuanto toca algo, `seed.py` deja de pisar los alias.

@@ -26,7 +26,7 @@ from app import catalogo, seed                                    # noqa: E402
 import catalogo_ejemplo                                   # noqa: E402
 from app.database import SessionLocal, init_db                    # noqa: E402
 from app.models import (Producto, AliasPlataforma, EstadoItem,    # noqa: E402
-                        Operacion, HistorialCatalogo)
+                        Operacion, HistorialCatalogo, Preferencia)
 
 # app/seed.py viene VACIO a proposito: una instalacion nueva no arranca
 # con la carta de otro local. Las pruebas siembran una carta inventada.
@@ -59,10 +59,8 @@ def limpiar(db):
     # El historial va tambien: si queda un paso de otro escenario, el
     # "deshacer" de este restaura un catalogo que no es el suyo.
     for modelo in (Operacion, AliasPlataforma, EstadoItem, Producto,
-                   HistorialCatalogo):
+                   HistorialCatalogo, Preferencia):
         db.query(modelo).delete()
-    from app.models import Preferencia
-    db.query(Preferencia).delete()
     db.commit()
 
 
@@ -484,6 +482,121 @@ def enlazar_una_plataforma_de_mas(db):
         revisar(True, "enlazar() rechaza una plataforma que no existe")
 
 
+def _preparar_para_reiniciar(db):
+    """Un catalogo con todo lo que el reset tiene que respetar o borrar."""
+    limpiar(db)
+    seed.sembrar()
+    db.expire_all()
+
+    # Una pausa de producto, una novedad ignorada y un ajuste de sucursal:
+    # los tres viven en lugares distintos y el reset los trata distinto.
+    p = db.query(Producto).filter_by(nombre="Tarta de verdura").first()
+    p.pausado = True
+    catalogo.ignorar_novedad(db, "rappi", "Postre que no cargo nadie")
+    db.add(Preferencia(clave="cfg_pedidosya_menu_id", valor="123-menu"))
+
+    # Una operacion viva (la cola) y una terminada (el historial).
+    viva = Operacion(producto_id=p.id, plataforma="rappi", accion="apagar_hoy")
+    vieja = Operacion(producto_id=p.id, plataforma="pedidosya",
+                      accion="prender", estado=Operacion.OK)
+    db.add_all([viva, vieja])
+    db.commit()
+    db.expire_all()
+    return viva.id, vieja.id
+
+
+def reiniciar_borra_el_catalogo(db):
+    """Empezar la carta de cero: que borre lo que dice y NADA mas.
+
+    El caso real (2026-08-14): el dueño cambio los nombres y las categorias
+    en los dos portales, asi que todos los alias quedaron apuntando a texto
+    que ya no existe. Lo que se prueba no es que borre —eso es facil— sino
+    que la sucursal sobreviva: los ajustes viven en la MISMA tabla
+    `preferencias` que las dos marcas del catalogo, y llevarselos puestos
+    dejaria a la app sin saber a que menu entrar.
+    """
+    print("\n== Empezar la carta de cero ==")
+    viva, vieja = _preparar_para_reiniciar(db)
+
+    previo = catalogo.contar_para_reiniciar(db)
+    revisar(previo["productos"] == db.query(Producto).count() and
+            previo["productos"] > 0,
+            "el cartel cuenta los productos que hay de verdad")
+    revisar(previo["vinculos"] == db.query(EstadoItem).count(),
+            "y los vinculos, que son los EstadoItem (no los alias, que solo "
+            "existen cuando el nombre difiere)")
+    revisar(previo["pausados"] == 1 and previo["en_cola"] == 1,
+            "avisa de la pausa que se pierde y de la cola que se cancela")
+
+    catalogo.reiniciar(db)
+    db.commit()
+    db.expire_all()
+
+    revisar(db.query(Producto).count() == 0, "no queda ningun producto")
+    revisar(db.query(AliasPlataforma).count() == 0, "no queda ningun alias")
+    revisar(db.query(EstadoItem).count() == 0, "no queda ningun estado")
+
+    ajuste = db.query(Preferencia).get("cfg_pedidosya_menu_id")
+    revisar(ajuste is not None and ajuste.valor == "123-menu",
+            "los ajustes de sucursal NO se tocan")
+    revisar(db.query(Preferencia).get(Preferencia.NOVEDADES_IGNORADAS) is None,
+            "los 'no me avises de este' se van: son nombres viejos del portal")
+    revisar(catalogo.es_manual(db),
+            "el catalogo lo sigue manejando la base, no seed.py")
+
+    op_viva = db.query(Operacion).get(viva)
+    revisar(op_viva.estado == Operacion.CANCELADA,
+            "la cola queda CANCELADA y no en ERROR: no es una falla, la "
+            "pediste vos")
+    revisar(op_viva.finalizada_en is not None,
+            "y cerrada, para que no siga contando en el badge")
+    revisar(db.query(Operacion).get(vieja).estado == Operacion.OK,
+            "lo ya terminado queda como estaba: es historial de lo que paso")
+
+    # Un catalogo vacio es justo la condicion con la que sembrar() vuelve a
+    # crear productos: sin la guarda de es_manual, reiniciar la app deshacia
+    # el reset sola.
+    seed.sembrar()
+    db.expire_all()
+    revisar(db.query(Producto).count() == 0,
+            "reiniciar la app no lo resucita")
+
+
+def reiniciar_se_puede_deshacer(db):
+    """El paso de deshacer es la red de seguridad del boton rojo."""
+    print("\n== Deshacer el 'empezar de cero' ==")
+    _preparar_para_reiniciar(db)
+
+    antes = {p.id: (p.nombre, bool(p.pausado),
+                    catalogo.nombre_remoto(p, "pedidosya"),
+                    catalogo.nombre_remoto(p, "rappi"))
+             for p in db.query(Producto).all()}
+    estados = {(e.producto_id, e.plataforma): e.estado
+               for e in db.query(EstadoItem).all()}
+
+    catalogo.reiniciar(db)
+    db.commit()
+    db.expire_all()
+
+    revisar(catalogo.hay_para_deshacer(db) is not None,
+            "queda un paso para deshacer")
+
+    catalogo.deshacer(db)
+    db.commit()
+    db.expire_all()
+
+    despues = {p.id: (p.nombre, bool(p.pausado),
+                      catalogo.nombre_remoto(p, "pedidosya"),
+                      catalogo.nombre_remoto(p, "rappi"))
+               for p in db.query(Producto).all()}
+    revisar(despues == antes,
+            "vuelve el catalogo entero, con los MISMOS ids (si no, las "
+            "operaciones del historial quedarian colgadas)")
+    revisar({(e.producto_id, e.plataforma): e.estado
+             for e in db.query(EstadoItem).all()} == estados,
+            "y con el estado que tenia cada uno en cada portal")
+
+
 def main():
     init_db()
     db = SessionLocal()
@@ -501,6 +614,8 @@ def main():
         deshacer_varios_pasos(db)
         nombres_de_los_sueltos(db)
         enlazar_una_plataforma_de_mas(db)
+        reiniciar_borra_el_catalogo(db)
+        reiniciar_se_puede_deshacer(db)
     finally:
         db.close()
         shutil.rmtree(TEMPORAL, ignore_errors=True)

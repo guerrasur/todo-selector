@@ -78,6 +78,16 @@ corrija al arrancar, que vincular fusione y separar desarme, que el estado y
 la cola de operaciones sobrevivan, y que `seed.py` deje de pisar los alias
 cuando el catálogo pasa a manejarse desde la app.
 
+Desde el 2026-08-14 cubre además **empezar la carta de cero**
+(`catalogo.reiniciar`), que es lo que hay que apretar cuando el portal
+renombró media carta y todos los alias quedaron apuntando a texto que ya no
+existe. Lo que se prueba no es el borrado —eso es una línea— sino lo que
+**no** se lleva puesto: que los ajustes de sucursal sobrevivan (viven en la
+misma tabla `preferencias` que las marcas del catálogo), que la cola quede
+CANCELADA y no en ERROR, que el historial ya terminado no se toque, que
+reiniciar la app no lo resucite, y que «Deshacer» devuelva el catálogo entero
+con los MISMOS ids (si no, las operaciones del historial quedarían colgadas).
+
 **`probar_estados.py`** cubre lo delicado de leer el estado real: que una
 operación en curso no la pise una lectura, que la app no se apropie de lo que
 apagó el local por su cuenta (`apagado_ajeno`, que la ronda de reverificación
@@ -166,6 +176,14 @@ y a recargar), y una regresión que costó caro: el chip de plataforma se
 deseleccionaba solo. La lista se repinta cada pocos segundos, y la selección
 vivía en una variable local del repintado; si tardabas más que el refresco en
 apretar el botón, la acción salía a los dos portales sin decir nada.
+
+Desde el 2026-08-14 cubre también el botón rojo del final de **Ajustes**
+(«Desvincular las cartas y empezar de cero»), de punta a punta y en ese orden:
+que el primer click **no** borre sino que abra la confirmación con los números
+a la vista, que «Mejor no» salga sin consecuencias, que después de borrar la
+app quede en la pantalla Carta leyendo los portales (que es para lo que
+apretaste) con todo para elegir de nuevo, y que los ajustes de sucursal sigan
+ahí. Corre al final de todo por lo obvio: borra el catálogo que usan las demás.
 
 **`probar_rappi_sync.py`** cubre la segunda tienda de Rappi. Rappi Turbo y
 Rappi Común son dos tiendas del mismo local que **no comparten la carta**:

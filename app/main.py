@@ -995,6 +995,52 @@ def ver_catalogo(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/catalogo/reiniciar/previo")
+def reiniciar_catalogo_previo(db: Session = Depends(get_db)):
+    """Qué se borraría, contado de la base. Es lo que dice el cartel.
+
+    Va aparte del POST a propósito: el número tiene que verse ANTES de
+    apretar, no después. Mismo patrón que `/api/masivo/previo`.
+    """
+    return catalogo.contar_para_reiniciar(db)
+
+
+@app.post("/api/catalogo/reiniciar")
+def reiniciar_catalogo(db: Session = Depends(get_db)):
+    """Borra el catálogo entero para volver a leerlo de los portales.
+
+    Es para cuando los portales cambiaron los nombres: el vínculo es por
+    texto exacto, así que un cambio masivo de nombres deja todos los alias
+    apuntando a algo que ya no existe y no hay nada que arreglar de a uno.
+
+    NO apaga ni prende nada en ningún portal, y NO toca los ajustes (la
+    sucursal y el ritmo viven en la misma tabla `preferencias` que las dos
+    marcas del catálogo; ver catalogo.reiniciar).
+
+    Dos redes de seguridad, y las dos importan: la copia de la base va
+    ANTES de tocar nada —si no se puede hacer, no se borra: es lo único que
+    salva del "me equivoqué de botón" media hora después, cuando el paso de
+    deshacer ya se usó para otra cosa— y el catálogo queda deshacible desde
+    la pantalla Carta con el botón de siempre.
+    """
+    try:
+        hacer_backup(refrescar_horas=0)
+    except Exception as e:
+        log.exception("No se pudo hacer la copia previa al reinicio")
+        raise HTTPException(500, f"no pude hacer la copia de seguridad de la "
+                                 f"base, así que no borré nada: {e}")
+
+    borrado = catalogo.reiniciar(db)
+    db.commit()
+
+    # La memoria del worker habla de productos y de nombres de portal que
+    # acaban de dejar de existir.
+    worker.olvidar_catalogo()
+
+    return {"ok": True, "borrado": borrado,
+            "deshacer": catalogo.hay_para_deshacer(db)}
+
+
 class ConfigIn(BaseModel):
     cambios: dict
 
