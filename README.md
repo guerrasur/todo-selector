@@ -851,9 +851,33 @@ misma.
       (nunca por posición: la 3ª es "Personalizar"), el diálogo se cierra con
       Escape cuando algo sale mal, y si el texto cambió el log dice qué
       opciones había. Cubierto por `pruebas/probar_rappi_menu.py` (caso E).
+- [x] `asegurar_sesion()`: la prueba de que la carta cargó es un toggle **de
+      producto**, no cualquier `availability-switch-control`.
+      **Arreglado el 2026-08-20**: el portal tiene además un toggle por
+      **categoría** (`menu-category-N-availability-switch-control`, el
+      "Activa" del encabezado), que termina igual que el de un producto
+      (`menu-category-N-product-N-availability-switch-control`) y solo se
+      distingue por el `-product-` del medio. Con el selector viejo, una
+      carta con todas las categorías plegadas —cero productos en el DOM—
+      pasaba por "el menú cargó", y después los 3 intentos se gastaban
+      buscando un producto que no estaba renderizado. Cubierto por
+      `pruebas/probar_rappi_menu.py` (caso L).
 - [ ] Pantalla de sesión expirada de Rappi: se sabe que existe (Rappi se
       desloguea por inactividad) pero falta confirmar el selector exacto
       para `asegurar_sesion()`.
+- [ ] **Las dos pantallas de menú** (2026-08-20). El portal sirve dos
+      pantallas distintas en la MISMA URL y cuál te toca cambia de una
+      recarga a la otra: una titulada «Menú» con botón «Publicar», y otra
+      «Tu Menú» con un chip «Maestro», «+ Agregar» y «Actualizar menú con
+      IA». Del volcado del DOM de la segunda (2026-08-20) se sabe que trae
+      **todos** los `data-testid` que la app usa (`menu-categories`,
+      `menu-category`, `collapsible-panel-header`, `catalog-item-image`,
+      `menu-category-N-product-N-availability-switch-control`), así que en
+      esa la app funciona. **Falta el volcado de la primera**, que es la
+      candidata a ser la que falla. Para conseguirlo ya no hace falta
+      DevTools: cuando `asegurar_sesion()` falla, `huella_de_pantalla()`
+      deja en el log el título, cuántas categorías, cuántos toggles de cada
+      tipo y cuántas fotos había.
 - [ ] **Pantalla de verificación en dos pasos** (`TEXTOS_VERIFICACION`,
       buscar `TODO-SELECTOR` en el archivo): los textos salen de lo que ve
       el usuario, no de DevTools. Hay que confirmarlos la próxima vez que

@@ -69,6 +69,16 @@ categoría cualquier cosa acierta—, y sin ese parámetro queda el header
 pegajoso suelto arriba de las tarjetas. Y que sin ningún título no se
 invente ninguna categoría.
 
+Desde el 2026-08-20, con `?carta=plegada`, cubre además **una carta que no
+es una carta**: las tres categorías llegan plegadas, así que no hay ni un
+producto renderizado, pero sí están los toggles de **categoría**
+(`menu-category-N-availability-switch-control`), que terminan igual que los
+de producto. Antes eso pasaba por «el menú cargó» y los 3 intentos se
+gastaban buscando un producto que no existía en el DOM. Se prueba que
+`asegurar_sesion()` conteste que no, y que `huella_de_pantalla()` deje en el
+log qué se vio — incluida la pestaña cerrada, donde tiene que contestar en
+vez de tirar.
+
 Y con `?tapa=ancestro`, las tres trampas del 2026-08-05, que son las que
 explicaban el «Rappi Turbo no apaga y se queda trabada»:
 
