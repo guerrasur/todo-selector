@@ -36,6 +36,13 @@ Y lo que dejaron ver los logs de agosto:
      leerlas del DOM y clickearlas por JS, sin dejar de elegir por texto.
   J) (?dialogo=tarde) La otra mitad: el popup monta a los 14 s, pasado el
      limite viejo de 10, y la app se rendia con el popup por llegar.
+  L) (?carta=plegada) La carta llega con todas las categorias plegadas: cero
+     productos en el DOM, pero los toggles de CATEGORIA si estan y terminan
+     con el mismo sufijo. Antes eso pasaba por "el menu cargo" y los 3
+     intentos se gastaban buscando un producto que no existia. Ademas la
+     huella tiene que dejar en el log QUE se vio (2026-08-20).
+  M) La huella es diagnostico: contra una pestaña cerrada tiene que contestar,
+     no tirar. Un diagnostico que revienta tapa el error que venia a explicar.
 """
 
 import asyncio
@@ -510,6 +517,57 @@ async def la_categoria_de_cada_producto(navegador):
     await pagina.close()
 
 
+async def la_carta_plegada_no_es_carta(navegador):
+    print("\n== L) Categorias plegadas: hay toggles, pero no hay carta ==")
+    plat, pagina = await abrir_plataforma(navegador, "?carta=plegada")
+
+    # Primero: que la trampa sea de verdad. Con el selector viejo
+    # (cualquier *availability-switch-control) la pagina daba positivo.
+    sueltos = pagina.locator('[data-testid*="availability-switch-control"]')
+    cuantos = await sueltos.count()
+    revisar(cuantos == 3,
+            f"el selector viejo encuentra {cuantos} toggles (los de categoria)")
+    revisar(await pagina.locator(
+        'img[data-testid="catalog-item-image"]').count() == 0,
+        "y sin embargo no hay ni un producto renderizado")
+
+    # Lo que importa: la carta no cargo, y la app lo dice.
+    revisar(await plat.asegurar_sesion() is False,
+            "asegurar_sesion() contesta que NO esta lista")
+
+    huella = await plat.huella_de_pantalla()
+    print("     huella: " + huella)
+    revisar("producto=0" in huella,
+            "la huella dice que no vio toggles de producto")
+    revisar("categoria=3" in huella,
+            "y que los 3 que hay son de categoria")
+    revisar("plegadas=3" in huella,
+            "y que las 3 cabeceras estan plegadas")
+    revisar("fotos=0" in huella, "y que no hay fotos de producto")
+    await pagina.close()
+
+    # Y en la carta normal no cambio nada: sigue dando lista.
+    plat, pagina = await abrir_plataforma(navegador, "")
+    revisar(await plat.asegurar_sesion() is True,
+            "con la carta desplegada sigue dando lista, como siempre")
+    await pagina.close()
+
+
+async def la_huella_no_puede_romper_nada(navegador):
+    print("\n== M) La huella nunca tira ==")
+    plat, pagina = await abrir_plataforma(navegador, "")
+    await pagina.close()          # la pestaña cerrada es el peor caso
+
+    try:
+        huella = await plat.huella_de_pantalla()
+        salio = True
+    except Exception as e:
+        huella, salio = str(e), False
+    revisar(salio, "con la pestaña cerrada contesta en vez de tirar")
+    revisar("no pude mirar" in huella,
+            f"y dice que no pudo mirar ({huella[:60]})")
+
+
 async def main():
     servidor = servir()
     try:
@@ -526,6 +584,8 @@ async def main():
             await el_popup_esta_pero_no_se_ve(navegador)
             await el_popup_llega_tarde(navegador)
             await la_categoria_de_cada_producto(navegador)
+            await la_carta_plegada_no_es_carta(navegador)
+            await la_huella_no_puede_romper_nada(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()

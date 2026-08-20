@@ -10,6 +10,36 @@ en vivo contra los dos portales el 2026-07-27. Queda un `TODO-SELECTOR` en
 `plataformas/rappi.py`: el HTML completo de la tarjeta y la pantalla de sesión
 expirada.
 
+**Rappi sirve DOS pantallas de menú en la misma URL** (2026-08-20, v6.8). De
+golpe Rappi Turbo empezó a fallar cada dos operaciones con «el menu no
+cargo, y NO hay campo de password», que mandaba a revisar los ids de
+Ajustes — y los ids estaban perfectos, con la carta entera visible en la
+pestaña. Son dos pantallas distintas: una titulada «Menú» con botón
+«Publicar», y otra «Tu Menú» con chip «Maestro». Cuál te toca cambia en
+cada recarga, y por eso alternaba sin patrón.
+
+Del volcado del DOM de la «Maestro» salieron dos cosas:
+
+- **Esa pantalla trae todos los `data-testid` que la app usa**, así que no
+  es la que rompe. Falta el volcado de la otra.
+- **Hay un toggle por CATEGORÍA**
+  (`menu-category-N-availability-switch-control`, el «Activa» del
+  encabezado) que termina igual que el de un producto
+  (`menu-category-N-product-N-availability-switch-control`) y solo se
+  distingue por el `-product-` del medio. `asegurar_sesion()` esperaba
+  cualquiera de los dos, así que una carta con **todas las categorías
+  plegadas** —cero productos en el DOM— pasaba por «el menú cargó» y
+  después los 3 intentos se gastaban buscando un producto que no estaba
+  renderizado. Ahora se pide un toggle de producto.
+
+Y cuando la carta no carga, `rappi.huella_de_pantalla()` deja en el log
+**qué había**: título, categorías, cabeceras plegadas/abiertas, toggles de
+cada tipo, fotos, modal. Es diagnóstico y nunca tira (regla 8). Existe
+porque averiguarlo a mano no era viable: la pantalla que falla dura hasta
+la próxima recarga —que la hace el worker cada dos minutos— y hay que
+tener DevTools abierto en la pestaña correcta justo en ese momento, con
+dos pestañas de Rappi que se llaman igual.
+
 **El apagado de Rappi Turbo y la cola trabada** (2026-08-05). El portal
 cambió otra vez: lo que tapa el toggle ahora es un ancestro suyo, el label
 trae `for="switch-hidden-input"` (repetido en toda la carta) y el popup de

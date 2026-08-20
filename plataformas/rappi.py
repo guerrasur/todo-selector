@@ -209,6 +209,25 @@ class Rappi(PlataformaBase):
         u = self.page.url
         return "partners.rappi.com/menu" in u and f"storeId={self.store_id}" in u
 
+    # El toggle de un PRODUCTO, que es el unico que prueba que la carta
+    # cargo de verdad.
+    #
+    # CONFIRMADO POR VOLCADO DEL DOM (2026-08-20): la carta trae DOS
+    # familias de toggle, y las dos terminan igual:
+    #
+    #   menu-category-325751-availability-switch-control            <- categoria
+    #   menu-category-325751-product-4687415-availability-switch-control  <- producto
+    #
+    # El primero es el "Activa" que apaga la CATEGORIA entera. Con el
+    # `*=availability-switch-control` de antes, una carta con todas las
+    # categorias plegadas —cero productos renderizados— pasaba igual la
+    # prueba de "el menu cargo", porque los toggles de categoria si estan.
+    # Despues los 3 intentos se gastaban buscando un producto que no
+    # existia en el DOM. Lo que hace falta es un producto, asi que se pide
+    # un toggle de producto: el `-product-` es lo que los distingue.
+    SELECTOR_TOGGLE_PRODUCTO = ('[data-testid*="-product-"]'
+                                '[data-testid*="availability-switch-control"]')
+
     async def asegurar_sesion(self) -> bool:
         await self.ir_al_menu()
 
@@ -217,12 +236,18 @@ class Rappi(PlataformaBase):
 
         # CONFIRMADO: los toggles de disponibilidad tienen un data-testid
         # con el patron "...-availability-switch-control". Esperar a que
-        # aparezca al menos uno es buena evidencia de que el menu cargo.
+        # aparezca al menos uno DE PRODUCTO es buena evidencia de que la
+        # carta cargo (ver SELECTOR_TOGGLE_PRODUCTO).
         try:
             await self.page.wait_for_selector(
-                '[data-testid*="availability-switch-control"]', timeout=15000
+                self.SELECTOR_TOGGLE_PRODUCTO, timeout=15000
             )
         except Exception:
+            # Sin esto, lo unico que se sabe es "el menu no cargo", que es
+            # cierto y no alcanza para arreglar nada: la pantalla se ve
+            # perfecta y el usuario no tiene como saber que le falto.
+            log.warning("%s: la carta no cargo. %s",
+                        self.nombre, await self.huella_de_pantalla())
             return False
 
         # El menu ya esta: recien ahora existe la franja que se come los
@@ -231,6 +256,71 @@ class Rappi(PlataformaBase):
         # cada _preparar, y el <style> no sobrevive a una navegacion.
         await self.neutralizar_estorbos()
         return True
+
+    # =====================================================================
+    #  QUE HABIA EN LA PESTAÑA CUANDO LA CARTA NO CARGO
+    # =====================================================================
+    # Es diagnostico, no logica: no decide nada, no navega, no toca el DOM
+    # y nunca tira. Mismo criterio que por_que_no_entra() y
+    # _por_que_no_hubo_dialogo() — cuando algo falla, contar lo que se vio.
+    #
+    # POR QUE EXISTE (2026-08-20): el portal empezo a servir DOS pantallas
+    # de menu distintas en la MISMA URL —una titulada "Menú", con boton
+    # "Publicar"; otra "Tu Menú" con un chip "Maestro"— y cual te toca
+    # cambia de una recarga a la otra. En el log las dos se veian igual:
+    # "el menu no cargo". Eso mandaba a mirar los ids de Ajustes, que
+    # estaban perfectos, mientras la pestaña mostraba la carta completa.
+    #
+    # Averiguarlo a mano no servia: la pantalla que falla dura hasta la
+    # proxima recarga, que la hace el worker cada dos minutos, y hay que
+    # tener DevTools abierto en la pestaña correcta justo en ese momento
+    # (son dos pestañas de Rappi y las dos dicen "Partners Rappi").
+    JS_HUELLA = """
+        () => {
+          const q = (sel) => document.querySelectorAll(sel);
+          const testids = [...q('[data-testid*="availability-switch-control"]')]
+                .map(e => e.getAttribute('data-testid') || '');
+          const cabeceras = [...q('[data-testid="collapsible-panel-header"]')];
+          const aria = (v) => cabeceras.filter(
+                c => c.getAttribute('aria-expanded') === v).length;
+          const h = document.querySelector('h1, h2');
+          return {
+            titulo: ((h && h.innerText) || '').trim().split('\\n')[0].slice(0, 60),
+            categorias: q('[data-testid="menu-category"]').length,
+            cabeceras: cabeceras.length,
+            plegadas: aria('false'),
+            abiertas: aria('true'),
+            producto: testids.filter(t => t.includes('-product-')).length,
+            categoria: testids.filter(t => !t.includes('-product-')).length,
+            fotos: q('img[data-testid="catalog-item-image"]').length,
+            password: q('input[type="password"]').length,
+            modal: q('[data-testid="modal-container"]').length,
+            testids: q('[data-testid]').length,
+          };
+        }"""
+
+    async def huella_de_pantalla(self) -> str:
+        """Una linea con lo que hay en pantalla, para el log."""
+        try:
+            d = await self.page.evaluate(self.JS_HUELLA)
+        except Exception as e:
+            # Un diagnostico que revienta tapa justo el error que venia a
+            # explicar. Contesta lo que sabe y ya.
+            return f"(no pude mirar la pestaña: {' '.join(str(e).split())[:90]})"
+
+        # Las cabeceras sin aria-expanded no se cuentan como abiertas ni
+        # como plegadas: no sabemos (regla 8), y decir "0 plegadas" cuando
+        # el portal no publica el dato es afirmar lo que no se esta viendo.
+        sin_aria = d["cabeceras"] - d["plegadas"] - d["abiertas"]
+        return (
+            f"titulo='{d['titulo']}' | categorias={d['categorias']} | "
+            f"cabeceras={d['cabeceras']} (plegadas={d['plegadas']}, "
+            f"abiertas={d['abiertas']}, sin aria-expanded={sin_aria}) | "
+            f"toggles: producto={d['producto']} categoria={d['categoria']} | "
+            f"fotos={d['fotos']} | modal={d['modal']} | "
+            f"password={d['password']} | data-testid en total={d['testids']} | "
+            f"url={self.page.url}"
+        )
 
     # =====================================================================
     #  TODO-SELECTOR: LA PANTALLA DE VERIFICACION EN DOS PASOS

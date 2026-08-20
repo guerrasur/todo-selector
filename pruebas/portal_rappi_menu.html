@@ -196,6 +196,11 @@ const DIALOGO = params.get("dialogo") || "";
 // ?categorias=dos  la carta agrupada en dos categorias de verdad, con el
 //                  header de cada una adentro de su <li menu-category>.
 const DOS_CATEGORIAS = params.get("categorias") === "dos";
+// ?carta=plegada  lo del 2026-08-20: la carta llega con TODAS las categorias
+//                 plegadas. No hay ni una tarjeta de producto en el DOM,
+//                 pero los toggles de CATEGORIA si estan, y terminan con el
+//                 mismo "-availability-switch-control" que los de producto.
+const CARTA_PLEGADA = params.get("carta") === "plegada";
 const DIALOGO_INVISIBLE = DIALOGO === "invisible";
 const DIALOGO_TARDE = DIALOGO === "tarde";
 // Los dos nuevos son variantes del portal de floating-ui, que es el dialogo
@@ -296,7 +301,51 @@ function contenedor() {
   return dentro;
 }
 
+// La carta plegada: tres categorias, cada una con su header cerrado y su
+// propio toggle de "Activa", y CERO productos renderizados. Es lo que hace
+// que "hay un availability-switch-control en la pagina" deje de significar
+// "la carta cargo".
+function pintarPlegada() {
+  const lista = document.getElementById("lista");
+  lista.innerHTML = "";
+  const ul = document.createElement("ul");
+  ul.setAttribute("data-testid", "menu-categories");
+
+  ["Ensaladas", "Wraps", "Bebidas"].forEach((nombre, i) => {
+    const li = document.createElement("li");
+    li.setAttribute("data-testid", "menu-category");
+
+    const h = document.createElement("div");
+    h.setAttribute("data-testid", "collapsible-panel-header");
+    h.setAttribute("role", "button");
+    h.setAttribute("aria-expanded", "false");
+    h.textContent = nombre;
+    li.appendChild(h);
+
+    // El toggle de la categoria entera. Ojo al data-testid: es el mismo
+    // sufijo que el de un producto, sin el "-product-N-" del medio.
+    const label = document.createElement("label");
+    label.setAttribute(
+      "data-testid", `menu-category-32575${i}-availability-switch-control`);
+    label.setAttribute("for", "switch-hidden-input");
+    label.className = "sc-iYsgxs on";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = "switch-hidden-input";
+    input.checked = true;
+    input.readOnly = true;
+    label.appendChild(input);
+    li.appendChild(label);
+
+    ul.appendChild(li);
+  });
+
+  lista.appendChild(ul);
+}
+
 function pintar() {
+  if (CARTA_PLEGADA) return pintarPlegada();
+
   // Con ?categorias=dos cada tarjeta va a la de su grupo; si no, todas al
   // mismo contenedor de siempre.
   const donde = DOS_CATEGORIAS ? contenedoresPorCategoria() : (() => {
