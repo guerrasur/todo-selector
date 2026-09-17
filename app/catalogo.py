@@ -79,6 +79,7 @@ def _foto(db) -> str:
                       for a in p.alias],
             "estados": [{"plataforma": e.plataforma, "estado": e.estado,
                          "detalle": e.detalle,
+                         "verificado_en": e.verificado_en.isoformat() if e.verificado_en else None,
                          "categoria_portal": e.categoria_portal or ""}
                         for e in p.estados],
         })
@@ -116,6 +117,9 @@ def deshacer(db) -> str | None:
         return None
 
     productos = json.loads(paso.datos)
+    if isinstance(productos, dict) and productos.get("tipo") == "limpieza_duplicados":
+        from . import limpieza
+        return limpieza.deshacer(db, paso, productos)
     descripcion = paso.descripcion
     paso_id = paso.id
 
@@ -148,6 +152,8 @@ def deshacer(db) -> str | None:
         for e in p["estados"]:
             db.add(EstadoItem(producto_id=p["id"], plataforma=e["plataforma"],
                               estado=e["estado"], detalle=e["detalle"],
+                              verificado_en=(datetime.fromisoformat(e["verificado_en"])
+                                             if e.get("verificado_en") else None),
                               categoria_portal=e.get("categoria_portal", "")))
 
     db.query(HistorialCatalogo).filter_by(id=paso_id).delete(
@@ -278,14 +284,17 @@ def nombre_remoto(producto: Producto, plataforma: str) -> str | None:
 def buscar_por_remoto(db, plataforma: str, remoto: str) -> Producto | None:
     """El producto que en `plataforma` se llama `remoto`, si esta cargado."""
     alias = (db.query(AliasPlataforma)
-             .filter_by(plataforma=plataforma, nombre_remoto=remoto)
+             .join(Producto)
+             .filter(AliasPlataforma.plataforma == plataforma,
+                     AliasPlataforma.nombre_remoto == remoto,
+                     Producto.activo.is_(True))
              .first())
     if alias is not None:
         return db.query(Producto).get(alias.producto_id)
 
     # Sin alias, el canonico es el nombre remoto. Igual tiene que existir en
     # esa plataforma: si no, es otro producto que se llama parecido.
-    producto = db.query(Producto).filter_by(nombre=remoto).first()
+    producto = db.query(Producto).filter_by(nombre=remoto, activo=True).first()
     if producto is not None and nombre_remoto(producto, plataforma) == remoto:
         return producto
     return None
@@ -467,7 +476,7 @@ def vincular_varios(db, nombres: dict, nombre: str = None,
     # ya estaba con la "Tarta de verdura" (PY), ese ultimo se quedaba sin
     # plataforma y desaparecia del catalogo. Ahora sobrevive como producto
     # propio.
-    for producto in encontrados:
+    for producto in {p.id: p for p in encontrados}.values():
         for plat in orden:
             actual = nombre_remoto(producto, plat)
             if actual is not None and actual != nombres[plat]:
@@ -495,7 +504,7 @@ def vincular_varios(db, nombres: dict, nombre: str = None,
         # Se queda el del portal que va primero (PedidosYa si esta, que es el
         # que tiene el nombre canonico) y los demas se absorben.
         producto = next(existentes[p] for p in orden if existentes[p] is not None)
-        for otro in encontrados:
+        for otro in {p.id: p for p in encontrados}.values():
             if otro.id != producto.id:
                 _absorber(db, destino=producto, origen=otro)
 
@@ -532,6 +541,10 @@ def _absorber(db, destino: Producto, origen: Producto):
     for plat in list(PLATAFORMAS):
         suyo = nombre_remoto(origen, plat)
         if suyo is None:
+            continue
+        if nombre_remoto(destino, plat) == suyo:
+            # Mismo producto remoto: separarlo fabricaba una copia con sufijo.
+            # El vínculo ya está en destino; no crear un producto suelto.
             continue
         if nombre_remoto(destino, plat) is not None:
             # Los dos lo tienen y no son el mismo nombre: el de origen no

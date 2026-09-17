@@ -9,10 +9,10 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from . import catalogo, cierre, config, cola
+from . import catalogo, cierre, config, cola, limpieza
 from .backup import hacer_backup, iniciar_backups_periodicos
 from .database import init_db, get_db, SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
@@ -223,8 +223,8 @@ def listar_productos(db: Session = Depends(get_db)):
 @app.post("/api/accion")
 def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
     producto = db.query(Producto).get(data.producto_id)
-    if producto is None:
-        raise HTTPException(404, "producto no encontrado")
+    if producto is None or not producto.activo:
+        raise HTTPException(404, "producto no encontrado o archivado")
 
     if data.accion not in cierre.ACCIONES:
         raise HTTPException(400, "accion invalida")
@@ -1039,7 +1039,10 @@ def cambiar_categoria(data: CategoriaIn, db: Session = Depends(get_db)):
 @app.post("/api/deshacer")
 def deshacer(db: Session = Depends(get_db)):
     """Vuelve el catálogo a como estaba antes del último cambio."""
-    descripcion = catalogo.deshacer(db)
+    try:
+        descripcion = catalogo.deshacer(db)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
     if descripcion is None:
         raise HTTPException(400, "no hay nada para deshacer")
     db.commit()
@@ -1062,6 +1065,36 @@ def ver_catalogo(db: Session = Depends(get_db)):
         "deshacer": catalogo.hay_para_deshacer(db),
         "productos": [_ver_producto(p) for p in productos],
     }
+
+
+class LimpiarDuplicadosIn(BaseModel):
+    firma: str
+
+
+@app.get("/api/catalogo/duplicados")
+def ver_duplicados(db: Session = Depends(get_db)):
+    return limpieza.planificar(db)
+
+
+@app.post("/api/catalogo/duplicados/limpiar")
+def limpiar_duplicados(data: LimpiarDuplicadosIn, db: Session = Depends(get_db)):
+    # Evita que entre una orden entre el chequeo de cola y el archivado.
+    db.execute(text("BEGIN IMMEDIATE"))
+    previo = limpieza.planificar(db)
+    if previo["firma"] != data.firma:
+        raise HTTPException(409, "El catálogo o la cola cambiaron. Volvé a revisar los duplicados.")
+    if previo["total"]:
+        try:
+            hacer_backup(refrescar_horas=0)
+        except Exception:
+            raise HTTPException(500, "No pude guardar la copia de seguridad. No se limpió nada.")
+    try:
+        resultado = limpieza.ejecutar(db, data.firma)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    db.commit()
+    worker.olvidar_catalogo()
+    return {"ok": True, **resultado}
 
 
 @app.get("/api/catalogo/reiniciar/previo")

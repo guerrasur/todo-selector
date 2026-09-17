@@ -327,3 +327,15 @@ el arranque simulado, versión 6.9, HTML, encolado, rechazo 404 y cancelación.
 No se validaron portales reales ni interfaz visual: Chromium no pudo descargarse
 en el entorno de revisión. No interpretar las pruebas aisladas como validación
 de los selectores actuales de Rappi/PedidosYa.
+
+## Duplicados v6.10
+
+- `python pruebas/probar_duplicados.py`: 15 casos. Copias exactas, variantes,
+  diferencias entre tiendas, conflictos, cola viva, firma vencida, backup,
+  historial, lookup de archivados, deshacer y fusión sin nuevos restos.
+- `node pruebas/probar_duplicados_ui.js`: vista previa sin mutación, nombres
+  como texto seguro, envío explícito de firma, rechazo por cambios y conflictos.
+- Backup SQLite real comprobado con la transacción de limpieza abierta.
+- Suites de catálogo, estados, verificación, cierre, Rappi sync, backup y las
+  17 regresiones de 6.9 aprobadas. No se validó visualmente en Chromium ni con
+  sesiones reales. La limpieza se prueba con catálogos temporales inventados.

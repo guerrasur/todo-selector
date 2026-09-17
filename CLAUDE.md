@@ -1,5 +1,28 @@
 # Todo-Selector — contexto para Claude Code
 
+## Actualización v6.10 — duplicados (2026-09-17)
+
+`app/limpieza.py` detecta componentes por (plataforma, nombre remoto EXACTO).
+Solo archiva si una fila ya cubre la unión completa de vínculos y no hay
+conflictos de plataforma, pausa, categoría manual ni operaciones vivas.
+No quitar sufijos ni normalizar nombres para decidir identidad. No inferir
+que un nombre ausente de una lectura parcial dejó de existir en el portal.
+
+Se archiva con `Producto.activo=False`, conservando ids, aliases e historial.
+`buscar_por_remoto` y el volcado de estados deben ignorar archivados. La API de
+acciones y el worker tampoco pueden ejecutar órdenes sobre ellos. La limpieza
+lleva firma del catálogo/cola, bloqueo SQLite y backup previo. Se aplica desde
+Carta, a pedido; nunca al arrancar ni desde una lectura automática.
+
+El historial de esta limpieza tiene `tipo=limpieza_duplicados`. Deshacer reactiva
+solo las filas afectadas y restaura sus metadatos; NO recrea todo el catálogo ni
+pisa lecturas o acciones posteriores. Los snapshots anteriores siguen válidos.
+
+`_absorber` no debe llamar `separar` si destino y origen tienen el MISMO nombre
+remoto. `vincular_varios` itera productos únicos antes de separar y absorber.
+Pruebas: `python pruebas/probar_duplicados.py` y
+`node pruebas/probar_duplicados_ui.js`. Detalles en `CAMBIOS-6.10.md`.
+
 ## Actualización v6.9 (2026-09-17)
 
 Leer `CAMBIOS-6.9.md` antes de modificar cola o verificaciones. `app/cola.py`

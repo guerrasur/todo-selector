@@ -1,5 +1,22 @@
 # Todo-Selector
 
+## Versión 6.10 — limpiar las filas repetidas
+
+En **Actualizar carta → Revisar duplicados** se ve qué fila conservar y qué
+copias se pueden archivar. Se comparan los nombres remotos exactos en la misma
+tienda, no los sufijos visuales «(2)» o «(PedidosYa)». Se conserva una fila que
+ya reúna todos los vínculos del grupo, dando preferencia a la información leída
+y la categoría existente. No se apaga ni prende ningún producto.
+
+**Archivar copias** hace backup y deja un paso de **Deshacer: limpiar duplicados**.
+Los grupos con órdenes pendientes, pausas distintas, categorías manuales en
+conflicto o vínculos incompatibles se muestran con el motivo y no se archivan.
+Luego usar **Volver a leer los portales** para confirmar los estados; si las
+copias se contradecían, se muestra «sin leer» hasta tener evidencia nueva.
+
+También se corrigió la fusión que separaba de nuevo un nombre remoto idéntico
+y podía generar más copias. Ver [CAMBIOS-6.10.md](CAMBIOS-6.10.md).
+
 ## Versión 6.9 — correcciones de cola y confirmaciones
 
 Las nuevas órdenes individuales reemplazan los reintentos pendientes del mismo

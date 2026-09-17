@@ -3048,6 +3048,70 @@ async function refrescarCarta() {
   pintarCarta();
 }
 
+async function revisarDuplicados() {
+  const cont = document.getElementById('revision-duplicados');
+  cont.replaceChildren();
+  const mensaje = document.createElement('p');
+  mensaje.textContent = 'Buscando copias del mismo producto…';
+  cont.appendChild(mensaje);
+  try {
+    const r = await fetch('/api/catalogo/duplicados');
+    const datos = await r.json();
+    if (!r.ok) throw new Error(datos.detail || 'No pude revisar el catálogo.');
+    mensaje.textContent = datos.total
+      ? `${datos.total} copias confirmadas. Se conserva una fila por producto; no se apaga ni prende nada.`
+      : 'No hay copias exactas que se puedan limpiar de forma segura.';
+    function mostrarFila(fila, etiqueta, padre) {
+      const nombre = document.createElement('p');
+      nombre.textContent = `${etiqueta}: ${fila.nombre}`;
+      padre.appendChild(nombre);
+      const vinculos = document.createElement('small');
+      vinculos.textContent = Object.entries(fila.plataformas)
+        .map(([plat, remoto]) => `${NOMBRE_PLAT[plat] || plat}: ${remoto}`).join(' · ');
+      padre.appendChild(vinculos);
+    }
+    for (const grupo of datos.grupos) {
+      const bloque = document.createElement('section');
+      bloque.style.cssText = 'margin:12px 0;padding:12px;border:1px solid #334155;border-radius:8px';
+      mostrarFila(grupo.conservar, 'Conservar', bloque);
+      for (const fila of grupo.archivar) mostrarFila(fila, 'Archivar copia', bloque);
+      cont.appendChild(bloque);
+    }
+    if (datos.total) {
+      const boton = document.createElement('button');
+      boton.textContent = `Archivar ${datos.total} ${datos.total === 1 ? 'copia' : 'copias'}`;
+      boton.title = 'Guarda una copia de seguridad. Se puede deshacer desde Carta.';
+      boton.onclick = async () => {
+        boton.disabled = true;
+        try {
+          const r = await fetch('/api/catalogo/duplicados/limpiar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ firma: datos.firma }),
+          });
+          const resultado = await r.json();
+          if (!r.ok) throw new Error(resultado.detail || 'No pude limpiar los duplicados.');
+          await refrescarCarta();
+          document.getElementById('revision-duplicados').textContent =
+            `Se archivaron ${resultado.archivados} copias. Podés deshacerlo arriba. Usá «Volver a leer los portales» para confirmar los estados.`;
+          await cargar();
+        } catch (e) {
+          mensaje.textContent = e.message;
+          boton.disabled = false;
+        }
+      };
+      cont.appendChild(boton);
+    }
+    for (const grupo of datos.revisar) {
+      const bloque = document.createElement('section');
+      const titulo = document.createElement('p');
+      titulo.textContent = 'No se fusionan: ' + grupo.motivo;
+      bloque.appendChild(titulo);
+      for (const fila of grupo.filas) mostrarFila(fila, 'Revisar', bloque);
+      cont.appendChild(bloque);
+    }
+  } catch (e) { mensaje.textContent = e.message; }
+}
+
 async function leerCarta() {
   const panel = panelCarta();
   panel.innerHTML = `<h2>Carta</h2>
@@ -3077,12 +3141,15 @@ function pintarCarta() {
          «Emparejados solos», «Solo en …») ya lo dicen. La ayuda de «Vincular
          a mano» se queda: esa explica una acción que no es evidente. -->
     <button id="btn-leer-carta">${carta ? 'Volver a leer los portales' : 'Leer los portales'}</button>
+    <button id="btn-duplicados">Revisar duplicados</button>
     <button id="btn-deshacer"${catalogo && catalogo.deshacer ? '' : ' disabled'}>
       ${catalogo && catalogo.deshacer
         ? 'Deshacer: ' + catalogo.deshacer : 'Nada para deshacer'}
     </button>
+    <div id="revision-duplicados" aria-live="polite"></div>
     <div id="carta-cuerpo"></div>`;
   document.getElementById('btn-leer-carta').onclick = leerCarta;
+  document.getElementById('btn-duplicados').onclick = revisarDuplicados;
   document.getElementById('btn-deshacer').onclick = (e) =>
     accionCarta('/api/deshacer', {}, e.target);
 

@@ -417,7 +417,7 @@ class Worker:
             db.commit()
 
             producto = db.query(Producto).get(op.producto_id)
-            if producto is None:
+            if producto is None or not producto.activo:
                 # El producto se borro (lo absorbio un vincular). Sin esto el
                 # worker revienta al tomarla y la cola se traba.
                 op.estado = Operacion.ERROR
@@ -1401,7 +1401,7 @@ class Worker:
             revividos = []
             no_encontrados = []
 
-            for producto in db.query(Producto).all():
+            for producto in db.query(Producto).filter_by(activo=True).all():
                 remoto = remoto_de(producto, plataforma)
                 if remoto is None:
                     continue
