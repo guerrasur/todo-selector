@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import catalogo, cierre, config
+from . import catalogo, cierre, config, cola
 from .backup import hacer_backup, iniciar_backups_periodicos
 from .database import init_db, get_db, SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
@@ -236,7 +236,7 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
     activas = config.plataformas_activas()
 
     creadas, salteadas = [], []
-    for plat in data.plataformas:
+    for plat in dict.fromkeys(data.plataformas):
         # Plataforma apagada en Ajustes (o pantalla vieja, que se repinta
         # sola pero el click puede salir con los datos de antes): no hay
         # pestaña, asi que la operacion no tendria a donde ir.
@@ -275,15 +275,20 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
         # Sin esto, dos clicks seguidos encolan la misma operacion dos veces
         # y el segundo pasa por todo el circuito (refrescar, leer, clickear)
         # para terminar en "ya estaba apagado". Con "Apagar todo" serian 30.
-        repetida = (db.query(Operacion)
-                    .filter(Operacion.producto_id == data.producto_id,
-                            Operacion.plataforma == plat,
-                            Operacion.accion == data.accion,
-                            Operacion.estado.in_(Operacion.VIVAS))
-                    .first())
-        if repetida is not None:
+        anterior = cola.ultima(db, data.producto_id, plat)
+        if (anterior is not None and anterior.estado in Operacion.VIVAS
+                and anterior.accion == data.accion):
             salteadas.append({"plataforma": plat, "motivo": "ya estaba encolada"})
             continue
+
+        # La nueva intención reemplaza los reintentos pendientes. Un intento
+        # que ya está en el navegador termina; el worker no lo repetirá.
+        for vieja in (db.query(Operacion)
+                      .filter_by(producto_id=data.producto_id, plataforma=plat,
+                                 estado=Operacion.PENDIENTE).all()):
+            vieja.estado = Operacion.CANCELADA
+            vieja.finalizada_en = datetime.now()
+            vieja.detalle = "reemplazada por una nueva orden"
 
         db.add(Operacion(
             producto_id=data.producto_id,
@@ -294,6 +299,7 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
         # Marcamos estado transitorio para feedback inmediato en la UI
         est.estado = (EstadoItem.PRENDIENDO if data.accion == "prender"
                       else EstadoItem.APAGANDO)
+        db.flush()
         creadas.append(plat)
 
     db.commit()

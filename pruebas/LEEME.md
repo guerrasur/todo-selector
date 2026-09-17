@@ -309,3 +309,21 @@ un ejemplo fácil deja de cubrirlas:
 Los ids de sucursal de `catalogo_ejemplo.SUCURSAL` también son de mentira: lo
 único que importa es que existan, para que las pruebas no se queden en la
 pantalla de primer arranque.
+
+## Regresiones v6.9
+
+- `python pruebas/probar_regresiones_69.py`: 17 casos con SQLite temporal,
+  adaptadores falsos y llamadas reales al worker/API. Incluye reintentos heredados,
+  cambios de orden mientras se espera al navegador, cancelación, lecturas nulas,
+  confirmaciones positivas y rechazo seguro de duración no confirmada.
+- `node pruebas/probar_accion_ui.js`: 6 casos que ejecutan la función `accion`
+  extraída del HTML con respuestas controladas: error HTTP, red, destinos
+  omitidos, doble click, éxito y fallo de refresco. No necesita navegador.
+  Node es solo para desarrollo; no es una dependencia nueva de la app.
+
+Para esta entrega pasaron las seis suites sin navegador: catálogo, estados,
+verificación, cierre, Rappi sync y backup. También se comprobó por HTTP local
+el arranque simulado, versión 6.9, HTML, encolado, rechazo 404 y cancelación.
+No se validaron portales reales ni interfaz visual: Chromium no pudo descargarse
+en el entorno de revisión. No interpretar las pruebas aisladas como validación
+de los selectores actuales de Rappi/PedidosYa.

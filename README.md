@@ -1,5 +1,21 @@
 # Todo-Selector
 
+## Versión 6.9 — correcciones de cola y confirmaciones
+
+Las nuevas órdenes individuales reemplazan los reintentos pendientes del mismo
+producto y portal. Las verificaciones diferidas vuelven a comprobar la intención
+actual antes de actuar; una lectura sin resultado ya no renueva la confirmación.
+Cancelar un intento que luego falla deja el producto «sin leer», no «apagando…».
+Los botones individuales muestran los errores y los destinos omitidos.
+
+**Límite del apagado indefinido:** si el producto ya está apagado, los adaptadores
+actuales no pueden confirmar su duración. Ahora la app muestra un error que pide
+cambiarla desde el portal, sin reactivar el producto ni declarar éxito. El cambio
+automático de duración sobre un apagado existente sigue pendiente de validar con
+el DOM real; las descripciones históricas de más abajo no garantizan esa operación.
+
+Detalle, pruebas y límites: [CAMBIOS-6.9.md](CAMBIOS-6.9.md).
+
 App local para apagar/prender productos en **PedidosYa** y **Rappi** desde una
 sola pantalla, sin entrar a cada portal.
 

@@ -47,7 +47,7 @@ import logging
 import time
 from typing import Optional
 
-from .base import PlataformaBase, ResultadoEstado, ResultadoTienda, plano
+from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, ResultadoTienda, plano
 
 log = logging.getLogger("rappi")
 
@@ -759,6 +759,13 @@ class Rappi(PlataformaBase):
         if estado is None:
             return False
         if not estado.disponible:
+            if not por_hoy:
+                # El booleano no distingue por hoy de indefinido. No reabrir
+                # ventas para cambiarlo ni afirmar una duración que no vimos.
+                raise DuracionNoConfirmada(
+                    "El producto ya está apagado, pero no pude confirmar que "
+                    "sea indefinido. Cambiá la duración desde el portal; "
+                    "la app no lo volvió a prender.")
             log.info("'%s' ya estaba apagado, no toco nada", nombre_remoto)
             return True
 

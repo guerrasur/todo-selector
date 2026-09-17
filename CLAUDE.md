@@ -1,5 +1,26 @@
 # Todo-Selector — contexto para Claude Code
 
+## Actualización v6.9 (2026-09-17)
+
+Leer `CAMBIOS-6.9.md` antes de modificar cola o verificaciones. `app/cola.py`
+centraliza la identidad de la última intención y el estado transitorio. No
+recuperar la deduplicación contra CUALQUIER operación viva: apagar → prender →
+apagar son tres intenciones, no un doble click. No reintentar una operación
+anterior a otra del mismo producto/portal, aunque la posterior esté cancelada.
+
+Las reverificaciones capturan el id de operación y el tipo de apagado, y los
+revalidan después del navegador con una sesión ORM nueva. `None` nunca confirma
+un apagado ni actualiza `verificado_en`. No quitar esas guardas.
+
+`DuracionNoConfirmada` evita afirmar «indefinido» cuando el portal solo informó
+«apagado». Es terminal y requiere cambiar duración en el portal. No resolverlo
+prendiendo automáticamente el producto: un fallo posterior lo dejaría a la venta.
+La conversión automática sigue pendiente de evidencia real de la UI; los cuatro
+métodos del contrato permanecen compatibles y no se inventaron selectores.
+
+Regresiones nuevas: `python pruebas/probar_regresiones_69.py` (17 casos) y
+`node pruebas/probar_accion_ui.js` (6 casos; Node solo para esta prueba de desarrollo).
+
 App local que apaga/prende productos en PedidosYa y Rappi desde una sola
 pantalla. Reemplaza el trabajo manual de entrar a cada portal.
 

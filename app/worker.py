@@ -15,7 +15,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 from sqlalchemy import or_
 
-from . import config
+from . import config, cola
 from .carta import emparejar_n, resumen
 from .database import SessionLocal, PERFIL_CHROME
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion
@@ -124,6 +124,7 @@ MSG_NO_SE_PUDO_MIRAR = ("no se pudo leer la pestaña para saber que paso: "
 # arregla reintentando: hay que corregir el alias en la pantalla Carta. Y
 # sobre todo, no hay que clickear ninguno de los dos (ver NombreAmbiguo).
 AMBIGUO = "ambiguo"
+DURACION_NO_CONFIRMADA = "duracion_no_confirmada"
 
 # Lo que antes eran constantes hoy sale de Ajustes (app/config.py). Los
 # valores por defecto son estos mismos, asi que sin tocar nada la app se
@@ -398,8 +399,17 @@ class Worker:
             if en_espera:
                 consulta = consulta.filter(~Operacion.plataforma.in_(en_espera))
 
-            op = consulta.order_by(Operacion.creada_en).first()
+            op = consulta.order_by(Operacion.creada_en, Operacion.id).first()
             if not op:
+                return
+
+            if cola.ultima_id(db, op.producto_id, op.plataforma) != op.id:
+                op.estado = Operacion.CANCELADA
+                op.finalizada_en = datetime.now()
+                op.detalle = "reemplazada por una orden posterior"
+                db.flush()
+                cola.reflejar_pendiente(db, op.producto_id, op.plataforma)
+                db.commit()
                 return
 
             op.estado = Operacion.EN_CURSO
@@ -435,7 +445,18 @@ class Worker:
             # (dejaria el portal con un dialogo abierto a medio camino), pero
             # no hay intento 2 ni 3: es lo acordado para el boton de cancelar.
             db.refresh(op)
-            if op.estado == Operacion.CANCELADA and not exito:
+            cancelada = op.estado == Operacion.CANCELADA
+            posterior = cola.ultima_id(db, op.producto_id, op.plataforma) != op.id
+            if (cancelada or posterior) and not exito:
+                op.estado = Operacion.CANCELADA
+                est = (db.query(EstadoItem)
+                       .filter_by(producto_id=op.producto_id,
+                                  plataforma=op.plataforma).first())
+                if est is not None:
+                    est.estado = EstadoItem.DESCONOCIDO
+                    est.detalle = "intento finalizado sin confirmar el resultado"
+                db.flush()
+                cola.reflejar_pendiente(db, op.producto_id, op.plataforma)
                 log.info("op#%s la cancelaste mientras corria: no la reintento",
                          op.id)
                 op.detalle = detalle or "cancelada mientras corria"
@@ -482,10 +503,12 @@ class Worker:
             # sin gastar los 3 intentos en el mismo error. Lo mismo con un
             # nombre que apunta a dos productos: eso se arregla en la
             # pantalla Carta, no reintentando.
-            if motivo in (NO_ACTIVA, AMBIGUO):
+            if motivo in (NO_ACTIVA, AMBIGUO, DURACION_NO_CONFIRMADA):
                 op.estado = Operacion.ERROR
                 op.detalle = detalle
                 op.finalizada_en = datetime.now()
+                if motivo == DURACION_NO_CONFIRMADA:
+                    op.reintentada = True  # requiere cambiar duración en el portal
                 self._marcar_fallo(db, op.producto_id, op.plataforma, detalle)
                 # "termina aca" y no "cancelada": cancelada es lo que saca el
                 # usuario desde la pantalla, y son cosas distintas.
@@ -509,10 +532,17 @@ class Worker:
                 # Verificacion rapida: a los 2 min confirmamos que siga asi.
                 # PedidosYa a veces revive el item unos minutos despues.
                 demora = config.entero("verificacion_rapida")
-                if op.accion != "prender" and demora > 0:
+                if cancelada and op.accion != "prender":
+                    est = (db.query(EstadoItem)
+                           .filter_by(producto_id=op.producto_id,
+                                      plataforma=op.plataforma).first())
+                    if est is not None:
+                        est.estado = EstadoItem.APAGADO_AJENO
+                if (not cancelada and not posterior
+                        and op.accion != "prender" and demora > 0):
                     asyncio.create_task(
                         self._verificar_luego(op.producto_id, op.plataforma,
-                                              op.accion, demora)
+                                              op.accion, demora, op.id)
                     )
             elif op.intentos < max_intentos:
                 op.estado = Operacion.PENDIENTE   # reintenta despues
@@ -527,6 +557,8 @@ class Worker:
                 op.finalizada_en = datetime.now()
                 self._marcar_fallo(db, op.producto_id, op.plataforma, detalle)
 
+            db.flush()
+            cola.reflejar_pendiente(db, op.producto_id, op.plataforma)
             db.commit()
         finally:
             db.close()
@@ -546,7 +578,7 @@ class Worker:
             return await self._ejecutar_sin_turno(plat, plataforma, accion, nombre_remoto)
 
     async def _ejecutar_sin_turno(self, plat, plataforma, accion, nombre_remoto):
-        from plataformas.base import NombreAmbiguo
+        from plataformas.base import NombreAmbiguo, DuracionNoConfirmada
 
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
@@ -584,6 +616,8 @@ class Worker:
                     return False, "se cayo la sesion durante la operacion", SIN_SESION
 
             return ok, "" if ok else "no se pudo confirmar el cambio", ""
+        except DuracionNoConfirmada as e:
+            return False, str(e), DURACION_NO_CONFIRMADA
         except NombreAmbiguo as e:
             # No es un fallo del portal: es el catalogo apuntando a dos
             # productos. Reintentar clickearia uno al azar tres veces.
@@ -592,100 +626,77 @@ class Worker:
             log.exception("Excepcion en %s.%s('%s')", plataforma, accion, nombre_remoto)
             return False, _resumen(e), ""
 
-    async def _verificar_luego(self, producto_id: int, plataforma: str,
-                               accion: str, demora: int):
-        """Espera y confirma que el item siga apagado. Si revivio, reencola.
+    def _apagado_vigente(self, db, producto_id, plataforma, estado, operacion_id):
+        """Revalidar después de cada espera: la intención puede haber cambiado."""
+        producto = db.get(Producto, producto_id)
+        est = (db.query(EstadoItem)
+               .filter_by(producto_id=producto_id, plataforma=plataforma).first())
+        if (producto is None or not producto.activo or producto.pausado
+                or config.tienda_pausada(plataforma)
+                or not config.activo("sostener_apagados")
+                or est is None or est.estado != estado
+                or estado not in EstadoItem.APAGADOS_PROPIOS
+                or cola.ultima_id(db, producto_id, plataforma) != operacion_id):
+            return None
+        return est
 
-        OJO: la `accion` con la que se lanza esto queda congelada hace 2
-        minutos. Entre medio el usuario pudo haber cambiado de idea, y
-        sostener una intencion vencida es apagarle algo que acaba de
-        prender a mano (ver la guarda de abajo).
-        """
+    def _anotar_reverificacion(self, producto_id, plataforma, estado,
+                               operacion_id, nombre_remoto, real, detalle):
+        # Sesión NUEVA: no reutilizar objetos ORM leídos antes de esperar al
+        # navegador. Tampoco confirmar una lectura que no encontró el producto.
+        if real is None:
+            return
+        with SessionLocal() as db:
+            est = self._apagado_vigente(db, producto_id, plataforma, estado,
+                                       operacion_id)
+            producto = db.get(Producto, producto_id)
+            if (est is None or
+                    self._nombre_remoto(db, producto, plataforma) != nombre_remoto):
+                return
+            if real.disponible:
+                db.add(Operacion(
+                    producto_id=producto_id, plataforma=plataforma,
+                    accion=("apagar_hoy" if estado == EstadoItem.APAGADO_HOY
+                            else "apagar_indef"), detalle=detalle))
+                est.estado = EstadoItem.APAGANDO
+            else:
+                est.verificado_en = datetime.now()
+            db.commit()
+
+    async def _verificar_luego(self, producto_id: int, plataforma: str,
+                               accion: str, demora: int,
+                               operacion_id: int | None = None):
         await asyncio.sleep(demora)
         if not self.corriendo or self.modo_simulado:
             return
-
-        db = SessionLocal()
+        estado = (EstadoItem.APAGADO_HOY if accion == "apagar_hoy"
+                  else EstadoItem.APAGADO_INDEF)
+        with SessionLocal() as db:
+            if operacion_id is None:
+                operacion_id = cola.ultima_id(db, producto_id, plataforma)
+            if self._apagado_vigente(db, producto_id, plataforma, estado,
+                                    operacion_id) is None:
+                return
+            nombre_remoto = self._nombre_remoto(db, db.get(Producto, producto_id),
+                                                plataforma)
+        plat = self.plataformas.get(plataforma)
+        if plat is None:
+            return
         try:
-            producto = db.query(Producto).get(producto_id)
-            if producto is None:
-                return
-
-            # Si lo pausaron entre el apagado y este chequeo, no lo sostenemos.
-            if producto.pausado:
-                return
-
-            est = (db.query(EstadoItem)
-                   .filter_by(producto_id=producto_id, plataforma=plataforma)
-                   .first())
-
-            # EL BUG DEL 2026-08-03: el usuario apago 'Agua con gas', lo
-            # prendio de nuevo un minuto y medio despues, y a los 120s esta
-            # verificacion lo encontro "disponible" y lo volvio a apagar.
-            # Estaba disponible porque el usuario lo prendio.
-            #
-            # Es la misma regla que ya protege a la ronda de 15 min en
-            # _guardar_estados, y el motivo esta escrito en models.py
-            # (APAGADO_AJENO): la reverificacion sostiene lo que apago la
-            # app, y nada mas. Cubre los tres casos de una: el usuario lo
-            # prendio (PRENDIDO), hay una operacion nueva en vuelo
-            # (PRENDIENDO/APAGANDO) y el apagado paso a ser ajeno.
-            #
-            # Va ANTES del bloqueo de la pestaña a proposito: si la
-            # intencion cambio no hay nada que ir a mirar, y son ~20s de
-            # navegador que no se gastan.
-            if est is None or est.estado not in EstadoItem.APAGADOS_PROPIOS:
-                log.info("%s en %s ya no esta apagado por la app (%s): no lo "
-                         "sostengo", producto.nombre, plataforma,
-                         est.estado if est else "sin estado")
-                return
-
-            plat = self.plataformas.get(plataforma)
-            if plat is None:
-                return
-
-            nombre_remoto = self._nombre_remoto(db, producto, plataforma)
-            try:
-                async with self.bloqueo(plataforma):
-                    listo, _ = await self._preparar(plataforma)
-                    if not listo:
-                        return
+            async with self.bloqueo(plataforma):
+                listo, _ = await self._preparar(plataforma)
+                if not listo:
+                    return
+                real = await plat.leer_estado(nombre_remoto)
+                if real is not None and real.disponible:
+                    await plat.page.wait_for_timeout(2500)
+                    # None en la segunda lectura tampoco confirma la primera.
                     real = await plat.leer_estado(nombre_remoto)
-
-                    # Un falso "revivio" no es gratis: reencola un apagado que
-                    # va a clickear el toggle, y si el producto en realidad
-                    # estaba apagado, lo PRENDE. Antes de acusar, releemos:
-                    # la primera lectura puede caer sobre la pagina a medio
-                    # renderizar despues del reload.
-                    if real is not None and real.disponible:
-                        await plat.page.wait_for_timeout(2500)
-                        segunda = await plat.leer_estado(nombre_remoto)
-                        if segunda is not None and not segunda.disponible:
-                            log.info("%s: la primera lectura dijo disponible y la "
-                                     "segunda no. Me quedo con la segunda.",
-                                     producto.nombre)
-                            real = segunda
-            except Exception as e:
-                log.error("Error verificando %s: %s", producto.nombre, e)
-                return
-
-            est.verificado_en = datetime.now()
-
-            if real is not None and real.disponible:
-                log.warning("%s revivio en %s a los %ss, reencolando",
-                            producto.nombre, plataforma, demora)
-                db.add(Operacion(
-                    producto_id=producto_id,
-                    plataforma=plataforma,
-                    accion=accion,
-                    detalle=f"reintento: revivio a los {demora}s",
-                ))
-            else:
-                log.info("%s confirmado apagado en %s", producto.nombre, plataforma)
-
-            db.commit()
-        finally:
-            db.close()
+                self._anotar_reverificacion(
+                    producto_id, plataforma, estado, operacion_id,
+                    nombre_remoto, real, f"reintento: revivio a los {demora}s")
+        except Exception as e:
+            log.error("Error verificando %s: %s", nombre_remoto, e)
 
     # ---------- Preparacion bajo demanda ----------
 
@@ -1432,7 +1443,6 @@ class Worker:
                     continue
 
                 disponible = leidos[remoto]
-                est.verificado_en = datetime.now()
 
                 if disponible:
                     # Un producto en pausa se lee igual (la lectura trae la
@@ -1448,6 +1458,7 @@ class Worker:
                             "plataforma": plataforma,
                             "nombre_remoto": remoto,
                             "estado": est.estado,
+                            "operacion_id": cola.ultima_id(db, producto.id, plataforma),
                         })
                         continue
                     est.estado = EstadoItem.PRENDIDO
@@ -1460,6 +1471,7 @@ class Worker:
                         est.estado = EstadoItem.APAGADO_AJENO
                         est.detalle = ""
                     apagados += 1
+                est.verificado_en = datetime.now()
 
             db.commit()
             return {"leidos": len(leidos), "prendidos": prendidos,
@@ -1794,60 +1806,28 @@ class Worker:
         return ""
 
     async def _reencolar_si_revivio(self, caso: dict):
-        """Confirma con una segunda lectura antes de acusar que revivio.
-
-        Un falso "revivio" no es gratis: reencola un apagado. Hoy apagar()
-        relee antes de clickear, asi que en el peor caso no hace nada, pero
-        la lectura de confirmacion es barata (es un solo producto) y evita
-        llenar el historial de operaciones que no hacian falta.
-        """
         plataforma = caso["plataforma"]
         plat = self.plataformas.get(plataforma)
         if plat is None:
             return
-
+        with SessionLocal() as db:
+            operacion_id = caso.get("operacion_id",
+                                    cola.ultima_id(db, caso["producto_id"], plataforma))
+            if self._apagado_vigente(db, caso["producto_id"], plataforma,
+                                    caso["estado"], operacion_id) is None:
+                return
         try:
             async with self.bloqueo(plataforma):
                 listo, _ = await self._preparar(plataforma)
                 if not listo:
                     return
                 real = await plat.leer_estado(caso["nombre_remoto"])
+                self._anotar_reverificacion(
+                    caso["producto_id"], plataforma, caso["estado"], operacion_id,
+                    caso["nombre_remoto"], real, "reintento automatico: se habia revivido")
         except Exception as e:
             log.error("Error confirmando si '%s' revivio en %s: %s",
                       caso["producto"], plataforma, e)
-            return
-
-        db = SessionLocal()
-        try:
-            est = (db.query(EstadoItem)
-                   .filter_by(producto_id=caso["producto_id"],
-                              plataforma=plataforma)
-                   .first())
-            if est is None:
-                return
-
-            est.verificado_en = datetime.now()
-
-            if real is None or not real.disponible:
-                log.info("%s: la lectura de la carta lo dio prendido y la "
-                         "confirmacion no. Me quedo con la confirmacion.",
-                         caso["producto"])
-                db.commit()
-                return
-
-            log.warning("%s revivio en %s, reencolando", caso["producto"],
-                        plataforma)
-            est.estado = EstadoItem.PRENDIDO
-            db.add(Operacion(
-                producto_id=caso["producto_id"],
-                plataforma=plataforma,
-                accion=("apagar_hoy" if caso["estado"] == EstadoItem.APAGADO_HOY
-                        else "apagar_indef"),
-                detalle="reintento automatico: se habia revivido",
-            ))
-            db.commit()
-        finally:
-            db.close()
 
     # ---------- Helpers ----------
 

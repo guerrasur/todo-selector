@@ -45,6 +45,10 @@ class NombreAmbiguo(Exception):
     """
 
 
+class DuracionNoConfirmada(Exception):
+    """Apagado conocido, pero sin evidencia de la duración solicitada."""
+
+
 @dataclass
 class ResultadoEstado:
     """Lo que devuelve leer_estado()."""

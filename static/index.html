@@ -2147,12 +2147,32 @@ async function accion(producto_id, accion, plataformas) {
   // botón va a los tres portales, así que soltarte la selección sola
   // convertiría el "Indefinido" que apretás después en un apagado en
   // portales que no habías pedido. Se suelta clickeando el chip de nuevo.
-  await fetch('/api/accion', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ producto_id, accion, plataformas }),
-  });
-  cargar();
+  try {
+    const r = await fetch('/api/accion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ producto_id, accion, plataformas }),
+    });
+    const resultado = await r.json();
+    if (!r.ok) {
+      const detalle = typeof resultado.detail === 'string'
+        ? resultado.detail : 'La solicitud fue rechazada.';
+      alert('No se pudo enviar la acción: ' + detalle);
+      return;
+    }
+    const omitidas = (resultado.salteadas || [])
+      .filter(p => p.motivo !== 'ya estaba encolada');
+    if (omitidas.length) {
+      alert('No se envió la acción en:\n' + omitidas
+        .map(p => `${NOMBRE_PLAT[p.plataforma] || p.plataforma}: ${p.motivo}`)
+        .join('\n'));
+    }
+  } catch (e) {
+    alert('No pude confirmar si se recibió la acción. Revisá la cola antes de repetirla.');
+    return;
+  }
+  try { await cargar(); }
+  catch (e) { alert('La acción fue recibida, pero no pude refrescar la pantalla.'); }
 }
 
 // ---------------------------------------------------------------- Cierre
