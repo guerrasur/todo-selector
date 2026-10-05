@@ -1698,7 +1698,9 @@ function titulo(texto, clase, aclaracion) {
 
 function pintarProductos(productos) {
   const cont = document.getElementById('lista');
-  cont.className = '';
+  // Conservar solo-dashboard: navegación decide la visibilidad incluso
+  // cuando este repintado corre con Carta o Precios abiertos.
+  cont.classList.remove('vacio');
   cont.innerHTML = '';
 
   const total = productos.length;
@@ -1715,7 +1717,7 @@ function pintarProductos(productos) {
     `${prendidos} prendido${prendidos === 1 ? '' : 's'}`;
 
   if (filtro && !productos.length) {
-    cont.className = 'vacio';
+    cont.classList.add('vacio');
     cont.textContent = 'No hay ningún producto que coincida.';
     return;
   }
@@ -1734,7 +1736,7 @@ function pintarProductos(productos) {
   if (vista === 'solo') pausados = pausados.filter(p => grupoDe(p) !== 'apagado');
 
   if (!pintados && !pausados.length) {
-    cont.className = 'vacio';
+    cont.classList.add('vacio');
     cont.textContent = filtro
       ? 'Ninguno de los que coinciden está prendido.'
       : 'No hay nada prendido: está toda la carta apagada.';

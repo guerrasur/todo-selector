@@ -10,3 +10,4 @@
 #panel-precios .estado-confirmado { color:var(--ok, #86efac); }
 #panel-precios .estado-sin_confirmar { color:var(--error, #f87171); }
 #panel-precios td input:not([type=checkbox]) { width:120px; }
+#panel-precios td input.precio-modificado { border-color:var(--acento); box-shadow:0 0 0 1px var(--acento); }

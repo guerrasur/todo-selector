@@ -1,5 +1,17 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.11.2 — edición individual y navegación (2026-10-05)
+
+Precios abre en modo individual, con valores precargados y borradores externos
+al repintado. `individualesPrecios()` solo envía cambios de las tiendas elegidas;
+volver al precio leído los excluye. Revisar no escribe: confirmar usa el plan
+inmutable del servidor. Cambiar un campo invalida la confirmación anterior.
+
+`pintarProductos` debe conservar `solo-dashboard` en `#lista`: reemplazar todo
+su className impide esconderla o volver a mostrarla después de navegar.
+La prueba `probar_precios_ui.py` cubre navegación, recarga en /precios, cajas,
+reversión de un cambio y ejecución únicamente después de confirmar.
+
 ## Corrección v6.11.1 — tarjetas de precios (2026-10-05)
 
 Rappi separa encabezado (foto/nombre/SKU) y footer (Precio/toggle/lápiz).

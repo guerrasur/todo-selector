@@ -1,6 +1,6 @@
 /* Estado fuera del repintado: ni la lectura periódica ni navegar borran ediciones. */
 const preciosUI = { tiendas: [], elegidas: new Set(), lectura: null,
-  seleccion: new Set(), individuales: {}, modo: 'pesos', alcance: 'toda',
+  seleccion: new Set(), individuales: {}, modo: 'individual', alcance: 'toda',
   cantidad: '', redondeo: 'centavos', buscar: '', plan: null, lote: null,
   ocupado: false, error: '', historial: [], temporizador: null, listo: false };
 
@@ -60,7 +60,8 @@ function pintarPrecios() {
     <div id="precios-error" role="alert" class="error-precios"></div>
     <div id="precios-lectura" class="resumen-precios"></div>
     <div id="precios-tabla" class="tabla-precios"></div>
-    <button id="precios-previo" ${!s.lectura || s.ocupado || corriendo ? 'disabled' : ''}>Ver cambios</button>
+    <span id="precios-modificados" class="resumen-precios" aria-live="polite"></span>
+    <button id="precios-previo" ${!s.lectura || s.ocupado || corriendo ? 'disabled' : ''}>Revisar cambios</button>
     <div id="precios-plan" class="tabla-precios"></div>
     <div id="precios-lote" class="tabla-precios" aria-live="polite"></div>
     <details><summary>Resultados anteriores</summary><div id="precios-historial"></div></details>`;
@@ -94,6 +95,7 @@ function pintarPrecios() {
   }
   const individual = s.modo === 'individual';
   for (const id of ['alcance', 'cantidad', 'redondeo']) q('precios-' + id + '-label').style.display = individual ? 'none' : '';
+  for (const id of ['seleccionar', 'limpiar']) q('precios-' + id).hidden = individual;
   if (s.lectura) {
     q('precios-lectura').textContent = `${s.lectura.filas.length} productos · ${s.lectura.leida_en}${s.lectura.simulado ? ' · Simulación' : ''}`;
     for (const [tienda, error] of Object.entries(s.lectura.errores)) {
@@ -109,7 +111,7 @@ function pintarPrecios() {
     s.plan = await apiPrecios('previo', { lectura: s.lectura.lectura, tiendas: [...s.elegidas],
       modo: s.modo, alcance: s.alcance, cantidad: s.cantidad || '0', redondeo: s.redondeo,
       seleccionados: [...s.seleccion].filter(k => visibles.has(k)),
-      individuales: Object.fromEntries(Object.entries(s.individuales).filter(([k,v]) => visibles.has(k) && v.trim())) });
+      individuales: individualesPrecios() });
   });
   pintarFilasPrecios(); pintarPlanPrecios(); pintarLotePrecios();
   for (const lote of s.historial) {
@@ -125,6 +127,23 @@ function pintarPrecios() {
 function filasPreciosVisibles() {
   return (preciosUI.lectura?.filas || []).filter(f => preciosUI.elegidas.has(f.tienda)
     && plano(f.nombre).includes(plano(preciosUI.buscar)));
+}
+
+function cambioIndividualPrecios(f, valor) {
+  return !!valor?.trim() && Number(valor.trim().replace(',', '.')) !== Number(f.precio);
+}
+
+function individualesPrecios() {
+  const s = preciosUI;
+  return Object.fromEntries((s.lectura?.filas || [])
+    .filter(f => s.elegidas.has(f.tienda) && cambioIndividualPrecios(f, s.individuales[f.clave]))
+    .map(f => [f.clave, s.individuales[f.clave]]));
+}
+
+function pintarModificadosPrecios() {
+  const cont = document.getElementById('precios-modificados'); if (!cont) return;
+  const cantidad = Object.keys(individualesPrecios()).length;
+  cont.textContent = preciosUI.modo === 'individual' ? `${cantidad} precio${cantidad === 1 ? '' : 's'} modificado${cantidad === 1 ? '' : 's'} · ` : '';
 }
 
 function tablaPrecios(contenedor, cabeceras) {
@@ -143,23 +162,31 @@ function celdaPrecios(fila, contenido) {
 function pintarFilasPrecios() {
   const cont = document.getElementById('precios-tabla'); if (!cont) return;
   const s = preciosUI, individual = s.modo === 'individual', filas = filasPreciosVisibles();
-  const cuerpo = tablaPrecios(cont, [individual ? 'Nuevo precio' : 'Elegir', 'Producto', 'Tienda', 'Precio actual']);
+  const cuerpo = tablaPrecios(cont, individual ? ['Producto', 'Tienda', 'Precio actual', 'Nuevo precio'] : ['Elegir', 'Producto', 'Tienda', 'Precio actual']);
   for (const f of filas) {
     const tr = document.createElement('tr'), input = document.createElement('input'); input.dataset.clave = f.clave;
     input.disabled = !!(f.error || s.ocupado || (s.lote && s.lote.estado === 'ejecutando'));
     if (individual) {
-      input.type = 'text'; input.inputMode = 'decimal'; input.value = s.individuales[f.clave] || '';
+      input.type = 'text'; input.inputMode = 'decimal'; input.value = s.individuales[f.clave] ?? f.precio ?? '';
+      input.classList.toggle('precio-modificado', cambioIndividualPrecios(f, input.value));
       input.placeholder = f.precio || ''; input.setAttribute('aria-label', 'Nuevo precio de ' + f.nombre + ' en ' + (NOMBRE_PLAT[f.tienda] || f.tienda));
-      input.oninput = () => { s.individuales[f.clave] = input.value; invalidarPlanPrecios(); document.getElementById('precios-plan').replaceChildren(); };
+      input.oninput = () => {
+        s.individuales[f.clave] = input.value;
+        input.classList.toggle('precio-modificado', cambioIndividualPrecios(f, input.value));
+        invalidarPlanPrecios(); document.getElementById('precios-plan').replaceChildren(); pintarModificadosPrecios();
+      };
     } else {
       input.type = 'checkbox'; input.checked = s.seleccion.has(f.clave);
       input.setAttribute('aria-label', 'Elegir ' + f.nombre + ' en ' + (NOMBRE_PLAT[f.tienda] || f.tienda));
       input.onchange = () => { input.checked ? s.seleccion.add(f.clave) : s.seleccion.delete(f.clave); invalidarPlanPrecios(); document.getElementById('precios-plan').replaceChildren(); };
     }
-    celdaPrecios(tr, input); celdaPrecios(tr, f.nombre || 'Sin nombre'); celdaPrecios(tr, NOMBRE_PLAT[f.tienda] || f.tienda);
+    if (!individual) celdaPrecios(tr, input);
+    celdaPrecios(tr, f.nombre || 'Sin nombre'); celdaPrecios(tr, NOMBRE_PLAT[f.tienda] || f.tienda);
     const precio = celdaPrecios(tr, f.error || precioDinero(f.precio)); if (f.error) precio.className = 'error-precios';
+    if (individual) celdaPrecios(tr, input);
     cuerpo.append(tr);
   }
+  pintarModificadosPrecios();
 }
 
 function pintarPlanPrecios() {
@@ -170,7 +197,7 @@ function pintarPlanPrecios() {
   for (const f of s.plan.filas) {
     const tr = document.createElement('tr'); [f.nombre, NOMBRE_PLAT[f.tienda] || f.tienda, precioDinero(f.antes), precioDinero(f.despues)].forEach(c => celdaPrecios(tr, c)); cuerpo.append(tr);
   }
-  const ejecutar = document.createElement('button'); ejecutar.textContent = s.plan.simulado ? 'Ejecutar simulación' : 'Ejecutar cambios';
+  const ejecutar = document.createElement('button'); ejecutar.textContent = s.plan.simulado ? 'Confirmar y ejecutar simulación' : 'Confirmar y ejecutar';
   ejecutar.id = 'precios-ejecutar'; ejecutar.disabled = !!(s.ocupado || s.lote?.estado === 'ejecutando');
   ejecutar.onclick = () => tareaPrecios(async () => { s.lote = await apiPrecios('ejecutar', { plan: s.plan.plan }); s.plan = null; vigilarPrecios(); });
   cont.append(titulo, tablas, ejecutar);

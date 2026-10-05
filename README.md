@@ -1,5 +1,16 @@
 # Todo-Selector
 
+## Versión 6.11.2 — cajas de precios y regreso a la carta
+
+**Precios (beta)** abre en **Editar uno por uno**. Cada producto/tienda tiene
+una caja con su precio cargado. Se pueden editar varios, **Revisar cambios**
+y **Confirmar y ejecutar**; solo se incluyen los precios modificados de las
+tiendas elegidas. Los borradores se conservan al buscar o cambiar de pantalla.
+Los aumentos en pesos y porcentaje siguen disponibles en **Cambio**.
+
+Corrige también la lista de productos que quedaba oculta al volver de Carta
+o Precios: el repintado conserva la marca de visibilidad del dashboard.
+
 ## Versión 6.11.1 — corregir lectura de precios
 
 Corrige las filas que aparecían con **Precio:** como nombre y el mensaje de
