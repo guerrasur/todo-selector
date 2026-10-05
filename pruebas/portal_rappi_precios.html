@@ -1,0 +1,58 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><title>Réplica de precios</title>
+<style>body{font:16px sans-serif}article{border:1px solid #ccc;padding:12px;margin:10px}input,button{padding:10px}button svg{width:20px;height:20px}</style>
+<main id="app"></main><script>
+const params = new URLSearchParams(location.search), tienda=params.get('storeId') || 'prueba';
+const key='precios-'+tienda, inicial=[{id:'1',nombre:'Producto de prueba',precio:17500,activo:true},
+  {id:'2',nombre:'Otro producto',precio:12000,activo:false},
+  {id:'3',nombre:'Producto sin foto',precio:8000,activo:true}];
+let carta=JSON.parse(localStorage.getItem(key) || JSON.stringify(inicial));
+if(params.has('duplicado')) carta.push({...carta[0],id:'4'});
+sessionStorage.setItem('recargas',Number(sessionStorage.getItem('recargas') || 0)+1);
+function menu(){
+  const app=document.querySelector('#app'); app.innerHTML='<h2>Tu Menú</h2>';
+  const header=document.createElement('button'); header.dataset.testid='collapsible-panel-header';
+  header.textContent='Categoría de prueba'; header.setAttribute('aria-expanded',params.has('plegada')?'false':'true');
+  const grupo=document.createElement('section');
+  header.onclick=()=>{header.setAttribute('aria-expanded','true'); grupo.hidden=false};
+  app.append(header,grupo); grupo.hidden=params.has('plegada');
+  carta.forEach(p=>{
+    const card=document.createElement('article');
+    if(p.id!=='3'){const img=document.createElement('img'); img.dataset.testid='catalog-item-image';img.alt=p.nombre;card.append(img);}
+    const nombre=document.createElement('div');nombre.textContent=p.nombre;card.append(nombre);
+    if(params.has('rotulo')){const nombre2=nombre.cloneNode(true);card.append(nombre2)}
+    const precio=document.createElement('div');precio.textContent='Precio:\n$ '+p.precio.toLocaleString('es-AR',{minimumFractionDigits:2});card.append(precio);
+    const toggle=document.createElement('label');toggle.dataset.testid='menu-category-1-product-'+p.id+'-availability-switch-control';
+    const input=document.createElement('input');input.type='checkbox';input.checked=p.activo;
+    toggle.append(input);card.append(toggle);
+    input.onchange=()=>{sessionStorage.setItem('toggles','tocado')};
+    const editar=document.createElement('button');
+    if(!params.has('sinlabel'))editar.setAttribute('aria-label','Editar producto');
+    editar.innerHTML='<svg viewBox="0 0 24 24"><path d="M3 17L17 3L21 7L7 21Z"/></svg>';editar.onclick=()=>editor(p);card.append(editar);
+    if(params.has('doslapices')){const otro=editar.cloneNode(true);otro.onclick=()=>editor(p);card.append(otro)}
+    grupo.append(card);
+  });
+}
+function editor(p){
+  const app=document.querySelector('#app');app.innerHTML='<h2>Editar producto</h2>';
+  const campo=(nombre,valor)=>{
+    const div=document.createElement('div'), label=document.createElement(params.has('flotante')?'span':'label'), input=document.createElement('input');
+    label.textContent=nombre+'*';input.value=valor;input.id='campo-'+nombre;
+    if(!params.has('flotante'))label.htmlFor=input.id;
+    div.append(label,input);app.append(div);return input;
+  };
+  campo('Nombre',params.has('otronombre')?'Producto distinto':p.nombre);
+  campo('SKU','SKU-'+p.id);campo('Categoría','Categoría de prueba');
+  const precio=campo('Precio','$ '+p.precio);campo('Descripción','Texto que debe conservarse');
+  const guardar=document.createElement('button');guardar.textContent='Guardar';
+  guardar.onclick=()=>{
+    sessionStorage.setItem('guardados',Number(sessionStorage.getItem('guardados') || 0)+1);
+    setTimeout(()=>{
+      if(!params.has('noguarda')){p.precio=Number(precio.value.replace('$',''));localStorage.setItem(key,JSON.stringify(carta))}
+      menu();
+    },params.has('lento')?800:20);
+  };
+  const borrar=document.createElement('button');borrar.textContent='Eliminar producto';borrar.onclick=()=>sessionStorage.setItem('borrados','tocado');
+  app.append(guardar,borrar);
+}
+menu();
+</script></html>

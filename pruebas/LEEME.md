@@ -1,5 +1,13 @@
 # Pruebas
 
+Precios beta (v6.11):
+
+```
+py pruebas/probar_precios.py        planes y lotes, sin navegador
+py pruebas/probar_rappi_precios.py  editor Rappi contra réplica local
+py pruebas/probar_precios_ui.py     pantalla/API completas en simulación
+```
+
 Todas corren **sin tocar los portales** y sin tocar tu base: usan una carpeta
 temporal y una réplica local del portal. Se pueden correr en cualquier máquina.
 

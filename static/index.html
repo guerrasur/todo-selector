@@ -597,6 +597,7 @@
   <div id="panel-cola" class="carta solo-dashboard" style="display:none"></div>
   <div id="panel-ajustes" class="carta" style="display:none"></div>
   <div id="panel-carta" class="carta" style="display:none"></div>
+  <div id="panel-precios" class="carta" style="display:none"></div>
   <div id="lista" class="vacio solo-dashboard">Cargando productos…</div>
 </main>
 
@@ -2953,7 +2954,7 @@ async function cancelarCola(qué) {
 // Los paneles de arriba (cierre, cola, ajustes, carta) son grandes y se
 // turnan: dos abiertos a la vez empujan la lista fuera de la pantalla.
 function cerrarPaneles(salvo) {
-  for (const id of ['panel-cierre', 'panel-cola', 'panel-ajustes', 'panel-carta']) {
+  for (const id of ['panel-cierre', 'panel-cola', 'panel-ajustes', 'panel-carta', 'panel-precios']) {
     if (id !== salvo) document.getElementById(id).style.display = 'none';
   }
   // Cerrar el panel y dejar la variable diciendo «abierto» lo haría
@@ -2969,7 +2970,7 @@ function cerrarPaneles(salvo) {
 // mover). `.solo-dashboard` son los elementos que no tienen sentido ahí
 // (buscador, vista, lista de productos, los otros paneles); `.solo-pantalla`
 // es lo que solo se ve en una pantalla propia (el botón Volver).
-const RUTA_DE = { ajustes: '/ajustes', carta: '/carta' };
+const RUTA_DE = { ajustes: '/ajustes', carta: '/carta', precios: '/precios' };
 let pantallaActual = 'dashboard';   // lo lee pintarInicio() para no reaparecer
 
 // Los paneles que deciden ELLOS si se ven: el de primer arranque y los dos
@@ -2999,6 +3000,7 @@ function mostrarPantalla(cual) {
   }
   if (cual === 'ajustes') panelAjustes().style.display = 'block';
   if (cual === 'carta') panelCarta().style.display = 'block';
+  if (cual === 'precios') document.getElementById('panel-precios').style.display = 'block';
 
   const ruta = RUTA_DE[cual] || '/';
   if (location.pathname !== ruta) history.pushState({ pantalla: cual }, '', ruta);
@@ -3019,10 +3021,12 @@ function irAlDashboard() {
 // la pantalla que corresponde (y los datos, si hace falta).
 window.addEventListener('popstate', () => {
   const cual = location.pathname === '/ajustes' ? 'ajustes'
-             : location.pathname === '/carta' ? 'carta' : 'dashboard';
+             : location.pathname === '/carta' ? 'carta'
+             : location.pathname === '/precios' ? 'precios' : 'dashboard';
   mostrarPantalla(cual);
   if (cual === 'ajustes') pintarAjustes();
   else if (cual === 'carta') refrescarCarta();
+  else if (cual === 'precios') abrirPrecios();
   else cargar();
 });
 
@@ -3142,6 +3146,7 @@ function pintarCarta() {
          a mano» se queda: esa explica una acción que no es evidente. -->
     <button id="btn-leer-carta">${carta ? 'Volver a leer los portales' : 'Leer los portales'}</button>
     <button id="btn-duplicados">Revisar duplicados</button>
+    <button id="btn-precios">Precios (beta)</button>
     <button id="btn-deshacer"${catalogo && catalogo.deshacer ? '' : ' disabled'}>
       ${catalogo && catalogo.deshacer
         ? 'Deshacer: ' + catalogo.deshacer : 'Nada para deshacer'}
@@ -3150,6 +3155,7 @@ function pintarCarta() {
     <div id="carta-cuerpo"></div>`;
   document.getElementById('btn-leer-carta').onclick = leerCarta;
   document.getElementById('btn-duplicados').onclick = revisarDuplicados;
+  document.getElementById('btn-precios').onclick = abrirPrecios;
   document.getElementById('btn-deshacer').onclick = (e) =>
     accionCarta('/api/deshacer', {}, e.target);
 
@@ -3660,6 +3666,8 @@ async function aplicarRefresco() {
 cargar();
 aplicarRefresco();
 </script>
+<link rel="stylesheet" href="/static/precios.css">
+<script src="/static/precios.js"></script>
 
 </body>
 </html>
