@@ -55,6 +55,67 @@ class Portal(unittest.IsolatedAsyncioTestCase):
     async def sin_efectos(self):
         self.assertIsNone(await self.page.evaluate("sessionStorage.getItem('toggles')"))
         self.assertIsNone(await self.page.evaluate("sessionStorage.getItem('borrados')"))
+        self.assertIsNone(await self.page.evaluate("sessionStorage.getItem('ajeno')"))
+
+    async def test_guardar_sin_rol_de_boton_y_con_texto_anidado(self):
+        plat = await self.abrir('guardar=div')
+        self.assertTrue(await self.cambiar(plat))
+        self.assertEqual(await self.page.evaluate("sessionStorage.getItem('guardados')"), '1')
+        await self.sin_efectos()
+
+    async def test_guardar_link_y_submit(self):
+        await self.abrir()
+        for tipo in ('a', 'submit'):
+            with self.subTest(tipo=tipo):
+                await self.page.evaluate('localStorage.clear(); sessionStorage.clear()')
+                plat = await self.abrir('guardar=' + tipo)
+                self.assertTrue(await self.cambiar(plat))
+                await self.sin_efectos()
+
+    async def test_guardar_del_formulario_ignora_otro_y_oculto(self):
+        plat = await self.abrir('formulario=1&guardarajeno=1&guardaroculto=1')
+        self.assertTrue(await self.cambiar(plat))
+        await self.sin_efectos()
+
+    async def test_espera_guardar_montado_y_habilitado(self):
+        await self.abrir()
+        for query in ('apareceluego=1', 'habilitarluego=1&guardar=div'):
+            with self.subTest(query=query):
+                await self.page.evaluate('localStorage.clear(); sessionStorage.clear()')
+                plat = await self.abrir(query)
+                self.assertTrue(await self.cambiar(plat))
+                await self.sin_efectos()
+
+    async def test_guardar_ambiguo_inhabilitado_o_texto_no_clickeable_no_guarda(self):
+        await self.abrir()
+        for query, cantidad in (('dosguardar=1', 2), ('dosguardar=1&guardar=div', 2),
+                                ('dosguardar=1&guardar=div&mixtoguardar=1', 2),
+                                ('deshabilitado=1', 1),
+                                ('guardar=div&noclick=1', 0)):
+            with self.subTest(query=query):
+                await self.page.evaluate('localStorage.clear(); sessionStorage.clear()')
+                plat = await self.abrir(query)
+                plat.TIEMPO_GUARDAR_PRECIO = 600
+                with self.assertRaisesRegex(ValueError, f'{cantidad} controles visibles'):
+                    await self.cambiar(plat)
+                self.assertIsNone(await self.page.evaluate("sessionStorage.getItem('guardados')"))
+                await self.sin_efectos()
+
+    async def test_verificacion_mientras_espera_guardar_detiene_edicion(self):
+        plat = await self.abrir()
+        await self.page.set_content('<form><input id="precio"><button disabled>Guardar</button></form>')
+        congelado = asyncio.Event()
+        async def congelar():
+            await asyncio.sleep(.05)
+            congelado.set()
+        tarea = asyncio.create_task(congelar())
+        try:
+            with self.assertRaisesRegex(ValueError, 'verificación manual'):
+                await plat._guardar_precio(self.page.locator('#precio'), lambda: not congelado.is_set())
+        finally:
+            await tarea
+        self.assertIsNone(await self.page.evaluate("sessionStorage.getItem('guardados')"))
+        await self.sin_efectos()
 
     async def test_lapiz_campo_guardar_reload(self):
         plat = await self.abrir("lento=1&rotulo=1")
