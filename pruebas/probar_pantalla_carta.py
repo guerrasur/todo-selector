@@ -1558,7 +1558,10 @@ async def main():
                 "queda marcado como cargado")
 
         # La lista se repinta despues de que la fila de la carta se marca
-        # como cargada, asi que hay que esperarla a ella, no leer y ver.
+        # como cargada. Solo se muestra en el dashboard, al volver.
+        revisar(await pagina.locator("#lista").is_hidden(),
+                "la lista principal sigue oculta mientras esta abierta Carta")
+        await pagina.click("#btn-volver")
         en_lista = pagina.locator("#lista .item").filter(has_text="Guiso de garbanzos")
         revisar(await esperar(en_lista),
                 "y aparece en la lista de productos de la pantalla principal")
