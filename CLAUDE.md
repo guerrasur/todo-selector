@@ -1,5 +1,17 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.11.4 — Guardar del editor de precios (2026-10-05)
+
+`_guardar_precio` busca desde el campo de precio ya validado, dentro de su
+formulario/modal/main cuando existe. Admite controles semánticos y el texto
+exacto Guardar con cursor pointer en un div sin rol; deduplica wrappers y no
+elige por posición. Espera aparición/habilitación hasta ocho segundos con
+guarda de tienda/2FA en cada vuelta. Dos candidatos visibles son ambiguos,
+incluso si uno es un div y el otro un botón. El error informa cantidad y estado.
+La variante del DOM real sigue pendiente de validar; la réplica cubre div,
+enlace, submit, texto anidado, control tardío/inhabilitado, duplicados y ocultos.
+No cambiar la confirmación por recarga ni reintentar escrituras no confirmadas.
+
 ## Corrección v6.11.3 — cajas visibles y caché de Precios (2026-10-05)
 
 Las cajas de Nuevo precio se renderizan en todos los modos. Escribir selecciona

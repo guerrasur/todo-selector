@@ -1,5 +1,18 @@
 # Todo-Selector
 
+## Versión 6.11.4 — detectar Guardar en el editor de precios
+
+La detección admite botones, enlaces, inputs de envío y controles con texto
+**Guardar** y cursor de interacción aunque no tengan rol de botón. Busca en
+el formulario del precio cuando existe y espera hasta ocho segundos si el
+control tarda en aparecer o habilitarse. Si hay varios controles visibles,
+no elige uno por posición: el error indica la cantidad y si están habilitados.
+
+Se conserva la confirmación del precio mediante recarga del portal; un click
+en Guardar por sí solo no se informa como éxito. Probado contra la réplica
+local, pendiente de comprobar esta variante en Rappi real. Cerrar y volver
+a abrir la app actualiza; luego **Leer precios** y preparar un lote nuevo.
+
 ## Versión 6.11.3 — cajas siempre disponibles y carga de la UI actualizada
 
 Las cajas **Nuevo precio** aparecen también en los modos de aumento en $ y %.

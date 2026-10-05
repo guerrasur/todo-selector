@@ -6,10 +6,63 @@ se elige un botón por posición ni se toca un toggle de disponibilidad.
 """
 
 import re
+import time
 from .precios import importe, serializar
 
 
 class PreciosRappi:
+    TIEMPO_GUARDAR_PRECIO = 8000
+    JS_GUARDAR_PRECIO = r"""campo => {
+      const normal = t => (t || '').replace(/\s+/g, ' ').trim();
+      const visible = e => !!e.getClientRects().length &&
+        !['hidden', 'collapse'].includes(getComputedStyle(e).visibility);
+      // El formulario/modal del campo validado tiene prioridad sobre otros
+      // Guardar de la página. El portal también usa una pantalla sin form.
+      const raiz = campo.closest('form, [role="dialog"], main') || document.body;
+      const selector = 'button, [role="button"], a, input[type="submit"], input[type="button"]';
+      const esGuardar = e => normal(e.getAttribute('aria-label')) === 'Guardar' ||
+        normal(e.matches('input') ? e.value : e.textContent) === 'Guardar';
+      let candidatos = [...raiz.querySelectorAll(selector)].filter(e => visible(e) && esGuardar(e));
+      // Algunos componentes dibujan un div clickeable sin role=button.
+      // Texto exacto + cursor interactivo; nunca usar una posición ni un
+      // contenedor con otros controles. Un span y su wrapper son uno solo.
+      {
+        const encontrados = new Set(candidatos);
+        for (const texto of raiz.querySelectorAll('span, div, p')) {
+          if (!visible(texto) || !esGuardar(texto) || texto.closest(selector)) continue;
+          let control = texto;
+          while (control.parentElement && control.parentElement !== raiz &&
+                 esGuardar(control.parentElement)) control = control.parentElement;
+          if (getComputedStyle(control).cursor === 'pointer' &&
+              !control.querySelector('input, select, textarea, ' + selector)) encontrados.add(control);
+        }
+        candidatos = [...encontrados];
+      }
+      document.querySelectorAll('[data-todo-selector-guardar-precio]').forEach(
+        e => e.removeAttribute('data-todo-selector-guardar-precio'));
+      const habilitado = e => !e.matches(':disabled') &&
+        !e.closest('[aria-disabled="true"], [inert]') && getComputedStyle(e).pointerEvents !== 'none';
+      if (candidatos.length === 1 && habilitado(candidatos[0]))
+        candidatos[0].setAttribute('data-todo-selector-guardar-precio', 'actual');
+      return {cantidad: candidatos.length,
+        listo: candidatos.length === 1 && habilitado(candidatos[0]),
+        controles: candidatos.map(e => e.tagName.toLowerCase() +
+          (habilitado(e) ? ' habilitado' : ' deshabilitado')).join(', ')};
+    }"""
+
+    async def _guardar_precio(self, campo, puede_tocar):
+        limite = time.monotonic() + self.TIEMPO_GUARDAR_PRECIO / 1000
+        while True:
+            self._comprobar_precio(puede_tocar)
+            estado = await campo.evaluate(self.JS_GUARDAR_PRECIO)
+            if estado['listo']:
+                return self.page.locator('[data-todo-selector-guardar-precio="actual"]')
+            if estado['cantidad'] > 1 or time.monotonic() >= limite:
+                raise ValueError('No pude identificar un único botón Guardar habilitado: '
+                                 f"{estado['cantidad']} controles visibles"
+                                 + (f" ({estado['controles']})" if estado['controles'] else ''))
+            await self.page.wait_for_timeout(250)
+
     # Un footer puede contener Precio + toggle sin foto/nombre/lápiz.
     # Se exige identidad además del precio y un único control de producto.
     # Lectura y edición usan la MISMA delimitación para no volver a tomar
@@ -219,9 +272,7 @@ class PreciosRappi:
         await campo.press("Tab")
         if importe(await campo.input_value(), portal=True) != nuevo:
             raise ValueError("El campo no aceptó el precio solicitado")
-        guardar = self.visible(self.page.get_by_role("button", name="Guardar", exact=True))
-        if await guardar.count() != 1:
-            raise ValueError("No pude identificar un único botón Guardar")
+        guardar = await self._guardar_precio(campo, puede_tocar)
         comprobar()
         await self.clickear(guardar, que="Guardar precio")
         # Espera la salida del editor para no interrumpir un guardado lento.

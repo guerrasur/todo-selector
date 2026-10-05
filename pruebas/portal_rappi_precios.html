@@ -40,7 +40,10 @@ function menu(){
   });
 }
 function editor(p){
-  const app=document.querySelector('#app');app.innerHTML='<h2>Editar producto</h2>';
+  const contenedor=document.querySelector('#app');contenedor.innerHTML='';
+  const app=params.has('formulario')?document.createElement('form'):contenedor;
+  if(app!==contenedor){app.onsubmit=e=>e.preventDefault();contenedor.append(app)}
+  app.innerHTML='<h2>Editar producto</h2>';
   const campo=(nombre,valor)=>{
     const div=document.createElement('div'), label=document.createElement(params.has('flotante')?'span':'label'), input=document.createElement('input');
     label.textContent=nombre+'*';input.value=valor;input.id='campo-'+nombre;
@@ -50,8 +53,18 @@ function editor(p){
   campo('Nombre',params.has('otronombre')?'Producto distinto':p.nombre);
   campo('SKU','SKU-'+p.id);campo('Categoría','Categoría de prueba');
   const precio=campo('Precio','$ '+p.precio);campo('Descripción','Texto que debe conservarse');
-  const guardar=document.createElement('button');guardar.textContent='Guardar';
-  guardar.onclick=()=>{
+  const tipo=params.get('guardar') || 'button';
+  const guardar=document.createElement(tipo==='submit'?'input':tipo);
+  if(tipo==='submit'){guardar.type='submit';guardar.value='Guardar'}
+  else guardar.innerHTML='<span>Guardar</span>';
+  if(tipo==='div')guardar.style.cursor=params.has('noclick')?'default':'pointer';
+  if(tipo==='a')guardar.href='#';
+  if(params.has('deshabilitado') || params.has('habilitarluego')){
+    guardar.setAttribute('aria-disabled','true');
+    if(params.has('habilitarluego'))setTimeout(()=>guardar.removeAttribute('aria-disabled'),450);
+  }
+  guardar.onclick=e=>{
+    e.preventDefault();
     sessionStorage.setItem('guardados',Number(sessionStorage.getItem('guardados') || 0)+1);
     setTimeout(()=>{
       if(!params.has('noguarda')){p.precio=Number(precio.value.replace('$',''));localStorage.setItem(key,JSON.stringify(carta))}
@@ -59,7 +72,21 @@ function editor(p){
     },params.has('lento')?800:20);
   };
   const borrar=document.createElement('button');borrar.textContent='Eliminar producto';borrar.onclick=()=>sessionStorage.setItem('borrados','tocado');
-  app.append(guardar,borrar);
+  if(params.has('apareceluego'))setTimeout(()=>app.append(guardar),450);
+  else app.append(guardar);
+  app.append(borrar);
+  if(params.has('dosguardar')){
+    const otro=guardar.cloneNode(true);
+    if(params.has('mixtoguardar'))otro.setAttribute('role','button');
+    otro.onclick=()=>sessionStorage.setItem('ajeno','tocado');app.append(otro);
+  }
+  if(params.has('guardarajeno')){
+    const otro=document.createElement('button');otro.textContent='Guardar';
+    otro.onclick=()=>sessionStorage.setItem('ajeno','tocado');contenedor.append(otro);
+  }
+  if(params.has('guardaroculto')){
+    const otro=guardar.cloneNode(true);otro.hidden=true;app.append(otro);
+  }
 }
 menu();
 </script></html>
