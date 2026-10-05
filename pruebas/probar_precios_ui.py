@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TEMP = tempfile.TemporaryDirectory(prefix="todo-selector-precios-ui-")
 with patch.object(Path, "home", return_value=Path(TEMP.name)), patch.dict(os.environ, {
     "LOCALAPPDATA": TEMP.name, "STOCKSWITCH_SIMULADO": "1"}):
-    from app.main import app
+    from app.main import app, VERSION
     from app.database import init_db, SessionLocal
     from app import config
     from app.models import Producto, AliasPlataforma, EstadoItem
@@ -44,9 +44,29 @@ async def main():
             browser = await pw.chromium.launch(headless=True)
             page = await browser.new_page(viewport={"width": 1365, "height": 900})
             errores = []; page.on("pageerror", lambda e: errores.append(str(e)))
+            # Una copia anterior en la URL sin versión no debe ser usada.
+            await page.route('**/static/precios.js', lambda route: route.fulfill(
+                status=200, content_type='application/javascript',
+                body='throw new Error("Script de precios anterior");'))
             ejecuciones = []
             page.on("request", lambda r: ejecuciones.append(r.post_data) if r.url.endswith('/api/precios/ejecutar') else None)
             await page.goto(f"http://127.0.0.1:{puerto}/")
+            assert await page.locator('script[src]').get_attribute('src') == f'/static/precios.js?v={VERSION}'
+            for ruta in ['/', '/carta', '/ajustes', '/precios']:
+                respuesta = await page.request.get(f'http://127.0.0.1:{puerto}{ruta}')
+                assert 'no-store' in respuesta.headers['cache-control']
+                html = await respuesta.text()
+                assert f'/static/precios.js?v={VERSION}' in html
+                assert f'/static/precios.css?v={VERSION}' in html
+                assert '__VERSION_ASSETS__' not in html
+            for archivo in ['precios.js', 'precios.css']:
+                respuesta = await page.request.get(f'http://127.0.0.1:{puerto}/static/{archivo}')
+                assert 'no-store' in respuesta.headers['cache-control']
+                # Incluso un navegador que revalida una copia anterior recibe
+                # el contenido completo, en lugar de quedarse con un 304.
+                etag = respuesta.headers['etag']
+                respuesta = await page.request.get(f'http://127.0.0.1:{puerto}/static/{archivo}', headers={'If-None-Match': etag})
+                assert respuesta.status == 200
             await page.wait_for_selector('#lista .item')
             await page.click('#btn-carta'); await page.click('#btn-precios')
             # El repintado con otra pantalla abierta no debe perder la clase
@@ -102,6 +122,8 @@ async def main():
             assert await page.locator('#precios-lote tbody tr').count() == 2
             assert '$ 1.900' in await page.locator('#precios-lote').inner_text()
             await page.select_option('#precios-modo', 'porcentaje')
+            assert await cajas.count() == 4
+            assert await cajas.first.is_editable()
             await page.fill('#precios-cantidad', '10')
             await page.click('#precios-previo'); await page.wait_for_selector('#precios-ejecutar')
             assert await page.locator('#precios-plan tbody tr').count() == 4
@@ -114,24 +136,31 @@ async def main():
             assert 'simulado' in await page.locator('#precios-lote').inner_text()
             assert 'confirmado' not in await page.locator('#precios-lote').inner_text()
             await page.select_option('#precios-alcance', 'seleccionados')
-            await page.locator('#precios-tabla input').first.check()
+            await page.locator('#precios-tabla input[type="checkbox"]').first.check()
             await page.fill('#precios-cantidad', '100'); await page.select_option('#precios-modo', 'pesos')
             await page.click('#precios-previo'); await page.wait_for_selector('#precios-ejecutar')
             assert await page.locator('#precios-plan tbody tr').count() == 1
             # Editar el incremento invalida el plan anterior inmediatamente.
             await page.fill('#precios-cantidad', '200')
             assert await page.locator('#precios-ejecutar').count() == 0
-            await page.select_option('#precios-modo', 'individual')
-            await page.locator('#precios-tabla input').nth(1).fill('1500')
-            await page.locator('#precios-tabla input').first.fill('1400,50')
+            # Desde el modo de aumento, escribir selecciona individual y
+            # conserva el mismo campo y el cursor durante todos los caracteres.
+            await cajas.nth(1).fill('1500')
+            assert await page.input_value('#precios-modo') == 'individual'
+            assert await page.locator('#precios-ejecutar').count() == 0
+            await page.select_option('#precios-modo', 'porcentaje')
+            await cajas.first.fill('')
+            await cajas.first.press_sequentially('1400,50')
+            assert await page.input_value('#precios-modo') == 'individual'
+            assert await cajas.first.evaluate('e => document.activeElement === e')
             await page.fill('#precios-buscar', 'Otro'); await page.fill('#precios-buscar', '')
-            assert await page.locator('#precios-tabla input').first.input_value() == '1400,50'
+            assert await cajas.first.input_value() == '1400,50'
             await page.click('#precios-previo'); await page.wait_for_selector('#precios-ejecutar')
             assert await page.locator('#precios-plan tbody tr').count() == 1
             assert '$ 1.400,5' in await page.locator('#precios-plan').inner_text()
             # Volver y abrir conserva cambios individuales.
             await page.click('#precios-carta'); await page.click('#btn-precios')
-            assert await page.locator('#precios-tabla input').first.input_value() == '1400,50'
+            assert await cajas.first.input_value() == '1400,50'
             await page.set_viewport_size({"width": 390, "height": 844})
             assert await page.locator('#precios-previo').is_visible()
             assert not errores, errores
@@ -141,7 +170,7 @@ async def main():
             await page.reload(); await page.wait_for_selector('#precios-tiendas input')
             assert page.url.endswith('/precios')
             await browser.close()
-            print('OK: cajas precargadas, cambios individuales, confirmación, aumentos, navegación y exclusión de PedidosYa')
+            print('OK: carga sin caché, cajas en todos los modos, foco, confirmación, aumentos, navegación y exclusión de PedidosYa')
     finally:
         server.should_exit = True
         await asyncio.to_thread(hilo.join, 10)

@@ -93,9 +93,7 @@ function pintarPrecios() {
       else if (clave === 'buscar') pintarFilasPrecios();
     };
   }
-  const individual = s.modo === 'individual';
-  for (const id of ['alcance', 'cantidad', 'redondeo']) q('precios-' + id + '-label').style.display = individual ? 'none' : '';
-  for (const id of ['seleccionar', 'limpiar']) q('precios-' + id).hidden = individual;
+  actualizarModoPrecios();
   if (s.lectura) {
     q('precios-lectura').textContent = `${s.lectura.filas.length} productos · ${s.lectura.leida_en}${s.lectura.simulado ? ' · Simulación' : ''}`;
     for (const [tienda, error] of Object.entries(s.lectura.errores)) {
@@ -146,6 +144,14 @@ function pintarModificadosPrecios() {
   cont.textContent = preciosUI.modo === 'individual' ? `${cantidad} precio${cantidad === 1 ? '' : 's'} modificado${cantidad === 1 ? '' : 's'} · ` : '';
 }
 
+function actualizarModoPrecios() {
+  const individual = preciosUI.modo === 'individual';
+  document.getElementById('precios-modo').value = preciosUI.modo;
+  for (const id of ['alcance', 'cantidad', 'redondeo']) document.getElementById('precios-' + id + '-label').style.display = individual ? 'none' : '';
+  for (const id of ['seleccionar', 'limpiar']) document.getElementById('precios-' + id).hidden = individual;
+  document.querySelectorAll('#precios-tabla .seleccion-precios').forEach(el => { el.hidden = individual; });
+}
+
 function tablaPrecios(contenedor, cabeceras) {
   const tabla = document.createElement('table'), head = document.createElement('thead'), tr = document.createElement('tr');
   for (const texto of cabeceras) { const th = document.createElement('th'); th.textContent = texto; tr.append(th); }
@@ -161,31 +167,34 @@ function celdaPrecios(fila, contenido) {
 
 function pintarFilasPrecios() {
   const cont = document.getElementById('precios-tabla'); if (!cont) return;
-  const s = preciosUI, individual = s.modo === 'individual', filas = filasPreciosVisibles();
-  const cuerpo = tablaPrecios(cont, individual ? ['Producto', 'Tienda', 'Precio actual', 'Nuevo precio'] : ['Elegir', 'Producto', 'Tienda', 'Precio actual']);
+  const s = preciosUI, filas = filasPreciosVisibles();
+  const cuerpo = tablaPrecios(cont, ['Elegir', 'Producto', 'Tienda', 'Precio actual', 'Nuevo precio']);
+  cont.querySelector('th').className = 'seleccion-precios';
   for (const f of filas) {
     const tr = document.createElement('tr'), input = document.createElement('input'); input.dataset.clave = f.clave;
     input.disabled = !!(f.error || s.ocupado || (s.lote && s.lote.estado === 'ejecutando'));
-    if (individual) {
-      input.type = 'text'; input.inputMode = 'decimal'; input.value = s.individuales[f.clave] ?? f.precio ?? '';
+    const check = document.createElement('input'); check.type = 'checkbox';
+    check.checked = s.seleccion.has(f.clave); check.disabled = input.disabled;
+    check.setAttribute('aria-label', 'Elegir ' + f.nombre + ' en ' + (NOMBRE_PLAT[f.tienda] || f.tienda));
+    check.onchange = () => { check.checked ? s.seleccion.add(f.clave) : s.seleccion.delete(f.clave); invalidarPlanPrecios(); document.getElementById('precios-plan').replaceChildren(); };
+    celdaPrecios(tr, check).className = 'seleccion-precios';
+    input.type = 'text'; input.inputMode = 'decimal'; input.value = s.individuales[f.clave] ?? f.precio ?? '';
+    input.classList.toggle('precio-modificado', cambioIndividualPrecios(f, input.value));
+    input.placeholder = f.precio || ''; input.setAttribute('aria-label', 'Nuevo precio de ' + f.nombre + ' en ' + (NOMBRE_PLAT[f.tienda] || f.tienda));
+    input.oninput = () => {
+      // Cambiar de modo sin repintar conserva el foco y el cursor mientras
+      // se escribe, también si se empezó desde un aumento en $ o %.
+      s.modo = 'individual'; actualizarModoPrecios();
+      s.individuales[f.clave] = input.value;
       input.classList.toggle('precio-modificado', cambioIndividualPrecios(f, input.value));
-      input.placeholder = f.precio || ''; input.setAttribute('aria-label', 'Nuevo precio de ' + f.nombre + ' en ' + (NOMBRE_PLAT[f.tienda] || f.tienda));
-      input.oninput = () => {
-        s.individuales[f.clave] = input.value;
-        input.classList.toggle('precio-modificado', cambioIndividualPrecios(f, input.value));
-        invalidarPlanPrecios(); document.getElementById('precios-plan').replaceChildren(); pintarModificadosPrecios();
-      };
-    } else {
-      input.type = 'checkbox'; input.checked = s.seleccion.has(f.clave);
-      input.setAttribute('aria-label', 'Elegir ' + f.nombre + ' en ' + (NOMBRE_PLAT[f.tienda] || f.tienda));
-      input.onchange = () => { input.checked ? s.seleccion.add(f.clave) : s.seleccion.delete(f.clave); invalidarPlanPrecios(); document.getElementById('precios-plan').replaceChildren(); };
-    }
-    if (!individual) celdaPrecios(tr, input);
+      invalidarPlanPrecios(); document.getElementById('precios-plan').replaceChildren(); pintarModificadosPrecios();
+    };
     celdaPrecios(tr, f.nombre || 'Sin nombre'); celdaPrecios(tr, NOMBRE_PLAT[f.tienda] || f.tienda);
     const precio = celdaPrecios(tr, f.error || precioDinero(f.precio)); if (f.error) precio.className = 'error-precios';
-    if (individual) celdaPrecios(tr, input);
+    celdaPrecios(tr, input);
     cuerpo.append(tr);
   }
+  actualizarModoPrecios();
   pintarModificadosPrecios();
 }
 

@@ -1,5 +1,15 @@
 # Todo-Selector
 
+## Versión 6.11.3 — cajas siempre disponibles y carga de la UI actualizada
+
+Las cajas **Nuevo precio** aparecen también en los modos de aumento en $ y %.
+Escribir en una cambia a edición individual, sin perder el foco ni ejecutar
+nada. Luego se revisan los cambios y se confirma la ejecución.
+
+El HTML pide los archivos de Precios con la versión instalada en su URL y
+el servidor los entrega sin caché. Así, la actualización del programa también
+actualiza esa pantalla aunque el navegador hubiera guardado el script anterior.
+
 ## Versión 6.11.2 — cajas de precios y regreso a la carta
 
 **Precios (beta)** abre en **Editar uno por uno**. Cada producto/tienda tiene
