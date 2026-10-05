@@ -10,27 +10,70 @@ from .precios import importe, serializar
 
 
 class PreciosRappi:
+    # Un footer puede contener Precio + toggle sin foto/nombre/lápiz.
+    # Se exige identidad además del precio y un único control de producto.
+    # Lectura y edición usan la MISMA delimitación para no volver a tomar
+    # el footer al buscar el lápiz de una tarjeta ya identificada.
+    JS_TARJETA_PRECIO = r"""control => {
+      const selector = '[data-testid*="-product-"][data-testid*="availability-switch-control"]';
+      const normal = t => (t || '').trim();
+      const nombreValido = t => !!t && !/^(?:Precio\s*:?(?:\s|$)|\$|SKU\b|Apagados$|Sin toppings$)/i.test(t);
+      for (let tarjeta = control && control.parentElement; tarjeta; tarjeta = tarjeta.parentElement) {
+        if (tarjeta.querySelectorAll(selector).length !== 1) break;
+        const texto = tarjeta.innerText || '';
+        if (!/Precio\s*:?\s*\$/i.test(texto)) continue;
+        const fotos = [...tarjeta.querySelectorAll('img[data-testid="catalog-item-image"]')];
+        if (fotos.length > 1) return null;
+        if (fotos.length === 1) {
+          const nombre = normal(fotos[0].alt);
+          if (nombreValido(nombre)) return {tarjeta, nombre};
+        }
+        // Sin foto, el rótulo SKU del encabezado relaciona el nombre con
+        // este producto. Un bloque con solo Precio nunca aporta identidad.
+        const lineas = texto.split(/\n/).map(normal).filter(Boolean);
+        const nombres = new Set();
+        for (let i=0; i<lineas.length; i++) {
+          const junto = lineas[i].match(/^(.+?)\s+SKU\b/);
+          const nombre = junto ? normal(junto[1])
+            : /^SKU\b/.test(lineas[i]) && i>0 ? lineas[i-1] : '';
+          if (nombreValido(nombre)) nombres.add(nombre);
+        }
+        if (nombres.size === 1) return {tarjeta, nombre: [...nombres][0]};
+        if (nombres.size > 1) return null;
+      }
+      return null;
+    }"""
+
     JS_CARTA_PRECIOS = r"""() => {
+      const ubicar = """ + JS_TARJETA_PRECIO + r""";
       const controles = [...document.querySelectorAll(
         '[data-testid*="-product-"][data-testid*="availability-switch-control"]')];
       return controles.map(control => {
-        let tarjeta = control.parentElement;
-        while (tarjeta && tarjeta.querySelectorAll(
-          '[data-testid*="-product-"][data-testid*="availability-switch-control"]').length === 1) {
-          if (/Precio\s*:?\s*\$/i.test(tarjeta.innerText || '')) break;
-          tarjeta = tarjeta.parentElement;
-        }
-        if (!tarjeta || tarjeta.querySelectorAll(
-          '[data-testid*="-product-"][data-testid*="availability-switch-control"]').length !== 1)
-          return {nombre: '', id_remoto: control.dataset.testid, error: 'No pude delimitar la tarjeta'};
-        const foto = tarjeta.querySelector('img[data-testid="catalog-item-image"]');
+        const hallazgo = ubicar(control);
+        if (!hallazgo)
+          return {nombre: '', id_remoto: control.dataset.testid,
+            error: 'No pude identificar el nombre dentro de la tarjeta del producto'};
+        const {tarjeta, nombre} = hallazgo;
         const texto = tarjeta.innerText || '';
-        const nombre = (foto && foto.alt || texto.split(/\n/)[0].split(/\s+SKU\b/)[0]).trim();
         const precios = [...texto.matchAll(/Precio\s*:?\s*(\$\s*[\d.,]+)/gi)];
         return {nombre, id_remoto: control.dataset.testid,
           precio_texto: precios.length === 1 ? precios[0][1] : null,
           error: precios.length === 1 ? '' : 'No pude identificar un único precio'};
       });
+    }"""
+
+    JS_MARCAR_TARJETA_PRECIO = r"""id => {
+      const ubicar = """ + JS_TARJETA_PRECIO + r""";
+      const controles = [...document.querySelectorAll(
+        '[data-testid*="-product-"][data-testid*="availability-switch-control"]')]
+        .filter(e => e.dataset.testid === id);
+      if (controles.length !== 1) return null;
+      const hallazgo = ubicar(controles[0]);
+      if (!hallazgo) return null;
+      document.querySelectorAll('[data-todo-selector-tarjeta-precio]').forEach(
+        e => e.removeAttribute('data-todo-selector-tarjeta-precio'));
+      hallazgo.tarjeta.setAttribute('data-todo-selector-tarjeta-precio', 'actual');
+      return hallazgo.nombre;
     }"""
 
     @staticmethod
@@ -71,8 +114,10 @@ class PreciosRappi:
                     fila["error"] = str(e)
         nombres = [f["nombre"] for f in filas]
         for fila in filas:
-            if not fila["nombre"] or nombres.count(fila["nombre"]) != 1:
-                fila["error"] = "Nombre vacío o repetido; no se puede editar con seguridad"
+            if fila["nombre"] and nombres.count(fila["nombre"]) != 1:
+                fila["error"] = "Nombre repetido; no se puede editar con seguridad"
+            elif not fila["nombre"] and not fila["error"]:
+                fila["error"] = "No se pudo leer el nombre del producto"
         return filas
 
     async def leer_precio(self, nombre_remoto, id_remoto=None, puede_tocar=lambda: True):
@@ -154,19 +199,8 @@ class PreciosRappi:
         await self.revisar_ambiguedad(nombre_remoto)
         # Delimita la MISMA tarjeta por el id leído, sin profundidad fija.
         # No se usa el padre del nombre si el lápiz quedó en otro wrapper.
-        encontrado = await self.page.evaluate(r"""id => {
-          const control = [...document.querySelectorAll('[data-testid]')]
-            .find(e => e.dataset.testid === id);
-          for (let p=control && control.parentElement; p; p=p.parentElement) {
-            const n=p.querySelectorAll('[data-testid*="-product-"][data-testid*="availability-switch-control"]').length;
-            if (n !== 1) return false;
-            if (/Precio\s*:?\s*\$/i.test(p.innerText || '')) {
-              p.setAttribute('data-todo-selector-tarjeta-precio', 'actual'); return true;
-            }
-          }
-          return false;
-        }""", id_remoto)
-        if not encontrado:
+        encontrado = await self.page.evaluate(self.JS_MARCAR_TARJETA_PRECIO, id_remoto)
+        if encontrado != nombre_remoto:
             raise ValueError("No se pudo delimitar la tarjeta para editar")
         tarjeta = self.page.locator('[data-todo-selector-tarjeta-precio="actual"]')
         lapiz = await self._lapiz_precio(tarjeta)

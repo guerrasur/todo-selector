@@ -17,18 +17,25 @@ function menu(){
   app.append(header,grupo); grupo.hidden=params.has('plegada');
   carta.forEach(p=>{
     const card=document.createElement('article');
-    if(p.id!=='3'){const img=document.createElement('img'); img.dataset.testid='catalog-item-image';img.alt=p.nombre;card.append(img);}
-    const nombre=document.createElement('div');nombre.textContent=p.nombre;card.append(nombre);
-    if(params.has('rotulo')){const nombre2=nombre.cloneNode(true);card.append(nombre2)}
-    const precio=document.createElement('div');precio.textContent='Precio:\n$ '+p.precio.toLocaleString('es-AR',{minimumFractionDigits:2});card.append(precio);
+    const superior=params.has('dividida')?document.createElement('div'):card;
+    const inferior=params.has('dividida')?document.createElement('div'):card;
+    if(superior!==card)card.append(superior,inferior);
+    if(!params.has('sinnombre')){
+      if(p.id!=='3'){const img=document.createElement('img'); img.dataset.testid='catalog-item-image';img.alt=p.nombre;superior.append(img);}
+      const nombre=document.createElement('div');nombre.textContent=p.nombre;superior.append(nombre);
+      const sku=document.createElement('div');sku.textContent='SKU';superior.append(sku);
+      if(params.has('rotulo')){const nombre2=nombre.cloneNode(true);superior.append(nombre2)}
+    }
+    const precio=document.createElement('div');precio.textContent='Precio:\n$ '+p.precio.toLocaleString('es-AR',{minimumFractionDigits:2});inferior.append(precio);
     const toggle=document.createElement('label');toggle.dataset.testid='menu-category-1-product-'+p.id+'-availability-switch-control';
     const input=document.createElement('input');input.type='checkbox';input.checked=p.activo;
-    toggle.append(input);card.append(toggle);
+    toggle.append(input);inferior.append(toggle);
     input.onchange=()=>{sessionStorage.setItem('toggles','tocado')};
     const editar=document.createElement('button');
     if(!params.has('sinlabel'))editar.setAttribute('aria-label','Editar producto');
-    editar.innerHTML='<svg viewBox="0 0 24 24"><path d="M3 17L17 3L21 7L7 21Z"/></svg>';editar.onclick=()=>editor(p);card.append(editar);
-    if(params.has('doslapices')){const otro=editar.cloneNode(true);otro.onclick=()=>editor(p);card.append(otro)}
+    editar.innerHTML='<svg viewBox="0 0 24 24"><path d="M3 17L17 3L21 7L7 21Z"/></svg>';editar.onclick=()=>editor(p);
+    (params.has('lapizfuera')?card:inferior).append(editar);
+    if(params.has('doslapices')){const otro=editar.cloneNode(true);otro.onclick=()=>editor(p);inferior.append(otro)}
     grupo.append(card);
   });
 }

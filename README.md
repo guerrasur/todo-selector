@@ -1,5 +1,13 @@
 # Todo-Selector
 
+## Versión 6.11.1 — corregir lectura de precios
+
+Corrige las filas que aparecían con **Precio:** como nombre y el mensaje de
+nombre repetido. Ahora identifica la tarjeta completa, incluyendo el encabezado
+del producto, tanto para leer precios como para encontrar el lápiz. Los fallos
+de lectura también dejan un diagnóstico en el log, además del resultado en
+pantalla. Cerrar y volver a abrir la app actualiza; luego usar **Leer precios**.
+
 ## Versión 6.11 — precios beta
 
 En **Actualizar carta → Precios (beta)** se pueden elegir las tiendas Rappi
