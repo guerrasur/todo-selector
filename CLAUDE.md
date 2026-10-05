@@ -1,5 +1,15 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.11.1 — tarjetas de precios (2026-10-05)
+
+Rappi separa encabezado (foto/nombre/SKU) y footer (Precio/toggle/lápiz).
+El primer ancestro con Precio puede ser SOLO el footer: no usar su primera
+línea como nombre. `PreciosRappi.JS_TARJETA_PRECIO` exige un único control de
+producto y evidencia de identidad (alt de foto o nombre asociado al SKU).
+Lectura y ubicación del lápiz comparten ese código. No relajar los controles
+de nombres realmente duplicados. La réplica `dividida=1` reproduce el fallo;
+las regresiones cubren lectura y escritura, con y sin foto y lápiz separado.
+
 ## Actualización v6.11 — precios beta (2026-10-05)
 
 `app/precios.py` administra lecturas y vistas previas de 30 minutos y lotes

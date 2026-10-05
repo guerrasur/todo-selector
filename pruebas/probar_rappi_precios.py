@@ -68,6 +68,33 @@ class Portal(unittest.IsolatedAsyncioTestCase):
         plat = await self.abrir("sinlabel=1&flotante=1")
         self.assertTrue(await self.cambiar(plat, nuevo="19000.50")); await self.sin_efectos()
 
+    async def test_lectura_tarjeta_dividida_no_toma_precio_como_nombre(self):
+        plat = await self.abrir("dividida=1")
+        filas = await plat.listar_precios()
+        self.assertEqual([f['nombre'] for f in filas], [
+            'Producto de prueba', 'Otro producto', 'Producto sin foto'])
+        self.assertEqual([f['precio'] for f in filas], ['17500.00', '12000.00', '8000.00'])
+        self.assertFalse(any(f['error'] for f in filas))
+
+    async def test_editar_tarjeta_dividida_lapiz_fuera_del_precio(self):
+        plat = await self.abrir("dividida=1&lapizfuera=1&sinlabel=1")
+        self.assertTrue(await self.cambiar(plat, nuevo="19000.50"))
+        self.assertEqual(await plat.leer_precio('Otro producto'), importe('12000'))
+        await self.sin_efectos()
+
+    async def test_no_inventa_nombre_con_solo_precio(self):
+        plat = await self.abrir("dividida=1&sinnombre=1")
+        filas = await plat.listar_precios()
+        self.assertTrue(all(f['error'] for f in filas))
+        self.assertTrue(all(f['nombre'] == '' for f in filas))
+
+    async def test_nombre_repetido_se_rechaza_en_tarjetas_divididas(self):
+        plat = await self.abrir("dividida=1&duplicado=1")
+        filas = await plat.listar_precios()
+        repetidos = [f for f in filas if f['nombre'] == 'Producto de prueba']
+        self.assertEqual(len(repetidos), 2)
+        self.assertTrue(all(f['error'] for f in repetidos))
+
     async def test_lectura_completa_sin_foto_plegada(self):
         plat = await self.abrir("plegada=1")
         filas = await plat.listar_precios()

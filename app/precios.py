@@ -134,6 +134,14 @@ class GestorPrecios:
                 clave = hashlib.sha256((tienda + "\0" + f["id_remoto"] + "\0" + f["nombre"]).encode()).hexdigest()
                 filas.append({**f, "clave": clave, "tienda": tienda})
         token = secrets.token_hex(16)
+        sin_precio = [f for f in filas if f.get("error") or f.get("precio") is None]
+        log.info("Lectura de precios: tiendas=%s, %s productos, %s con errores",
+                 ", ".join(tiendas), len(filas), len(sin_precio))
+        for tienda, detalle in errores.items():
+            log.warning("Leyendo precios de %s: %s", tienda, detalle)
+        for fila in sin_precio[:10]:
+            log.warning("Precio no leído en %s / %s: %s", fila["tienda"],
+                        fila["nombre"] or fila["id_remoto"], fila.get("error") or "Sin precio")
         self.lecturas = {k: v for k, v in self.lecturas.items() if time.monotonic() - v["instante"] < 1800}
         if len(self.lecturas) >= 20:
             self.lecturas.pop(next(iter(self.lecturas)))
