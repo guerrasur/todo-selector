@@ -48,11 +48,12 @@ import time
 from typing import Optional
 
 from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, ResultadoTienda, plano
+from .rappi_precios import PreciosRappi
 
 log = logging.getLogger("rappi")
 
 
-class Rappi(PlataformaBase):
+class Rappi(PreciosRappi, PlataformaBase):
     nombre = "rappi"
 
     # La marca y la tienda son las TUYAS: salen de Ajustes y no tienen

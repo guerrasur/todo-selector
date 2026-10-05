@@ -1,5 +1,25 @@
 # Todo-Selector
 
+## Versión 6.11 — precios beta
+
+En **Actualizar carta → Precios (beta)** se pueden elegir las tiendas Rappi
+configuradas, leer sus precios y preparar cambios. Admite aumentos en pesos o
+porcentaje sobre toda la carta o una selección, y precios individuales por
+producto/tienda. El redondeo es configurable. **Ver cambios** muestra la vista
+previa; **Ejecutar cambios** aplica los precios revisados.
+
+Cada cambio abre el lápiz del producto, completa Precio, guarda y recarga el
+portal para confirmar. Si el producto/precio cambió desde la lectura, no lo
+sobrescribe. Los resultados quedan guardados localmente y se pueden consultar
+desde la misma pantalla. Cancelar pendientes deja terminar el producto en curso.
+Un lote interrumpido al cerrar la app nunca se reanuda automáticamente.
+
+La función beta solo admite Rappi Turbo y Rappi Común. PedidosYa no está
+integrado en precios. La automatización fue probada contra una réplica local;
+los controles del editor deben confirmarse en el portal real. Un control
+ambiguo o un precio que no pudo verificarse queda indicado en el resultado.
+
+
 ## Versión 6.10 — limpiar las filas repetidas
 
 En **Actualizar carta → Revisar duplicados** se ve qué fila conservar y qué

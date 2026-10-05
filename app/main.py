@@ -1,5 +1,6 @@
 """API + frontend de Todo-Selector."""
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ from .database import init_db, get_db, SessionLocal
 from .models import Producto, AliasPlataforma, EstadoItem, Operacion, Preferencia
 from .seed import sembrar
 from .worker import worker, MENU_NO_CARGO
+from .precios import GestorPrecios
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -75,6 +77,70 @@ def silenciar_ruido_de_refresco():
         log_acceso.addFilter(SinRuidoDeRefresco())
 
 app = FastAPI(title="Todo-Selector")
+precios = GestorPrecios(worker)
+
+
+class LeerPreciosIn(BaseModel):
+    tiendas: list[str]
+
+
+class PlanPreciosIn(LeerPreciosIn):
+    lectura: str
+    modo: str = "pesos"
+    alcance: str = "toda"
+    cantidad: str = "0"
+    seleccionados: list[str] = []
+    individuales: dict[str, str] = {}
+    redondeo: str = "centavos"
+
+
+class EjecutarPreciosIn(BaseModel):
+    plan: str
+
+
+@app.get("/api/precios/tiendas")
+async def tiendas_precios():
+    return {"tiendas": precios.tiendas(), "historial": precios.historial()}
+
+
+@app.post("/api/precios/leer")
+async def leer_precios(data: LeerPreciosIn):
+    try:
+        return await precios.leer(data.tiendas)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/precios/previo")
+async def previo_precios(data: PlanPreciosIn):
+    try:
+        return precios.preparar(**data.model_dump())
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/precios/ejecutar")
+async def ejecutar_precios(data: EjecutarPreciosIn):
+    try:
+        return precios.ejecutar(data.plan)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.get("/api/precios/lote/{identidad}")
+async def estado_precios(identidad: str):
+    try:
+        return precios.estado(identidad)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@app.post("/api/precios/lote/{identidad}/cancelar")
+async def cancelar_precios(identidad: str):
+    try:
+        return precios.cancelar(identidad)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
 
 RAIZ = Path(__file__).resolve().parent.parent
 STATIC = RAIZ / "static"
@@ -151,6 +217,12 @@ async def arrancar():
 
 @app.on_event("shutdown")
 async def apagar_app():
+    if precios.tarea and not precios.tarea.done():
+        precios.tarea.cancel()
+        try:
+            await precios.tarea
+        except asyncio.CancelledError:
+            pass
     await worker.detener()
 
 
@@ -1237,5 +1309,6 @@ def index():
 # sola). Navegar ahi con los botones de la app sigue andando igual.
 @app.get("/ajustes")
 @app.get("/carta")
+@app.get("/precios")
 def pantalla_spa():
     return FileResponse(str(STATIC / "index.html"), headers=SIN_CACHE)

@@ -1,5 +1,20 @@
 # Todo-Selector — contexto para Claude Code
 
+## Actualización v6.11 — precios beta (2026-10-05)
+
+`app/precios.py` administra lecturas y vistas previas de 30 minutos y lotes
+idempotentes; `plataformas/rappi_precios.py` agrega el flujo de editor sin cambiar
+el contrato de base ni disponibilidad. Solo Rappi configurado; PedidosYa se
+rechaza también desde API. Los resultados viven fuera del repo, en DATOS/precios.
+No reanudar ni reintentar escrituras interrumpidas al reiniciar. Usar los locks
+del worker y respetar congelación 2FA antes de cada navegación/escritura. Los
+importes son Decimal; precios absolutos del plan, nunca sumar de nuevo al reintentar.
+Nombre/id/precio/tienda deben seguir coincidiendo con la vista previa.
+
+El editor/lápiz está observado en capturas, no en HTML real. TODO-SELECTOR marca
+esa limitación. Exigir un control único y fallar explícitamente antes de adivinar.
+Pruebas: `probar_precios.py`, `probar_rappi_precios.py`, `probar_precios_ui.py`.
+
 ## Actualización v6.10 — duplicados (2026-09-17)
 
 `app/limpieza.py` detecta componentes por (plataforma, nombre remoto EXACTO).
