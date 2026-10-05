@@ -6,9 +6,9 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -1270,15 +1270,28 @@ def guardar_alias(data: AliasIn, db: Session = Depends(get_db)):
 
 # ---------- Frontend ----------
 
-app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
-
-
 # La app se autoactualiza, asi que el navegador NO puede cachear la pantalla:
 # quedaba con el HTML viejo despues de cada update y mostraba estados que esa
 # version no sabia nombrar ("apagado_ajeno" crudo en vez de "apagado (afuera)",
 # 2026-07-28). Con no-store, abrir la pagina siempre trae la version que
 # corresponde al server que la esta sirviendo.
 SIN_CACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
+
+
+@app.get("/static/precios.js", include_in_schema=False)
+@app.get("/static/precios.css", include_in_schema=False)
+def archivo_precios(request: Request):
+    return FileResponse(str(STATIC / Path(request.url.path).name), headers=SIN_CACHE)
+
+
+app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+
+def html_pantalla():
+    # El HTML actualizado debe pedir un URL nuevo aunque el navegador ya
+    # haya guardado precios.js antes de que agregáramos no-store.
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(html.replace("__VERSION_ASSETS__", VERSION), headers=SIN_CACHE)
 
 
 ICONO = RAIZ / "todo2.ico"
@@ -1298,7 +1311,7 @@ def favicon():
 
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC / "index.html"), headers=SIN_CACHE)
+    return html_pantalla()
 
 
 # Ajustes y Carta son pantallas propias (URL propia via history.pushState,
@@ -1311,4 +1324,4 @@ def index():
 @app.get("/carta")
 @app.get("/precios")
 def pantalla_spa():
-    return FileResponse(str(STATIC / "index.html"), headers=SIN_CACHE)
+    return html_pantalla()

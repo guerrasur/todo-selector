@@ -1,5 +1,16 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.11.3 — cajas visibles y caché de Precios (2026-10-05)
+
+Las cajas de Nuevo precio se renderizan en todos los modos. Escribir selecciona
+individual mediante `actualizarModoPrecios`, sin repintar ni perder el foco.
+La selección de productos solo aparece para aumentos. No mezclar importes
+individuales con un incremento: el modo decide qué plan se prepara.
+
+`html_pantalla` sustituye `__VERSION_ASSETS__` por VERSION en URLs JS/CSS.
+Las rutas explícitas de esos archivos van ANTES del mount /static y responden
+no-store; el query de versión evita reutilizar copias ya cacheadas.
+
 ## Corrección v6.11.2 — edición individual y navegación (2026-10-05)
 
 Precios abre en modo individual, con valores precargados y borradores externos
