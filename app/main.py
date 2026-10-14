@@ -605,7 +605,8 @@ def alertas(db: Session = Depends(get_db)):
                           if ok is False and p not in congeladas
                           and worker.motivo_sesion.get(p) == MENU_NO_CARGO],
         "sin_confirmar": salida,
-        # Apagado en una tienda de Rappi y prendido en la hermana. Es el
+        # Diferencias entre tiendas Rappi, o PedidosYa apagado / Rappi prendido.
+        # Es el
         # mismo tipo de problema que el de arriba —algo que se sigue
         # vendiendo cuando creias que no— pero por otro camino: acá la app
         # SÍ lo está viendo, y justamente por eso lo puede decir.
@@ -622,7 +623,7 @@ def alertas(db: Session = Depends(get_db)):
             db,
             [p for p in config.plataformas_activas()
              if not config.tienda_pausada(p)],
-            desde=limite),
+            desde=limite, no_vistos=ciegos),
     }
 
 

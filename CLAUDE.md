@@ -1,5 +1,14 @@
 # Todo-Selector — contexto para Claude Code
 
+## Actualización v6.12 — PedidosYa apagado / Rappi prendido
+
+`catalogo.desparejos` conserva la comparación entre tiendas Rappi y agrega
+pares dirigidos PedidosYa → cada Rappi activo. No avisar por el caso inverso.
+`/api/alertas` pasa `no_vistos` para excluir productos ausentes de la última
+lectura además del límite de frescura. No modificar disponibilidad desde el
+aviso. La UI cuenta productos únicos aunque haya dos tiendas afectadas.
+Prueba: `python pruebas/probar_pedidosya_rappi_alertas.py`.
+
 ## Corrección v6.11.4 — Guardar del editor de precios (2026-10-05)
 
 `_guardar_precio` busca desde el campo de precio ya validado, dentro de su

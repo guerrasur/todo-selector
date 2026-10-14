@@ -707,14 +707,18 @@ def detectar_novedades(db, plataforma: str, leidos) -> list:
 
 # ---------- Dos tiendas del mismo portal que quedaron distintas ----------
 
-def desparejos(db, activas, desde=None) -> list:
-    """Lo que quedo APAGADO en una tienda y PRENDIDO en la tienda hermana.
+def desparejos(db, activas, desde=None, no_vistos=()) -> list:
+    """Diferencias entre Rappi hermanos y PedidosYa apagado / Rappi prendido.
 
     Rappi Turbo y Rappi Común son dos tiendas del mismo local con dos
     toggles independientes. Un producto vinculado en las dos que quedo
     apagado en una sola se sigue vendiendo en la otra, y en la pantalla eso
     no se ve: son dos chips distintos, uno rojo y otro verde, en una fila
     que a simple vista parece atendida.
+
+    También compara PedidosYa apagado contra cada tienda Rappi prendida,
+    sin avisar por la dirección inversa. `no_vistos` excluye pares cuyos
+    productos no aparecieron en la última lectura del portal.
 
     Lo que NO entra aca, a proposito: el producto que directamente no esta
     vinculado en la otra tienda. Puede que ahi no se venda, y no hay forma
@@ -740,8 +744,13 @@ def desparejos(db, activas, desde=None) -> list:
 
     familias = [sorted(f & set(activas)) for f in TIENDAS_DEL_MISMO_PORTAL]
     familias = [f for f in familias if len(f) > 1]
-    if not familias:
+    # Además de las tiendas hermanas, comparar PedidosYa con cada Rappi.
+    # En estos pares solo interesa PedidosYa apagado y Rappi prendido.
+    pares_py = [("pedidosya", plat) for plat in activas
+                if plat in ("rappi", "rappi_comun") and "pedidosya" in activas]
+    if not familias and not pares_py:
         return []
+    no_vistos = set(no_vistos)
 
     salida = []
     productos = (db.query(Producto)
@@ -754,6 +763,8 @@ def desparejos(db, activas, desde=None) -> list:
         for familia in familias:
             estados = {e.plataforma: e for e in p.estados
                        if e.plataforma in familia}
+            if any((p.id, plat) in no_vistos for plat in estados):
+                continue
             # Con una operacion en vuelo lo que diga el estado es
             # transitorio: avisar ahi seria avisar de algo que se esta
             # arreglando solo en este momento.
@@ -785,6 +796,28 @@ def desparejos(db, activas, desde=None) -> list:
                 "estado": estados[apagadas[0]].estado,
             })
 
+        por_plataforma = {e.plataforma: e for e in p.estados}
+        for apagada, prendida in pares_py:
+            py, rappi = por_plataforma.get(apagada), por_plataforma.get(prendida)
+            if py is None or rappi is None:
+                continue
+            if any((p.id, plat) in no_vistos for plat in (apagada, prendida)):
+                continue
+            if desde is not None and any(
+                    e.verificado_en is None or e.verificado_en < desde
+                    for e in (py, rappi)):
+                continue
+            if (py.estado not in (*EstadoItem.APAGADOS_PROPIOS,
+                                 EstadoItem.APAGADO_AJENO)
+                    or rappi.estado != EstadoItem.PRENDIDO):
+                continue
+            salida.append({
+                "producto_id": p.id, "producto": p.nombre,
+                "apagada_en": apagada, "prendida_en": prendida,
+                "nombre_remoto": nombre_remoto(p, prendida),
+                "estado": py.estado,
+            })
+
     _loguear_desparejos(salida)
     return salida
 
@@ -805,20 +838,21 @@ def _loguear_desparejos(salida: list) -> None:
     """
     global _ultimos_desparejos
 
-    ahora = {s["producto_id"] for s in salida}
+    ahora = {(s["producto_id"], s["apagada_en"], s["prendida_en"])
+             for s in salida}
     if ahora == _ultimos_desparejos:
         return
     _ultimos_desparejos = ahora
 
     if salida:
         log.info("%s producto(s) apagados en una tienda y prendidos en la "
-                 "hermana: %s", len(salida),
+                 "otra: %s", len(salida),
                  ", ".join(s["producto"] for s in salida))
     else:
         # Esto antes no se veia nunca (el log estaba adentro de un `if
         # salida`), asi que el aviso quedaba abierto en el log para siempre.
         log.info("Ya no queda nada apagado en una tienda y prendido en la "
-                 "hermana")
+                 "otra")
 
 
 def separar(db, producto_id: int, plataforma: str,

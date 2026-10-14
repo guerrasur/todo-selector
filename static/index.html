@@ -1136,9 +1136,10 @@ function pintarAlertas(alertas) {
     const t = document.createElement('div');
     t.style.marginBottom = dudas.length ? '10px' : '0';
     const b = document.createElement('b');
-    b.textContent = desparejos.length === 1
+    const cantidad = new Set(desparejos.map(d => d.producto_id)).size;
+    b.textContent = cantidad === 1
       ? 'Hay 1 producto apagado en una tienda y prendido en la otra.'
-      : `Hay ${desparejos.length} productos apagados en una tienda y ` +
+      : `Hay ${cantidad} productos apagados en una tienda y ` +
         `prendidos en la otra.`;
     t.append(b, ' Se siguen vendiendo donde quedaron prendidos.');
     cont.appendChild(t);

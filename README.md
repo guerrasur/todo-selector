@@ -1,5 +1,14 @@
 # Todo-Selector
 
+## Versión 6.12 — avisos entre PedidosYa y Rappi
+
+La pantalla avisa cuando un producto vinculado está apagado en PedidosYa
+y prendido en Rappi Turbo o Rappi Común. Muestra el producto y la tienda
+donde sigue disponible. Incluye apagados realizados directamente en el portal.
+Compara únicamente tiendas activas y sin pausa, con estados recientes y
+sin productos ausentes de la última lectura. El aviso desaparece al resolver
+la diferencia; no cambia la disponibilidad automáticamente.
+
 ## Versión 6.11.4 — detectar Guardar en el editor de precios
 
 La detección admite botones, enlaces, inputs de envío y controles con texto
