@@ -1,5 +1,12 @@
 # Todo-Selector
 
+## Versión 6.14 — prender productos con diferencias
+
+El aviso de diferencias incluye «Prender los que tienen diferencia».
+Revisa las diferencias actuales y encola el encendido únicamente en las
+tiendas donde esos productos están apagados, sin repetir un producto por
+tener dos tiendas Rappi prendidas. Respeta productos y tiendas en pausa.
+
 ## Versión 6.12 — avisos entre PedidosYa y Rappi
 
 La pantalla avisa cuando un producto vinculado está apagado en PedidosYa

@@ -1071,6 +1071,34 @@ async function terminarVerificacion(plataforma, boton) {
   }
 }
 
+let prendiendoDiferencias = false;
+
+async function prenderDiferencias() {
+  if (prendiendoDiferencias) return;
+  prendiendoDiferencias = true;
+  const boton = document.getElementById('btn-prender-diferencias');
+  if (boton) { boton.disabled = true; boton.textContent = 'Enviando…'; }
+  try {
+    const r = await fetch('/api/prender-diferencias', {method: 'POST'});
+    const resultado = await r.json();
+    if (!r.ok) throw new Error(resultado.detail || 'La solicitud fue rechazada.');
+    if ((resultado.salteadas || []).length) {
+      alert('Algunas acciones no se enviaron:\n' + resultado.salteadas
+        .map(p => `${NOMBRE_PLAT[p.plataforma] || p.plataforma}: ${p.motivo}`)
+        .join('\n'));
+    }
+  } catch (e) {
+    alert('No pude confirmar si se recibió la acción. Revisá la cola antes de repetirla.');
+  } finally {
+    prendiendoDiferencias = false;
+    if (boton) {
+      boton.disabled = false;
+      boton.textContent = 'Prender los que tienen diferencia';
+    }
+  }
+  try { await cargar(); } catch (e) { /* El próximo refresco lo vuelve a intentar. */ }
+}
+
 function pintarAlertas(alertas) {
   const panel = document.getElementById('panel-alertas');
   const caidas = alertas.sesiones_caidas || [];
@@ -1156,6 +1184,18 @@ function pintarAlertas(alertas) {
                   ` como «${d.nombre_remoto}».`);
       cont.appendChild(fila);
     }
+    const acciones = document.createElement('div');
+    acciones.className = 'acciones';
+    acciones.style.marginTop = '12px';
+    const prender = document.createElement('button');
+    prender.id = 'btn-prender-diferencias';
+    prender.textContent = prendiendoDiferencias
+      ? 'Enviando…' : 'Prender los que tienen diferencia';
+    prender.title = 'Prende estos productos solo en las tiendas donde están apagados';
+    prender.disabled = prendiendoDiferencias;
+    prender.onclick = prenderDiferencias;
+    acciones.appendChild(prender);
+    cont.appendChild(acciones);
   }
 
   if (!dudas.length) return;

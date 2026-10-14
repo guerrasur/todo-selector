@@ -1,5 +1,12 @@
 # Todo-Selector — contexto para Claude Code
 
+## Actualización v6.14 — botón prender diferencias
+
+POST `/api/prender-diferencias` recalcula `alertas`, deduplica por producto
+y tienda apagada y usa `encolar_accion` con acción `prender`. No usar la
+lista del frontend ni prender la carta completa. El estado de envío del
+botón vive fuera del repintado. Prueba: `probar_pedidosya_rappi_alertas.py`.
+
 ## Actualización v6.12 — PedidosYa apagado / Rappi prendido
 
 `catalogo.desparejos` conserva la comparación entre tiendas Rappi y agrega

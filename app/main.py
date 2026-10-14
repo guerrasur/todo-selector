@@ -627,6 +627,21 @@ def alertas(db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/prender-diferencias")
+def prender_diferencias(db: Session = Depends(get_db)):
+    """Recalcula las diferencias y prende solo el lado apagado, una vez."""
+    diferencias = alertas(db)["sin_espejo"]
+    destinos = dict.fromkeys((d["producto_id"], d["apagada_en"])
+                             for d in diferencias)
+    creadas, salteadas = [], []
+    for producto_id, plataforma in destinos:
+        resultado = encolar_accion(AccionIn(
+            producto_id=producto_id, accion="prender", plataformas=[plataforma]), db)
+        creadas.extend(resultado["encoladas"])
+        salteadas.extend(resultado["salteadas"])
+    return {"encoladas": creadas, "salteadas": salteadas}
+
+
 @app.get("/api/estado-sistema")
 def estado_sistema(db: Session = Depends(get_db)):
     pendientes = (db.query(Operacion)

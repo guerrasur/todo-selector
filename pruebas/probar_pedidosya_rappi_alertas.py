@@ -1,6 +1,7 @@
 """python pruebas/probar_pedidosya_rappi_alertas.py — sin portales."""
 import sys
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -9,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from app.database import Base
-from app.models import Producto, EstadoItem, AliasPlataforma
+from app.models import Producto, EstadoItem, AliasPlataforma, Operacion
 from app.catalogo import desparejos
 
 
@@ -87,6 +88,33 @@ class AvisosPedidosYaRappi(unittest.TestCase):
         self.estado("rappi").estado = EstadoItem.APAGADO_AJENO
         self.estado("rappi_comun").estado = EstadoItem.APAGADO_AJENO
         self.assertEqual(self.avisos(), [])
+
+    def test_boton_prende_solo_apagadas_sin_duplicar(self):
+        from app.main import prender_diferencias
+        with patch('app.main.config.plataformas_activas',
+                   return_value=['pedidosya', 'rappi', 'rappi_comun']), \
+             patch('app.main.config.tienda_pausada', return_value=False):
+            resultado = prender_diferencias(self.db)
+            self.assertEqual(resultado['encoladas'], ['pedidosya'])
+            operaciones = self.db.query(Operacion).all()
+            self.assertEqual([(o.plataforma, o.accion) for o in operaciones],
+                             [('pedidosya', 'prender')])
+            self.assertEqual(self.estado('pedidosya').estado, EstadoItem.PRENDIENDO)
+            self.assertEqual(self.estado('rappi').estado, EstadoItem.PRENDIDO)
+            self.assertEqual(prender_diferencias(self.db)['encoladas'], [])
+            self.assertEqual(self.db.query(Operacion).count(), 1)
+
+    def test_boton_recalcula_y_respeta_pausa(self):
+        from app.main import prender_diferencias
+        with patch('app.main.config.plataformas_activas',
+                   return_value=['pedidosya', 'rappi']), \
+             patch('app.main.config.tienda_pausada',
+                   side_effect=lambda p: p == 'pedidosya'):
+            self.assertEqual(prender_diferencias(self.db)['encoladas'], [])
+        self.estado('pedidosya').estado = EstadoItem.PRENDIDO
+        self.db.commit()
+        self.assertEqual(prender_diferencias(self.db)['encoladas'], [])
+        self.assertEqual(self.db.query(Operacion).count(), 0)
 
 
 if __name__ == "__main__":
