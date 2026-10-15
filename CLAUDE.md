@@ -1,5 +1,14 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.16.1 — drawer fuera del viewport
+
+No usar :visible/count para decidir si el filtro está abierto: Rappi mantiene
+el aside con tamaño y lo cierra mediante transform fuera del viewport.
+`_panel_abierto` exige intersección con la pantalla; apertura y cierre esperan
+esa condición, sin esperar hidden de Playwright sobre un drawer montado.
+Close tiene timeout corto y fallback al handler exacto; la limpieza nunca
+reemplaza la excepción de selección original. Prueba: `probar_rappi_filtro.py`.
+
 ## Actualización v6.16 — una sola pestaña de Rappi
 
 Turbo y Común comparten Page y lock (`bloqueo` normaliza ambas a rappi).

@@ -62,6 +62,8 @@ class Seleccion(unittest.IsolatedAsyncioTestCase):
         r._cerrar_lista_filtro=AsyncMock()
         r._abrir_filtro=AsyncMock(return_value=Panel(p))
         r._panel_tiendas=lambda: Panel(p)
+        r._cerrar_filtro=AsyncMock()
+        r._esperar_panel=AsyncMock()
         return p,r
 
     async def test_busca_tienda_en_otra_marca_y_recarga(self):

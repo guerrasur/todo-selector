@@ -4,8 +4,13 @@ Dos adaptadores comparten la misma Page y el worker serializa TODO acceso.
 La marca se busca por las tiendas que realmente contiene; no se supone que
 Turbo y Común compartan brandId. No se guardan ids/nombres de locales aquí.
 """
+import logging
 import re
+import time
 from urllib.parse import urlsplit
+
+
+log = logging.getLogger("rappi")
 
 
 class SeleccionTiendaRappi:
@@ -23,12 +28,61 @@ class SeleccionTiendaRappi:
         return self.page.locator('aside:visible').filter(
             has=self.page.get_by_text("Filtrar Marca y Tienda", exact=True))
 
+    # :visible también incluye drawers cerrados con translateX(-100%).
+    # La caja debe intersectar el viewport; no basta con tener tamaño.
+    JS_PANELES_EN_PANTALLA = """els => els.flatMap((el, i) => {
+        const r = el.getBoundingClientRect();
+        const estilo = getComputedStyle(el);
+        const ancho = Math.min(r.right, innerWidth) - Math.max(r.left, 0);
+        const alto = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+        return !el.closest('[inert], [aria-hidden="true"]') &&
+            estilo.display !== 'none' && estilo.visibility !== 'hidden' &&
+            ancho > 1 && alto > 1 ? [i] : [];
+    })"""
+
+    async def _panel_abierto(self):
+        paneles = self._panel_tiendas()
+        indices = await paneles.evaluate_all(self.JS_PANELES_EN_PANTALLA)
+        if len(indices) > 1:
+            raise RuntimeError("Hay más de un filtro de tiendas abierto en Rappi")
+        return paneles.nth(indices[0]) if indices else None
+
+    async def _esperar_panel(self, abierto, timeout=10000):
+        limite = time.monotonic() + timeout / 1000
+        while True:
+            panel = await self._panel_abierto()
+            if (panel is not None) == abierto:
+                return panel
+            if time.monotonic() >= limite:
+                accion = "abrió" if abierto else "cerró"
+                raise RuntimeError(f"El filtro de tiendas de Rappi no se {accion}")
+            await self.page.wait_for_timeout(100)
+
     async def _abrir_filtro(self):
-        panel = self._panel_tiendas()
-        if not await panel.count():
-            await self.page.locator('[data-component="store-select"]').click()
-        await panel.wait_for(state="visible", timeout=10000)
+        panel = await self._panel_abierto()
+        if panel is None:
+            await self.page.locator('[data-component="store-select"]').click(timeout=5000)
+            panel = await self._esperar_panel(abierto=True)
         return panel
+
+    async def _cerrar_filtro(self):
+        panel = await self._panel_abierto()
+        if panel is None:
+            return
+        boton = panel.get_by_role('button', name='Close', exact=True)
+        if await boton.count() != 1:
+            raise RuntimeError("No identifiqué un único botón para cerrar el filtro de Rappi")
+        try:
+            await boton.click(timeout=2000)
+        except Exception:
+            # Close solo descarta el panel. Su handler no necesita coordenadas;
+            # evita bloquear 30 s por un layout que lo dejó fuera del viewport.
+            await boton.evaluate("""el => {
+                if (el.disabled || el.getAttribute('aria-disabled') === 'true')
+                    throw new Error('El cierre del filtro está deshabilitado');
+                el.click();
+            }""", timeout=2000)
+        await self._esperar_panel(abierto=False, timeout=5000)
 
     async def _lista_filtro(self, campo):
         panel = await self._abrir_filtro()
@@ -130,10 +184,10 @@ class SeleccionTiendaRappi:
             await self._cerrar_lista_filtro()
             panel = await self._abrir_filtro()
             if sin_cambio:
-                await panel.get_by_role('button', name='Close', exact=True).click()
+                await self._cerrar_filtro()
             else:
                 await panel.get_by_role('button', name='Aplicar filtro', exact=True).click()
-            await panel.wait_for(state='hidden', timeout=15000)
+            await self._esperar_panel(abierto=False, timeout=15000)
             if not sin_cambio:
                 # Una URL/header nuevos pueden preceder a la respuesta de
                 # productos. Recargar evita aceptar las filas de la tienda anterior.
@@ -150,8 +204,10 @@ class SeleccionTiendaRappi:
             self.page._todo_tienda = {'store_id': self.store_id, 'nombre': nombre}
         except Exception:
             self.page._todo_tienda = None
-            # No aplicar un filtro parcial ni dejar el panel tapando productos.
-            panel = self._panel_tiendas()
-            if await panel.count():
-                await panel.get_by_role('button', name='Close', exact=True).click()
+            # El cierre es limpieza: si falla, conservar el error de selección.
+            log.exception("%s: falló la selección de tienda en Rappi", self.nombre)
+            try:
+                await self._cerrar_filtro()
+            except Exception as cierre:
+                log.warning("%s: tampoco pude cerrar el filtro: %s", self.nombre, cierre)
             raise
