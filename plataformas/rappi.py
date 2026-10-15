@@ -44,8 +44,10 @@ indefinidamente" aparece un SEGUNDO modal de confirmacion,
 """
 
 import logging
+import re
 import time
 from typing import Optional
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, ResultadoTienda, plano
 from .rappi_precios import PreciosRappi
@@ -145,7 +147,8 @@ class Rappi(PreciosRappi, PlataformaBase):
     # producto del portal, asi que identifica la tarjeta sin ambiguedad
     # (ej: menu-category-101536-product-1148962-availability-switch-control).
     XPATH_TARJETA = ("xpath=ancestor::*"
-                     "[.//*[contains(@data-testid,'availability-switch-control')]][1]")
+                     "[.//*[contains(@data-testid,'availability-switch-control')"
+                     " or @data-component='menu-item-availability-switch']][1]")
     SELECTOR_ID_TARJETA = '[data-testid*="availability-switch-control"]'
     ATRIBUTO_ID_TARJETA = "data-testid"
 
@@ -197,18 +200,47 @@ class Rappi(PreciosRappi, PlataformaBase):
 
     @property
     def url_menu(self) -> str:
-        return (
-            f"https://partners.rappi.com/menu"
-            f"?brandId={self.brand_id}&storeIds={self.store_id}"
-            f"&storeId={self.store_id}"
-        )
+        return "https://restaurantes.rappi.com/menu?" + urlencode(
+            {"storeIds": self.store_id})
 
     def en_el_menu(self) -> bool:
-        # Rappi reescribe la URL con los storeIds de TODAS las tiendas, asi
-        # que la nuestra nunca coincide entera. Alcanza con estar en /menu
-        # y con la tienda correcta seleccionada.
-        u = self.page.url
-        return "partners.rappi.com/menu" in u and f"storeId={self.store_id}" in u
+        u = urlsplit(self.page.url)
+        if u.path.rstrip("/") != "/menu" or not self.store_id:
+            return False
+        query = parse_qs(u.query)
+        if u.hostname == "restaurantes.rappi.com":
+            # Un menú con varias tiendas no identifica una sucursal única.
+            return query.get("storeIds") == [self.store_id] and (
+                "storeId" not in query or query["storeId"] == [self.store_id])
+        return (u.hostname == "partners.rappi.com"
+                and query.get("storeId") == [self.store_id])
+
+    # HTML confirmado del Portal Aliados (octubre 2026). No usar data-state
+    # del botón: dice closed/open para el popup, no disponibilidad.
+    SELECTOR_TOGGLE_NUEVO = (
+        '[data-component="menu-item-availability-switch"] button[role="switch"]')
+    XPATH_FILA_NUEVA = (
+        'xpath=ancestor::*[.//*[@data-component="menu-product-description"]'
+        ' and .//*[@data-component="menu-item-availability-switch"]][1]')
+
+    def _filas_nuevas(self):
+        return self.page.locator(
+            '[data-component="menu-product-description"]').locator(self.XPATH_FILA_NUEVA)
+
+    def _nombres_nuevos(self):
+        return self.page.locator('[data-component="menu-product-description"]').locator(
+            'xpath=preceding-sibling::div//p')
+
+    async def tarjetas_del_nombre(self, nombre_remoto: str) -> list:
+        if await self._filas_nuevas().count():
+            filas = self._nombres_nuevos().filter(has_text=re.compile(
+                r"^" + re.escape(nombre_remoto) + r"$"
+            )).locator(self.XPATH_FILA_NUEVA)
+            # Identidad DOM: aria-controls es opcional y los ids de producto
+            # ya no están publicados. XPath deduplica la misma fila.
+            return await filas.evaluate_all(
+                "els => [...new Set(els)].map((e,i) => [String(i), e.innerText.slice(0,70)])")
+        return await super().tarjetas_del_nombre(nombre_remoto)
 
     # El toggle de un PRODUCTO, que es el unico que prueba que la carta
     # cargo de verdad.
@@ -227,7 +259,8 @@ class Rappi(PreciosRappi, PlataformaBase):
     # existia en el DOM. Lo que hace falta es un producto, asi que se pide
     # un toggle de producto: el `-product-` es lo que los distingue.
     SELECTOR_TOGGLE_PRODUCTO = ('[data-testid*="-product-"]'
-                                '[data-testid*="availability-switch-control"]')
+                                '[data-testid*="availability-switch-control"], '
+                                + SELECTOR_TOGGLE_NUEVO)
 
     async def asegurar_sesion(self) -> bool:
         await self.ir_al_menu()
@@ -291,7 +324,8 @@ class Rappi(PreciosRappi, PlataformaBase):
             cabeceras: cabeceras.length,
             plegadas: aria('false'),
             abiertas: aria('true'),
-            producto: testids.filter(t => t.includes('-product-')).length,
+            producto: testids.filter(t => t.includes('-product-')).length +
+                q('[data-component="menu-item-availability-switch"] button[role="switch"]').length,
             categoria: testids.filter(t => !t.includes('-product-')).length,
             fotos: q('img[data-testid="catalog-item-image"]').length,
             password: q('input[type="password"]').length,
@@ -412,7 +446,13 @@ class Rappi(PreciosRappi, PlataformaBase):
         depender de cuantos <div> hay entre el nombre y el resto de la
         tarjeta.
         """
-        return self.texto_exacto(nombre_remoto).first.locator(self.XPATH_TARJETA)
+        nuevas = self._nombres_nuevos().filter(
+            has_text=re.compile(r"^" + re.escape(nombre_remoto) + r"$")
+        ).locator(self.XPATH_FILA_NUEVA)
+        anteriores = self.texto_exacto(nombre_remoto).locator(
+            "xpath=ancestor::*[.//*[contains(@data-testid,"
+            "'availability-switch-control')]][1]")
+        return nuevas.or_(anteriores).first
 
     def _toggle_clickeable(self, tarjeta):
         """El elemento que hay que clickear para togglear disponibilidad.
@@ -422,7 +462,7 @@ class Rappi(PreciosRappi, PlataformaBase):
         (id="switch-hidden-input"), asi que clickear el input directo
         puede fallar por no ser interactuable.
         """
-        control = tarjeta.locator('[data-testid*="availability-switch-control"]').first
+        control = tarjeta.locator('[data-testid*="availability-switch-control"], ' + self.SELECTOR_TOGGLE_NUEVO).first
         return control
 
     def _toggle_input(self, tarjeta):
@@ -441,6 +481,9 @@ class Rappi(PreciosRappi, PlataformaBase):
         OJO: un producto sin foto no va a aparecer aca.
         """
         await self.ir_al_menu()
+        if await self._filas_nuevas().count():
+            return [n.strip() for n in await self._nombres_nuevos().all_text_contents()
+                    if n.strip()]
         imgs = self.page.locator('img[data-testid="catalog-item-image"]')
         nombres = []
         for i in range(await imgs.count()):
@@ -531,6 +574,7 @@ class Rappi(PreciosRappi, PlataformaBase):
 
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
         await self.ir_al_menu()
+        await self.revisar_ambiguedad(nombre_remoto)
         tarjeta = self._tarjeta(nombre_remoto)
 
         if await tarjeta.count() == 0:
@@ -548,7 +592,7 @@ class Rappi(PreciosRappi, PlataformaBase):
         toggle = self._toggle_input(tarjeta)
         if await toggle.count() > 0:
             aria = await toggle.get_attribute("aria-checked")
-            if aria is not None:
+            if aria in ("true", "false"):
                 return ResultadoEstado(disponible=(aria == "true"), detalle=f"aria={aria}")
             try:
                 return ResultadoEstado(disponible=await toggle.is_checked(),
@@ -556,6 +600,8 @@ class Rappi(PreciosRappi, PlataformaBase):
             except Exception:
                 pass
 
+        if await tarjeta.locator(self.SELECTOR_TOGGLE_NUEVO).count():
+            return None  # No inventar disponibilidad si el nuevo switch no la publica.
         return ResultadoEstado(disponible=True, detalle="sin badge de apagado")
 
     def _opciones_abiertas(self):
@@ -574,7 +620,7 @@ class Rappi(PreciosRappi, PlataformaBase):
         encadenan operaciones que fallan todas igual".
         """
         return self.visible(self.page.locator(
-            f"{self.SELECTOR_OPCION}, [data-floating-ui-portal]"))
+            f"{self.SELECTOR_OPCION}, [data-floating-ui-portal], [role=dialog]"))
 
     # Cuantas veces mandar Escape antes de avisar que quedo algo abierto.
     INTENTOS_DE_CIERRE = 2
