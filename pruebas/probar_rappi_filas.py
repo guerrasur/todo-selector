@@ -72,6 +72,7 @@ class Filas(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await r.leer_todos(),{'Prueba':True,'Prueba chica':False})
         self.assertTrue((await r.leer_estado('Prueba')).disponible)
         self.assertIsNone(await r.leer_estado('Prueb'))
+        self.assertIn("No encontré el nombre exacto 'Prueb'", r.ultimo_error_producto)
 
     async def test_espacios_exteriores_no_pierden_nombre_ni_confunden_prefijos(self):
         r=crear(fila('  Producto ficticio  ','true')+fila('Producto ficticio grande','false'))

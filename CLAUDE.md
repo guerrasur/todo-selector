@@ -1,5 +1,25 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.16.8 — lecturas entre operaciones de Rappi
+
+El log real 6.16.7 confirmó lectura de wraps ya apagados. No demostró un
+apagado nuevo. Un vínculo con nombre distinto del portal falló y debe
+corregirse en Carta; no agregar equivalencias automáticas. leer_estado
+informa nombre exacto no encontrado y el worker conserva ese detalle.
+
+estado_tienda devolvía None en el adaptador nuevo, pero el worker primero
+_preparar navegaba la carta. Ahora ese caso devuelve desconocido antes de
+preparar: no cambiar tienda para una lectura que todavía no está adaptada.
+
+La guarda central de _preparar pospone lecturas Rappi mientras haya ids en
+la tanda o tareas de operación (incluso esperando el lock). Las tareas de
+operación se identifican por asyncio.current_task, se registran antes del
+lock y se retiran en finally; solo ellas pueden preparar durante la tanda.
+Esto también cubre lecturas pedidas explícitamente y evita la carrera de
+un lector que esperaba el lock. PedidosYa conserva su preparación.
+No cambiar la regla de duración no confirmada para un producto ya apagado.
+Pruebas: probar_rappi_tanda.py, probar_rappi_filas.py y regresiones existentes.
+
 ## Operación v6.16.7 — categorías y nuevo diálogo
 
 El log real 6.16.6 confirmó 30 productos en ambas tiendas tras abrir las

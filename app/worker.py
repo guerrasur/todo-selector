@@ -180,6 +180,7 @@ class Worker:
         # log del 2026-07-27, que dio un verificar-catalogo con 22 falsos
         # "no encontrado").
         self.bloqueos = {}
+        self._tareas_operacion_rappi = set()
         self._tanda_rappi = []  # snapshot finito de ids: Turbo, luego Común
         self.rappi_solo_diagnostico = False
 
@@ -655,8 +656,16 @@ class Worker:
             return False, (f"{plataforma} no está activa en esta instalación "
                            f"(revisá Ajustes)"), NO_ACTIVA
 
-        async with self.bloqueo(plataforma):
-            return await self._ejecutar_sin_turno(plat, plataforma, accion, nombre_remoto)
+        tarea = asyncio.current_task()
+        es_rappi = plataforma in ("rappi", "rappi_comun")
+        if es_rappi:
+            self._tareas_operacion_rappi.add(tarea)
+        try:
+            async with self.bloqueo(plataforma):
+                return await self._ejecutar_sin_turno(plat, plataforma, accion, nombre_remoto)
+        finally:
+            if es_rappi:
+                self._tareas_operacion_rappi.discard(tarea)
 
     async def _ejecutar_sin_turno(self, plat, plataforma, accion, nombre_remoto):
         from plataformas.base import NombreAmbiguo, DuracionNoConfirmada
@@ -696,7 +705,8 @@ class Worker:
                 if not sigue_ok:
                     return False, "se cayo la sesion durante la operacion", SIN_SESION
 
-            return ok, ("" if ok else "no se pudo confirmar el cambio"), ""
+            return ok, ("" if ok else getattr(plat, "ultimo_error_producto", "")
+                        or "no se pudo confirmar el cambio"), ""
         except DuracionNoConfirmada as e:
             return False, str(e), DURACION_NO_CONFIRMADA
         except NombreAmbiguo as e:
@@ -793,6 +803,10 @@ class Worker:
         """
         if self.rappi_solo_diagnostico and plataforma in ("rappi", "rappi_comun"):
             return False, "Rappi en diagnóstico: se revisó al arrancar y las acciones están en pausa"
+        if (plataforma in ("rappi", "rappi_comun")
+                and (self._tanda_rappi or self._tareas_operacion_rappi)
+                and asyncio.current_task() not in self._tareas_operacion_rappi):
+            return False, "lectura pospuesta hasta terminar la tanda de Rappi"
         plat = self.plataformas.get(plataforma)
         if plat is None:
             return False, f"plataforma desconocida: {plataforma}"
@@ -1215,6 +1229,13 @@ class Worker:
         plat = self.plataformas.get(plataforma)
         if self.modo_simulado or plat is None:
             return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
+
+        if (plataforma in ("rappi", "rappi_comun")
+                and getattr(plat, "_portal_nuevo", lambda: False)()):
+            # El adaptador ya devuelve desconocido para Gestión de tiendas.
+            # No preparar/navegar la carta solo para obtener ese mismo None.
+            return {"abierta": None, "motivo":
+                    "El estado general de la tienda requiere adaptar Gestión de tiendas"}
 
         async with self.bloqueo(plataforma):
             listo, motivo = await self._preparar(plataforma)

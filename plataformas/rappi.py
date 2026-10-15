@@ -600,7 +600,11 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         await self.revisar_ambiguedad(nombre_remoto)
         tarjeta = self._tarjeta(nombre_remoto)
 
+        self.ultimo_error_producto = ""
         if await tarjeta.count() == 0:
+            self.ultimo_error_producto = (
+                f"No encontré el nombre exacto '{nombre_remoto}' en la carta de Rappi; "
+                "revisá su vínculo en Carta")
             return None
 
         # Fuente 1: el badge de texto (mas confiable, no depende de

@@ -103,6 +103,46 @@ class Tandas(unittest.IsolatedAsyncioTestCase):
         pagina.close.assert_not_called()
         self.assertIs(w.bloqueo('rappi'),bloqueo)
 
+class Coordinacion(Tandas):
+    async def test_guardia_central_frena_lecturas_explicitamente_pedidas(self):
+        w = self.worker; w.modo_simulado = False; w._tanda_rappi = [123]
+        for tienda in ('rappi', 'rappi_comun'):
+            listo, motivo = await w._preparar(tienda)
+            self.assertFalse(listo)
+            self.assertIn('pospuesta', motivo)
+        # PedidosYa no pasa por esta guarda.
+        self.assertIn('desconocida', (await w._preparar('pedidosya'))[1])
+
+    async def test_operacion_esperando_lock_bloquea_lectura_y_limpia_turno(self):
+        w = self.worker; w.modo_simulado = False
+        w.plataformas['rappi'] = SimpleNamespace(configurado=False)
+        motivos = []
+        async def operar(*args):
+            motivos.append((await w._preparar('rappi'))[1])
+            return False, 'prueba', ''
+        w._ejecutar_sin_turno = AsyncMock(side_effect=operar)
+        lock = w.bloqueo('rappi')
+        await lock.acquire()
+        tarea = asyncio.create_task(w._ejecutar('rappi', 'apagar_hoy', 'Ejemplo'))
+        try:
+            await asyncio.sleep(0)
+            self.assertTrue(w._tareas_operacion_rappi)
+            self.assertIn('pospuesta', (await w._preparar('rappi_comun'))[1])
+        finally:
+            lock.release()
+            await tarea
+        self.assertIn('falta configurar', motivos[0])
+        self.assertEqual(w._tareas_operacion_rappi, set())
+
+    async def test_estado_general_no_prepara_carta_si_no_esta_adaptado(self):
+        w = self.worker; w.modo_simulado = False
+        w.plataformas['rappi'] = SimpleNamespace(_portal_nuevo=lambda: True)
+        w._preparar = AsyncMock()
+        resultado = await w.estado_tienda('rappi')
+        self.assertIsNone(resultado['abierta'])
+        self.assertIn('Gestión de tiendas', resultado['motivo'])
+        w._preparar.assert_not_awaited()
+
 class Diagnostico(Tandas):
     async def test_arranque_real_sale_del_diagnostico(self):
         w = self.worker
