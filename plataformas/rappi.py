@@ -51,11 +51,12 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, ResultadoTienda, plano
 from .rappi_precios import PreciosRappi
+from .rappi_tiendas import SeleccionTiendaRappi
 
 log = logging.getLogger("rappi")
 
 
-class Rappi(PreciosRappi, PlataformaBase):
+class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
     nombre = "rappi"
 
     # La marca y la tienda son las TUYAS: salen de Ajustes y no tienen
@@ -283,6 +284,9 @@ class Rappi(PreciosRappi, PlataformaBase):
             log.warning("%s: la carta no cargo. %s",
                         self.nombre, await self.huella_de_pantalla())
             return False
+
+        if self._portal_nuevo():
+            await self._seleccionar_tienda(forzar=True)
 
         # El menu ya esta: recien ahora existe la franja que se come los
         # clicks. Va aca y no en apagar()/prender() porque asegurar_sesion()
@@ -836,6 +840,7 @@ class Rappi(PreciosRappi, PlataformaBase):
         # <input>, que la activacion nativa del label si propaga) y apagar
         # no abria nada nunca. profundo=True clickea el descendiente mas
         # profundo, asi que el evento sube por todos los niveles.
+        await self._exigir_tienda()
         click_real = await self.clickear(self._toggle_clickeable(tarjeta),
                                          que="toggle", profundo=True)
 
@@ -861,6 +866,7 @@ class Rappi(PreciosRappi, PlataformaBase):
             await self.recargar_y_preparar(por_que=f"reintentar '{nombre_remoto}'")
             return False
 
+        await self._exigir_tienda()
         if por_js:
             # La opcion esta en el DOM pero Playwright no la ve. El camino
             # normal quemaria su timeout entero esperando una visibilidad
@@ -885,6 +891,7 @@ class Rappi(PreciosRappi, PlataformaBase):
         # CONFIRMADO POR CAPTURA (2026-07-27): cualquiera de las 2 opciones
         # abre un segundo modal "¿Desactivar producto?" con botones
         # "Cancelar" y "Sí, desactivar" (rojo). Hay que confirmar ahi.
+        await self._exigir_tienda()
         if not await self._confirmar_en_el_modal():
             log.warning("%s: no encontre el boton de confirmar del modal. Lo "
                         "que hay abierto dice: %s", self.nombre,
@@ -1073,6 +1080,7 @@ class Rappi(PreciosRappi, PlataformaBase):
         # Mismo profundo=True que en apagar(): aca el camino viejo andaba,
         # pero el toggle es el mismo elemento y no hay motivo para que los
         # dos lados usen fallbacks distintos.
+        await self._exigir_tienda()
         await self.clickear(self._toggle_clickeable(tarjeta), que="toggle",
                             profundo=True)
         await self.page.wait_for_timeout(2500)

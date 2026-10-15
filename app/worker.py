@@ -1,7 +1,7 @@
 """Worker en background: mantiene el navegador abierto y procesa la cola.
 
 Diseño:
-  - UN navegador persistente, con UNA pestaña por plataforma, siempre logueado.
+  - UN navegador persistente: PedidosYa y una pestaña compartida por ambos Rappi.
   - La UI nunca espera al navegador: encola una Operacion y devuelve enseguida.
   - Cada 5 min se revisa todo lo apagado (PedidosYa a veces lo revive solo).
 """
@@ -180,6 +180,7 @@ class Worker:
         # log del 2026-07-27, que dio un verificar-catalogo con 22 falsos
         # "no encontrado").
         self.bloqueos = {}
+        self._tanda_rappi = []  # snapshot finito de ids: Turbo, luego Común
 
     def olvidar_catalogo(self):
         """Se borro el catalogo: lo que teniamos en memoria ya no existe.
@@ -198,6 +199,8 @@ class Worker:
 
     def bloqueo(self, plataforma: str) -> asyncio.Lock:
         """Turno exclusivo sobre la pestaña de una plataforma."""
+        if plataforma in ("rappi", "rappi_comun"):
+            plataforma = "rappi"  # una pestaña, un único turno para ambas tiendas
         if plataforma not in self.bloqueos:
             self.bloqueos[plataforma] = asyncio.Lock()
         return self.bloqueos[plataforma]
@@ -266,6 +269,13 @@ class Worker:
 
         # Una pestaña fija por plataforma
         pag_py = self.browser.pages[0] if self.browser.pages else await self.browser.new_page()
+        # Las pestañas de Rappi restauradas del arranque anterior también
+        # comparten selección. No dejar ninguna segunda pestaña del portal.
+        from urllib.parse import urlsplit
+        for anterior in list(self.browser.pages):
+            if anterior is not pag_py and urlsplit(anterior.url).hostname in (
+                    "partners.rappi.com", "restaurantes.rappi.com"):
+                await anterior.close()
         pag_rappi = await self.browser.new_page()
 
         # Que sucursal es sale de Ajustes: el id de menu de PedidosYa y el
@@ -318,10 +328,10 @@ class Worker:
                 log.error("Error verificando sesion %s: %s", nombre, e)
 
     async def _abrir_rappi_comun(self):
-        """Le abre la pestaña a Rappi Común (la plataforma opcional)."""
+        """Agrega el adaptador Común sobre la misma pestaña de Rappi."""
         from plataformas.rappi import Rappi
 
-        pagina = await self.browser.new_page()
+        pagina = self.plataformas["rappi"].page
         self.plataformas["rappi_comun"] = Rappi(
             pagina,
             store_id=config.texto("rappi_comun_store_id"),
@@ -346,15 +356,17 @@ class Worker:
         self.verificacion.pop(nombre, None)
         self.novedades.pop(nombre, None)
         self.no_encontrados.pop(nombre, None)
-        self.bloqueos.pop(nombre, None)
+        if nombre not in ("rappi", "rappi_comun"):
+            self.bloqueos.pop(nombre, None)
 
         if plat is None:
             return
         try:
-            await plat.page.close()
+            if not any(p.page is plat.page for p in self.plataformas.values()):
+                await plat.page.close()
         except Exception as e:
             log.warning("No pude cerrar la pestaña de %s: %s", nombre, e)
-        log.info("%s quedo desactivada: se cerro su pestaña", nombre)
+        log.info("%s quedo desactivada; se conservan las pestañas compartidas", nombre)
 
     async def detener(self):
         self.corriendo = False
@@ -372,6 +384,27 @@ class Worker:
             except Exception as e:
                 log.exception("Error en loop de cola: %s", e)
             await asyncio.sleep(INTERVALO_COLA)
+
+    def _siguiente_pendiente(self, consulta):
+        """Tandas finitas: las nuevas órdenes no postergan Común para siempre.
+
+        consulta ya excluye verificaciones, sesiones en espera y reintentos
+        demorados. Una operación se retira de la tanda antes de ejecutarse:
+        si falla no vuelve a ponerse delante de las restantes.
+        """
+        while self._tanda_rappi:
+            ident = self._tanda_rappi.pop(0)
+            op = consulta.filter(Operacion.id == ident).first()
+            if op is not None:
+                return op
+        primera = consulta.order_by(Operacion.creada_en, Operacion.id).first()
+        if primera is None or primera.plataforma not in ("rappi", "rappi_comun"):
+            return primera
+        candidatas = (consulta.filter(Operacion.plataforma.in_(("rappi", "rappi_comun")))
+                      .order_by(Operacion.creada_en, Operacion.id).all())
+        self._tanda_rappi = [op.id for tienda in ("rappi", "rappi_comun")
+                            for op in candidatas if op.plataforma == tienda]
+        return self._siguiente_pendiente(consulta)
 
     async def _procesar_pendientes(self):
         db = SessionLocal()
@@ -399,7 +432,7 @@ class Worker:
             if en_espera:
                 consulta = consulta.filter(~Operacion.plataforma.in_(en_espera))
 
-            op = consulta.order_by(Operacion.creada_en, Operacion.id).first()
+            op = self._siguiente_pendiente(consulta)
             if not op:
                 return
 
@@ -957,6 +990,10 @@ class Worker:
                 for plat, datos in self.verificacion.items()}
 
     async def aplicar_config(self) -> dict:
+        async with self.bloqueo("rappi"):
+            return await self._aplicar_config_con_turno()
+
+    async def _aplicar_config_con_turno(self) -> dict:
         """Le pasa a las pestañas los ids de sucursal que se acaban de guardar.
 
         Sin esto, cambiar de local en Ajustes no hacia nada hasta reiniciar

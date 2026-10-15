@@ -1,5 +1,22 @@
 # Todo-Selector — contexto para Claude Code
 
+## Actualización v6.16 — una sola pestaña de Rappi
+
+Turbo y Común comparten Page y lock (`bloqueo` normaliza ambas a rappi).
+No volver a crear una segunda pestaña: Portal Aliados sincroniza su selección.
+`rappi_tiendas.py` selecciona marca/tienda por value numérico de los radios,
+confirma una única tienda antes de Aplicar y comprueba URL + nombre visible.
+Tras cambiar de tienda recarga para no leer filas de la anterior. La caché
+vive en la Page compartida, no en cada adaptador. Un cambio externo bloquea
+el clic. Desactivar Común no cierra la Page ni elimina el lock de Turbo.
+
+La cola toma snapshots finitos de ids elegibles, Turbo y luego Común; conserva
+FIFO dentro de cada tienda. Las nuevas órdenes van a otra tanda. Fallos y
+cancelaciones no bloquean la tanda; las guardas de última intención siguen
+actuando antes y después de ejecutar. Ajustes de Rappi también usan el lock.
+Pruebas nuevas: `probar_rappi_tanda.py` y `probar_rappi_seleccion.py`.
+El diálogo de duración del apagado sigue pendiente de validación en vivo.
+
 ## Actualización v6.14 — botón prender diferencias
 
 POST `/api/prender-diferencias` recalcula `alertas`, deduplica por producto
