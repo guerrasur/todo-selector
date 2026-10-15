@@ -1,5 +1,13 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.16.2 — botones store-select duplicados
+
+Rappi publica dos botones store-select. Toda interacción, lectura del nombre
+y confirmación de tienda usa `_selector_tienda`, que exige un único botón
+con caja visible dentro del viewport. No usar el locator crudo para click,
+inner_text ni querySelector del primer nodo. Dos botones realmente visibles
+son ambiguos; una copia oculta no cuenta. Regresiones en probar_rappi_filtro.py.
+
 ## Corrección v6.16.1 — drawer fuera del viewport
 
 No usar :visible/count para decidir si el filtro está abierto: Rappi mantiene

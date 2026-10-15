@@ -31,6 +31,7 @@ class Filtro(unittest.IsolatedAsyncioTestCase):
         p.wait_for_timeout=AsyncMock()
         r=Rappi(p,store_id='AR100',brand_id='AR10')
         r._panel_tiendas=lambda:Paneles(p)
+        r._selector_tienda=AsyncMock(return_value=p.disparador)
         return p,r
 
     async def test_panel_montado_fuera_de_pantalla_requiere_abrir(self):
@@ -72,6 +73,37 @@ class Filtro(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError,'error original de Marca'):
                 await r._seleccionar_tienda(forzar=True)
         self.assertIsNone(p._todo_tienda)
+
+    async def test_dos_selectores_usa_el_segundo_cuando_el_primero_esta_oculto(self):
+        p,r=self.crear()
+        candidato_oculto=SimpleNamespace(click=AsyncMock(),inner_text=AsyncMock(return_value='Otra tienda'))
+        candidato_visible=SimpleNamespace(click=p.disparador.click,inner_text=AsyncMock(return_value='Centro Turbo'))
+        coleccion=SimpleNamespace(evaluate_all=AsyncMock(return_value=[1]),
+                                 nth=lambda i:[candidato_oculto,candidato_visible][i])
+        p.locator=lambda _:coleccion
+        # Ejecutar el método real, no el doble usado por los demás tests.
+        del r._selector_tienda
+        boton=await r._selector_tienda()
+        self.assertIs(boton,candidato_visible)
+        self.assertEqual(await r._nombre_tienda_actual(),'Centro Turbo')
+        await r._abrir_filtro()
+        candidato_visible.click.assert_awaited_once_with(timeout=5000)
+        candidato_oculto.click.assert_not_awaited()
+
+    async def test_dos_selectores_realmente_visibles_no_elige_por_posicion(self):
+        p,r=self.crear()
+        p.locator=lambda _:SimpleNamespace(evaluate_all=AsyncMock(return_value=[0,1]))
+        del r._selector_tienda
+        with self.assertRaisesRegex(RuntimeError,'más de un selector'):
+            await r._selector_tienda()
+
+    async def test_selector_sin_caja_visible_no_se_clica(self):
+        p,r=self.crear()
+        p.locator=lambda _:SimpleNamespace(evaluate_all=AsyncMock(return_value=[]))
+        del r._selector_tienda
+        with self.assertRaisesRegex(RuntimeError,'No hay un selector'):
+            await r._abrir_filtro()
+        p.disparador.click.assert_not_awaited()
 
     def test_js_descarta_drawer_desplazado_y_conserva_panel_activo(self):
         script=r'''

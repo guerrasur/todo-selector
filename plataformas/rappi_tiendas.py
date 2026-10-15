@@ -58,10 +58,34 @@ class SeleccionTiendaRappi:
                 raise RuntimeError(f"El filtro de tiendas de Rappi no se {accion}")
             await self.page.wait_for_timeout(100)
 
+    async def _selector_tienda(self):
+        botones = self.page.locator('[data-component="store-select"]')
+        indices = await botones.evaluate_all(self.JS_PANELES_EN_PANTALLA)
+        if len(indices) > 1:
+            raise RuntimeError("Hay más de un selector de tienda de Rappi en pantalla")
+        return botones.nth(indices[0]) if indices else None
+
+    async def _nombre_tienda_actual(self):
+        boton = await self._selector_tienda()
+        return (' '.join((await boton.inner_text()).split())
+                if boton is not None else None)
+
+    async def _esperar_tienda_actual(self, nombre, timeout=15000):
+        limite = time.monotonic() + timeout / 1000
+        while True:
+            if self.en_el_menu() and await self._nombre_tienda_actual() == nombre:
+                return
+            if time.monotonic() >= limite:
+                raise RuntimeError("Rappi no confirmó la tienda en la URL y el selector visible")
+            await self.page.wait_for_timeout(100)
+
     async def _abrir_filtro(self):
         panel = await self._panel_abierto()
         if panel is None:
-            await self.page.locator('[data-component="store-select"]').click(timeout=5000)
+            boton = await self._selector_tienda()
+            if boton is None:
+                raise RuntimeError("No hay un selector de tiendas de Rappi en pantalla")
+            await boton.click(timeout=5000)
             panel = await self._esperar_panel(abierto=True)
         return panel
 
@@ -110,10 +134,7 @@ class SeleccionTiendaRappi:
         dato = getattr(self.page, '_todo_tienda', None)
         if not dato or dato['store_id'] != self.store_id or not self.en_el_menu():
             return False
-        selector = self.page.locator('[data-component="store-select"]')
-        if await selector.count() != 1:
-            return False
-        return ' '.join((await selector.inner_text()).split()) == dato['nombre']
+        return await self._nombre_tienda_actual() == dato['nombre']
 
     async def _exigir_tienda(self):
         if self._portal_nuevo() and not await self._tienda_verificada():
@@ -162,8 +183,7 @@ class SeleccionTiendaRappi:
                     nombre = ' '.join((await opcion.inner_text()).split())
                     sin_cambio = (marca == marca_original and self.en_el_menu()
                                   and await opcion.get_attribute('aria-checked') == 'true'
-                                  and ' '.join((await self.page.locator(
-                                      '[data-component="store-select"]').inner_text()).split()) == nombre)
+                                  and await self._nombre_tienda_actual() == nombre)
                     await opcion.click()
                     await self._cerrar_lista_filtro()
                     break
@@ -192,14 +212,7 @@ class SeleccionTiendaRappi:
                 # Una URL/header nuevos pueden preceder a la respuesta de
                 # productos. Recargar evita aceptar las filas de la tienda anterior.
                 await self.page.reload(wait_until='domcontentloaded')
-            await self.page.wait_for_function(
-                """d => { const u = new URL(location.href);
-                    const b = document.querySelector('[data-component="store-select"]');
-                    return u.pathname.replace(/\\/$/, '') === '/menu'
-                      && u.searchParams.getAll('storeIds').length === 1
-                      && u.searchParams.get('storeIds') === d.id
-                      && b && b.innerText.replace(/\\s+/g,' ').trim() === d.nombre;
-                }""", arg={'id': self.store_id, 'nombre': nombre}, timeout=15000)
+            await self._esperar_tienda_actual(nombre)
             await self.page.wait_for_selector(self.SELECTOR_TOGGLE_PRODUCTO, timeout=15000)
             self.page._todo_tienda = {'store_id': self.store_id, 'nombre': nombre}
         except Exception:
