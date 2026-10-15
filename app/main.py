@@ -661,6 +661,7 @@ def estado_sistema(db: Session = Depends(get_db)):
 
     return {
         "version": VERSION,
+        "rappi_diagnostico": worker.rappi_solo_diagnostico,
         "simulado": MODO_SIMULADO,
         "arrancado_en": ARRANCADO_EN.isoformat(timespec="seconds"),
         "sesiones": worker.sesion_ok,

@@ -52,11 +52,12 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, ResultadoTienda, plano
 from .rappi_precios import PreciosRappi
 from .rappi_tiendas import SeleccionTiendaRappi
+from .rappi_carta import CartaRappi
 
 log = logging.getLogger("rappi")
 
 
-class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
+class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
     nombre = "rappi"
 
     # La marca y la tienda son las TUYAS: salen de Ajustes y no tienen

@@ -181,6 +181,7 @@ class Worker:
         # "no encontrado").
         self.bloqueos = {}
         self._tanda_rappi = []  # snapshot finito de ids: Turbo, luego Común
+        self.rappi_solo_diagnostico = False
 
     def olvidar_catalogo(self):
         """Se borro el catalogo: lo que teniamos en memoria ya no existe.
@@ -210,6 +211,11 @@ class Worker:
     async def iniciar(self, modo_simulado: bool = False):
         """Arranca el navegador. En modo simulado no abre nada."""
         self.modo_simulado = modo_simulado
+        # Versión de diagnóstico solicitada: no ejecutar acciones en Rappi.
+        self.rappi_solo_diagnostico = not modo_simulado
+        if self.rappi_solo_diagnostico:
+            log.warning("RAPPI DIAGNOSTICO: se leerán ambas tiendas una vez. "
+                        "La cola de Rappi queda en pausa; no se cambia disponibilidad.")
         self.corriendo = True
 
         if not modo_simulado:
@@ -326,6 +332,41 @@ class Worker:
             except Exception as e:
                 self.sesion_ok[nombre] = False
                 log.error("Error verificando sesion %s: %s", nombre, e)
+            if self.rappi_solo_diagnostico and nombre in ("rappi", "rappi_comun"):
+                await self._registrar_diagnostico_rappi(nombre, plat)
+
+    async def _registrar_diagnostico_rappi(self, nombre, plat):
+        """Comparar lector directo y selectores anteriores sin tocar productos."""
+        try:
+            filas = await plat._capturar_carta_nueva()
+            error_selector = ""
+            try:
+                anteriores = await plat._nombres_nuevos().all_text_contents()
+            except Exception as error:
+                anteriores = []
+                error_selector = _resumen(error, 200)
+            log.warning("DIAG_RAPPI_RESUMEN %s", json.dumps({
+                "tienda": nombre, "store_id": plat.store_id, "url": plat.page.url,
+                "nombre_visible": await plat._nombre_tienda_actual(),
+                "directo": len(filas), "xpath": len(anteriores),
+                "error_selector": error_selector,
+                "nombres_xpath": anteriores,
+                "nombres_dom": plat._diagnostico_dom["nombres_dom"],
+                "switches_dom": plat._diagnostico_dom["switches_dom"],
+                "tienda_verificada": await plat._tienda_verificada()}, ensure_ascii=False))
+            for fila in filas:
+                dato = dict(fila, tienda=nombre)
+                try:
+                    viejo = plat._tarjeta(fila['nombre'])
+                    dato['fila_xpath'] = await viejo.count()
+                    dato['aria_xpath'] = (await plat._toggle_input(viejo).get_attribute(
+                        'aria-checked', timeout=1000) if dato['fila_xpath'] else None)
+                except Exception as error:
+                    dato['error_xpath'] = _resumen(error, 200)
+                log.warning("DIAG_RAPPI_FILA %s", json.dumps(dato, ensure_ascii=False))
+            log.warning("DIAG_RAPPI_FIN %s: diagnóstico terminado; automatización de Rappi en pausa", nombre)
+        except Exception:
+            log.exception("DIAG_RAPPI_ERROR %s", nombre)
 
     async def _abrir_rappi_comun(self):
         """Agrega el adaptador Común sobre la misma pestaña de Rappi."""
@@ -422,6 +463,8 @@ class Worker:
             # cuando el usuario aprieta el boton y no antes. Cortarla sola
             # seria navegarle la pestaña mientras espera el codigo.
             en_espera += [p for p in self.verificacion if p not in en_espera]
+            if self.rappi_solo_diagnostico:
+                en_espera += ["rappi", "rappi_comun"]
 
             consulta = (db.query(Operacion)
                         .filter(Operacion.estado == Operacion.PENDIENTE,
@@ -598,6 +641,8 @@ class Worker:
 
     async def _ejecutar(self, plataforma: str, accion: str, nombre_remoto: str):
         """(exito, detalle, motivo). `motivo` distingue el caso sin sesion."""
+        if self.rappi_solo_diagnostico and plataforma in ("rappi", "rappi_comun"):
+            return False, "Rappi en diagnóstico: acciones en pausa", VERIFICACION
         if self.modo_simulado:
             await asyncio.sleep(2)
             return True, "simulado", ""
@@ -648,7 +693,7 @@ class Worker:
                 if not sigue_ok:
                     return False, "se cayo la sesion durante la operacion", SIN_SESION
 
-            return ok, "" if ok else "no se pudo confirmar el cambio", ""
+            return ok, ("" if ok else "no se pudo confirmar el cambio"), ""
         except DuracionNoConfirmada as e:
             return False, str(e), DURACION_NO_CONFIRMADA
         except NombreAmbiguo as e:
@@ -743,6 +788,8 @@ class Worker:
           - Rappi se desloguea por inactividad
           - PedidosYa se pone rancio despues de un dia
         """
+        if self.rappi_solo_diagnostico and plataforma in ("rappi", "rappi_comun"):
+            return False, "Rappi en diagnóstico: se revisó al arrancar y las acciones están en pausa"
         plat = self.plataformas.get(plataforma)
         if plat is None:
             return False, f"plataforma desconocida: {plataforma}"

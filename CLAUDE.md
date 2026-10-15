@@ -1,5 +1,22 @@
 # Todo-Selector — contexto para Claude Code
 
+## Diagnóstico v6.16.5 — Rappi en pausa
+
+Esta versión es de detección, no una corrección de operaciones. En iniciar()
+el worker real activa rappi_solo_diagnostico antes de abrir el navegador.
+Prepara cada tienda al arrancar y registra una vez DIAG_RAPPI_RESUMEN,
+DIAG_RAPPI_FILA y DIAG_RAPPI_FIN (o DIAG_RAPPI_ERROR). Compara p.font-body-medium
++ ancestro con un switch y Editar contra _nombres_nuevos y _tarjeta actuales.
+rappi_carta.py no modifica el DOM ni sustituye al lector operativo.
+La cola excluye ambas tiendas sin gastar intentos. _ejecutar y _preparar
+bloquean acciones y navegación posterior; precios también corta antes de
+su fallback de abrir categorías. PedidosYa continúa normalmente. La UI
+expone rappi_diagnostico y muestra un aviso de acciones en pausa.
+No quitar estas guardas hasta analizar el log real. Las listas del usuario
+arriba/abajo fueron idénticas: no asumir carga progresiva como causa.
+Pruebas: probar_rappi_diagnostico_dom.py (Node + linkedom solo desarrollo),
+probar_rappi_tanda.py (arranque y guardas), más regresiones existentes.
+
 ## Corrección v6.16.4 — lecturas y filtros repetidos
 
 asegurar_sesion no debe forzar _seleccionar_tienda después de ir_al_menu:

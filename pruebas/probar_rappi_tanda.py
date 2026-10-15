@@ -103,4 +103,72 @@ class Tandas(unittest.IsolatedAsyncioTestCase):
         pagina.close.assert_not_called()
         self.assertIs(w.bloqueo('rappi'),bloqueo)
 
+class Diagnostico(Tandas):
+    async def test_arranque_real_activa_diagnostico_antes_del_navegador(self):
+        w = self.worker
+        async def abrir():
+            self.assertTrue(w.rappi_solo_diagnostico)
+        w._abrir_navegador = AsyncMock(side_effect=abrir)
+        def cerrar_tarea(coro):
+            coro.close()
+        with patch('app.worker.asyncio.create_task', side_effect=cerrar_tarea):
+            await w.iniciar(modo_simulado=False)
+        w._abrir_navegador.assert_awaited_once()
+        self.assertTrue(w.rappi_solo_diagnostico)
+
+    async def test_log_compara_selector_real_y_termina_sin_escribir(self):
+        import json
+        from probar_rappi_filas import crear, fila
+        plat = crear(fila('Ejemplo', 'false'))
+        plat._diagnostico_dom = {'nombres_dom': ['Ejemplo'], 'switches_dom': 1}
+        plat._capturar_carta_nueva = AsyncMock(return_value=[
+            {'nombre': 'Ejemplo', 'aria': 'false', 'disponible': False}])
+        plat._nombre_tienda_actual = AsyncMock(return_value='Sucursal ficticia')
+        plat._tienda_verificada = AsyncMock(return_value=True)
+        plat.apagar = AsyncMock(); plat.prender = AsyncMock()
+        with self.assertLogs('worker', level='WARNING') as logs:
+            await self.worker._registrar_diagnostico_rappi('rappi', plat)
+        mensajes = [r.getMessage() for r in logs.records]
+        resumen = json.loads(mensajes[0].split(' ', 1)[1])
+        producto = json.loads(mensajes[1].split(' ', 1)[1])
+        self.assertEqual(resumen['directo'], 1)
+        self.assertEqual(resumen['xpath'], 1)
+        self.assertEqual(producto['aria_xpath'], 'false')
+        self.assertFalse(producto['disponible'])
+        self.assertTrue(mensajes[-1].startswith('DIAG_RAPPI_FIN rappi:'))
+        plat.apagar.assert_not_awaited(); plat.prender.assert_not_awaited()
+
+    async def test_cola_rappi_pendiente_no_gasta_intentos(self):
+        ops = [self.agregar('rappi'), self.agregar('rappi_comun')]
+        self.db.commit()
+        w = self.worker; w.rappi_solo_diagnostico = True
+        w._ejecutar = AsyncMock()
+        await w._procesar_pendientes()
+        self.db.expire_all()
+        for op in ops:
+            self.assertEqual(op.estado, Operacion.PENDIENTE)
+            self.assertEqual(op.intentos, 0)
+        w._ejecutar.assert_not_awaited()
+
+    async def test_guardas_no_navegan_ni_ejecutan(self):
+        w = self.worker; w.rappi_solo_diagnostico = True
+        plat = SimpleNamespace(page=SimpleNamespace(reload=AsyncMock()),
+                               asegurar_sesion=AsyncMock(), apagar=AsyncMock())
+        w.plataformas = {'rappi': plat, 'rappi_comun': plat}
+        for tienda in w.plataformas:
+            self.assertFalse((await w._preparar(tienda))[0])
+            self.assertFalse((await w._ejecutar(tienda, 'apagar_hoy', 'Ejemplo'))[0])
+        plat.page.reload.assert_not_awaited()
+        plat.asegurar_sesion.assert_not_awaited()
+        plat.apagar.assert_not_awaited()
+
+    async def test_precios_no_abren_categorias_en_diagnostico(self):
+        from app.precios import GestorPrecios
+        w = self.worker; w.rappi_solo_diagnostico = True
+        w.motivo_sesion['rappi'] = 'menu_no_cargo'
+        w._preparar = AsyncMock()
+        gestor = GestorPrecios(w)
+        self.assertFalse((await gestor._preparar('rappi'))[0])
+        w._preparar.assert_not_awaited()
+
 if __name__=='__main__': unittest.main()

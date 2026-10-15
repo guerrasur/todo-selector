@@ -46,6 +46,8 @@ class GestorPrecios:
         return [config.texto(c) for c in claves]
 
     async def _preparar(self, tienda):
+        if self.worker.rappi_solo_diagnostico and tienda in RAPPI:
+            return False, "Rappi en diagnóstico: precios en pausa"
         listo, motivo = await self.worker._preparar(tienda)
         if listo or self.worker.en_verificacion(tienda):
             return listo, motivo
