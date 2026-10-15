@@ -41,6 +41,7 @@ class Page:
     url='https://restaurantes.rappi.com/menu?storeIds=AR100'
     def __init__(self,markup): self.doc=html.fromstring('<main>'+markup+'</main>')
     def locator(self,selector):
+        if selector==Rappi.SELECTOR_CATEGORIA_CARTA: return Locator([self.doc])
         if selector==Rappi.SELECTOR_TOGGLE_NUEVO:
             return Locator(self.doc.xpath('.//*[@data-component="menu-item-availability-switch"]//button[@role="switch"]'))
         if selector=='input[type="password"]': return Locator([])
@@ -60,6 +61,7 @@ def fila(nombre,estado,descripcion=True):
 def crear(markup):
     r=Rappi(Page(markup),store_id='AR100',brand_id='AR10')
     r.ir_al_menu=AsyncMock();r.neutralizar_estorbos=AsyncMock()
+    r._abrir_categorias_carta_nueva=AsyncMock()
     r.huella_de_pantalla=AsyncMock(return_value='diagnóstico de pantalla')
     return r
 
@@ -70,6 +72,21 @@ class Filas(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await r.leer_todos(),{'Prueba':True,'Prueba chica':False})
         self.assertTrue((await r.leer_estado('Prueba')).disponible)
         self.assertIsNone(await r.leer_estado('Prueb'))
+
+    async def test_espacios_exteriores_no_pierden_nombre_ni_confunden_prefijos(self):
+        r=crear(fila('  Producto ficticio  ','true')+fila('Producto ficticio grande','false'))
+        self.assertTrue((await r.leer_estado('Producto ficticio')).disponible)
+        self.assertIsNone(await r.leer_estado('Producto fict'))
+        self.assertEqual(await r.listar_productos(), ['Producto ficticio', 'Producto ficticio grande'])
+        self.assertEqual(len(await r.tarjetas_del_nombre('Producto ficticio')), 1)
+
+    async def test_lecturas_y_sesion_abren_categorias(self):
+        r=crear(fila('Prueba','false'))
+        r._tienda_verificada=AsyncMock(return_value=True)
+        for operar in (r.listar_productos, lambda: r.leer_estado('Prueba'), r.asegurar_sesion):
+            r._abrir_categorias_carta_nueva.reset_mock()
+            await operar()
+            r._abrir_categorias_carta_nueva.assert_awaited_once()
 
     async def test_categoria_no_cuenta_como_producto(self):
         cat='<div data-component="menu-item-availability-switch"><button role="switch" aria-checked="true"/></div>'

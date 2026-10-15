@@ -104,17 +104,17 @@ class Tandas(unittest.IsolatedAsyncioTestCase):
         self.assertIs(w.bloqueo('rappi'),bloqueo)
 
 class Diagnostico(Tandas):
-    async def test_arranque_real_activa_diagnostico_antes_del_navegador(self):
+    async def test_arranque_real_sale_del_diagnostico(self):
         w = self.worker
         async def abrir():
-            self.assertTrue(w.rappi_solo_diagnostico)
+            self.assertFalse(w.rappi_solo_diagnostico)
         w._abrir_navegador = AsyncMock(side_effect=abrir)
         def cerrar_tarea(coro):
             coro.close()
         with patch('app.worker.asyncio.create_task', side_effect=cerrar_tarea):
             await w.iniciar(modo_simulado=False)
         w._abrir_navegador.assert_awaited_once()
-        self.assertTrue(w.rappi_solo_diagnostico)
+        self.assertFalse(w.rappi_solo_diagnostico)
 
     async def test_log_compara_selector_real_y_termina_sin_escribir(self):
         import json

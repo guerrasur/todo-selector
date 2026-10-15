@@ -1,5 +1,30 @@
 # Todo-Selector — contexto para Claude Code
 
+## Operación v6.16.7 — categorías y nuevo diálogo
+
+El log real 6.16.6 confirmó 30 productos en ambas tiendas tras abrir las
+cuatro categorías, y coincidencia de aria-checked para los productos
+localizados. Coca Cola tenía espacio final en HTML: el filtro del nombre
+admite solo espacios exteriores; conserva coincidencia exacta, mayúsculas
+y detección de duplicados. No agregar equivalencias de nombres por código.
+
+asegurar_sesion despliega categorías después de verificar la tienda; listar,
+leer_estado e inspeccionar también preparan la carta. La apertura es
+idempotente y se repite después de las recargas de confirmación.
+El nuevo apagado pulsa el switch, usa su aria-controls para acotar role=dialog
+y elige button[role=radio] por value today/indefinitely. Además exige el label
+correspondiente. No selecciona customDate ni busca Guardar/Aplicar globales.
+Si aparece el segundo diálogo conocido, solo pulsa Sí, desactivar dentro de
+¿Desactivar producto?. En cualquier caso _confirmar recarga y relee: el clic
+solo no es éxito. Si ya está apagado, no inventar duración indefinida.
+
+El arranque deja rappi_solo_diagnostico=False: se reanudan lecturas y cola.
+Se mantienen Page y lock compartidos, tanda Turbo antes de Común, guardas de
+última intención y verificación manual. No se ejecuta el diagnóstico inicial.
+Pruebas nuevas: probar_rappi_apagado_nuevo.py, probar_rappi_filas.py; más
+regresiones de cola, selección, categorías y verificación. El apagado nuevo
+está probado localmente; falta la confirmación del primer uso en vivo.
+
 ## Diagnóstico v6.16.6 — desplegar categorías antes de leer
 
 El log 6.16.5 verificó ambas tiendas y coincidencia de lectores para 13

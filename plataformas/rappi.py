@@ -9,10 +9,9 @@ OJO CON LAS TIENDAS:
   La URL trae varios storeIds y cada tienda es INDEPENDIENTE: apagar en
   una no apaga en la otra, y ni siquiera tienen la misma carta
   (confirmado 2026-07-29). Una instancia de esta clase = UNA tienda. Para
-  operar sobre dos (Turbo y Común) el worker crea DOS instancias con dos
-  pestañas y dos store_id, no una que va cambiando la URL: asi cada
-  tienda tiene su lock, su sesion y su estado, y una lectura no pisa a la
-  otra. Ver worker._abrir_rappi_comun().
+  operar sobre dos (Turbo y Común) el worker crea DOS instancias con store_id independientes sobre UNA
+  pestaña y un lock compartidos. Portal Aliados sincroniza la selección
+  entre pestañas; cada operación verifica la tienda antes de actuar. Ver worker._abrir_rappi_comun().
 
 CONFIRMADO POR HTML (DevTools, 2026-07-27): el toggle de disponibilidad es
 
@@ -44,6 +43,7 @@ indefinidamente" aparece un SEGUNDO modal de confirmacion,
 """
 
 import logging
+import json
 import re
 import time
 from typing import Optional
@@ -242,7 +242,7 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
     async def tarjetas_del_nombre(self, nombre_remoto: str) -> list:
         if await self._filas_nuevas().count():
             filas = self._nombres_nuevos().filter(has_text=re.compile(
-                r"^" + re.escape(nombre_remoto) + r"$"
+                r"^\s*" + re.escape(nombre_remoto.strip()) + r"\s*$"
             )).locator(self.XPATH_FILA_NUEVA)
             # Identidad DOM: aria-controls es opcional y los ids de producto
             # ya no están publicados. XPath deduplica la misma fila.
@@ -270,6 +270,13 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
                                 '[data-testid*="availability-switch-control"], '
                                 + SELECTOR_TOGGLE_NUEVO)
 
+    async def _preparar_lectura_carta(self):
+        await self.ir_al_menu()
+        if self._portal_nuevo():
+            await self.page.locator(self.SELECTOR_CATEGORIA_CARTA).first.wait_for(
+                state="visible", timeout=15000)
+            await self._abrir_categorias_carta_nueva()
+
     async def asegurar_sesion(self) -> bool:
         await self.ir_al_menu()
 
@@ -282,12 +289,12 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         # carta cargo (ver SELECTOR_TOGGLE_PRODUCTO).
         try:
             if self._portal_nuevo():
-                await self._nombres_nuevos().first.wait_for(state="visible", timeout=15000)
+                await self.page.locator(self.SELECTOR_CATEGORIA_CARTA).first.wait_for(
+                    state="visible", timeout=15000)
                 if not await self._tienda_verificada():
-                    # El selector puede aparecer después de domcontentloaded.
-                    # Validar una vez renderizado, sin forzar otra aplicación.
                     await self._seleccionar_tienda()
-                    await self._nombres_nuevos().first.wait_for(state="visible", timeout=15000)
+                await self._abrir_categorias_carta_nueva()
+                await self._nombres_nuevos().first.wait_for(state="visible", timeout=15000)
             else:
                 await self.page.wait_for_selector(self.SELECTOR_TOGGLE_PRODUCTO, timeout=15000)
         except Exception:
@@ -458,7 +465,7 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         selector por data-testid. La identidad sigue siendo el nombre exacto.
         """
         nuevas = self._nombres_nuevos().filter(
-            has_text=re.compile(r"^" + re.escape(nombre_remoto) + r"$")
+            has_text=re.compile(r"^\s*" + re.escape(nombre_remoto.strip()) + r"\s*$")
         ).locator(self.XPATH_FILA_NUEVA)
         anteriores = self.texto_exacto(nombre_remoto).locator(
             "xpath=ancestor::*[.//*[contains(@data-testid,"
@@ -485,7 +492,7 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
 
     async def listar_productos(self) -> list[str]:
         """Nombres de filas con switch y Editar; en el portal viejo, alt de foto."""
-        await self.ir_al_menu()
+        await self._preparar_lectura_carta()
         if self._portal_nuevo() or await self._filas_nuevas().count():
             nombres = [n.strip() for n in await self._nombres_nuevos().all_text_contents()
                        if n.strip()]
@@ -562,7 +569,7 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         no cuesta otra recorrida como en PedidosYa: aca la carta entera esta
         en la misma pantalla.
         """
-        await self.ir_al_menu()
+        await self._preparar_lectura_carta()
         try:
             return await self.page.evaluate(self.JS_CATEGORIAS)
         except Exception as e:
@@ -575,7 +582,7 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         # De paso resuelve el TODO-SELECTOR de _tarjeta(): con esto vemos
         # por fin el HTML completo de la tarjeta de Rappi.
-        await self.ir_al_menu()
+        await self._preparar_lectura_carta()
         tarjeta = self._tarjeta(nombre_remoto)
         salida = await self._html_de(tarjeta)
         # Y el toggle aparte, que es el que no se deja clickear. El HTML de
@@ -589,7 +596,7 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         return salida
 
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
-        await self.ir_al_menu()
+        await self._preparar_lectura_carta()
         await self.revisar_ambiguedad(nombre_remoto)
         tarjeta = self._tarjeta(nombre_remoto)
 
@@ -814,6 +821,47 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
                 return None, False
             await self.page.wait_for_timeout(self.PASO_DIALOGO)
 
+    async def _apagar_portal_nuevo(self, nombre_remoto, por_hoy):
+        await self.cerrar_dialogo()
+        tarjeta = self._tarjeta(nombre_remoto)
+        toggle = self._toggle_clickeable(tarjeta)
+        await self._exigir_tienda()
+        await toggle.click(timeout=5000)
+        controles = await toggle.get_attribute("aria-controls")
+        if not controles:
+            raise RuntimeError("El switch no identificó su diálogo de disponibilidad")
+        dialogo = self.page.locator('[role="dialog"][id=' + json.dumps(controles) + ']')
+        await dialogo.wait_for(state="visible", timeout=15000)
+        valor = "today" if por_hoy else "indefinitely"
+        texto = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
+        radio = dialogo.locator(f'button[role="radio"][value="{valor}"]')
+        if await radio.count() != 1:
+            raise RuntimeError(f"El diálogo no ofrece una única opción '{valor}'")
+        fila = radio.locator('xpath=ancestor::div[.//label and count(.//button[@role="radio"])=1][1]')
+        etiquetas = await fila.locator('label').all_text_contents()
+        if [t.strip() for t in etiquetas] != [texto]:
+            raise RuntimeError(f"La opción '{valor}' cambió de significado: {etiquetas}")
+        await self._exigir_tienda()
+        log.info("%s: apagando '%s', duración %s", self.nombre, nombre_remoto, valor)
+        await radio.click(timeout=5000)
+
+        # Algunas versiones muestran una confirmación adicional. Acotar al
+        # diálogo y al texto conocido; nunca buscar Guardar/Aplicar globales.
+        confirmar = self.page.get_by_role('dialog').filter(
+            has=self.page.get_by_text('¿Desactivar producto?', exact=True))
+        try:
+            await confirmar.wait_for(state='visible', timeout=2000)
+        except Exception:
+            confirmar = None
+        if confirmar is not None:
+            boton = confirmar.get_by_role('button', name='Sí, desactivar', exact=True)
+            if await boton.count() != 1:
+                raise RuntimeError('No hay una confirmación de apagado inequívoca')
+            await self._exigir_tienda()
+            await boton.click(timeout=5000)
+        await self.page.wait_for_timeout(1500)
+        return await self._confirmar(nombre_remoto, esperado_disponible=False)
+
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
         # Va ANTES de leer: con un nombre que llega a dos productos, la
         # lectura tampoco vale (leer_estado usa el mismo `.first`).
@@ -831,6 +879,9 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
                     "la app no lo volvió a prender.")
             log.info("'%s' ya estaba apagado, no toco nada", nombre_remoto)
             return True
+
+        if self._portal_nuevo():
+            return await self._apagar_portal_nuevo(nombre_remoto, por_hoy)
 
         # Un dialogo que quedo abierto de un intento anterior tapa el toggle
         # de este. Se cierra ANTES de tocar nada.

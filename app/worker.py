@@ -211,11 +211,8 @@ class Worker:
     async def iniciar(self, modo_simulado: bool = False):
         """Arranca el navegador. En modo simulado no abre nada."""
         self.modo_simulado = modo_simulado
-        # Versión de diagnóstico solicitada: no ejecutar acciones en Rappi.
-        self.rappi_solo_diagnostico = not modo_simulado
-        if self.rappi_solo_diagnostico:
-            log.warning("RAPPI DIAGNOSTICO: se leerán ambas tiendas una vez. "
-                        "La cola de Rappi queda en pausa; no se cambia disponibilidad.")
+        # Diagnóstico 6.16.6 validado: volver a operar ambas tiendas.
+        self.rappi_solo_diagnostico = False
         self.corriendo = True
 
         if not modo_simulado:
