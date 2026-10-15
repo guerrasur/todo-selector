@@ -1,5 +1,17 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.16.3 — dropdowns y Aplicar filtro
+
+La lista de Marca ya se había abierto al fallar la segunda llamada a
+_lista_filtro (línea 174 del log 6.16.2). Escape no daba un cierre confirmado;
+volver a pulsar el disparador cerraba la lista y la app esperaba que aparezca.
+La apertura ahora reutiliza una lista que ya esté en pantalla. El cierre
+pulsa su mismo disparador y espera que desaparezca; no depende de Escape.
+Marca excluye dropdowns que contienen store-list. Tras verificar una única
+tienda se pulsa Aplicar filtro también si ya estaba seleccionada; solo se
+recarga cuando cambia la tienda. Se registra el paso de Aplicar en el log.
+Prueba del flujo con dropdowns con/sin autocierre: probar_rappi_dropdowns.py.
+
 ## Corrección v6.16.2 — botones store-select duplicados
 
 Rappi publica dos botones store-select. Toda interacción, lectura del nombre

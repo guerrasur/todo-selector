@@ -108,16 +108,51 @@ class SeleccionTiendaRappi:
             }""", timeout=2000)
         await self._esperar_panel(abierto=False, timeout=5000)
 
+    def _contenedores_lista(self, campo):
+        selector = ('[data-component="store-list"]' if campo == "Tienda" else
+                    '[data-component="dropdown-content"]:not(:has([data-component="store-list"]))')
+        return self.page.locator(selector)
+
+    async def _lista_en_pantalla(self, campo):
+        listas = self._contenedores_lista(campo)
+        indices = await listas.evaluate_all(self.JS_PANELES_EN_PANTALLA)
+        if len(indices) > 1:
+            raise RuntimeError(f"Hay más de una lista de {campo} abierta en Rappi")
+        return listas.nth(indices[0]) if indices else None
+
+    async def _pulsar_control_filtro(self, boton):
+        if await boton.count() != 1:
+            raise RuntimeError("No identifiqué un único control del filtro de Rappi")
+        try:
+            await boton.click(timeout=3000)
+        except Exception:
+            # El dropdown puede cubrir su propio disparador. Se invoca el
+            # mismo botón exacto, sin elegir controles por coordenadas.
+            await boton.evaluate("""el => {
+                if (el.disabled || el.getAttribute('aria-disabled') === 'true')
+                    throw new Error('El control del filtro está deshabilitado');
+                el.click();
+            }""", timeout=2000)
+
     async def _lista_filtro(self, campo):
         panel = await self._abrir_filtro()
+        lista = await self._lista_en_pantalla(campo)
+        if lista is not None:
+            return lista  # Ya abierta: otro click la cerraría.
+        otro = "Tienda" if campo == "Marca" else "Marca"
+        if await self._lista_en_pantalla(otro) is not None:
+            await self._cerrar_lista_filtro()
         boton = panel.get_by_text(campo, exact=True).locator(
             'xpath=following-sibling::button[1]')
-        await boton.click()
-        selector = ('[data-component="store-list"]:visible' if campo == "Tienda"
-                    else '[data-component="dropdown-content"]:visible')
-        lista = self.page.locator(selector)
-        await lista.wait_for(state="visible", timeout=10000)
-        return lista
+        await self._pulsar_control_filtro(boton)
+        limite = time.monotonic() + 10
+        while True:
+            lista = await self._lista_en_pantalla(campo)
+            if lista is not None:
+                return lista
+            if time.monotonic() >= limite:
+                raise RuntimeError(f"No se abrió la lista de {campo} del filtro de Rappi")
+            await self.page.wait_for_timeout(100)
 
     def _opcion_id(self, lista, ident):
         # El botón radio está dentro de pointer-events:none: clic en la fila.
@@ -125,10 +160,20 @@ class SeleccionTiendaRappi:
             has=self.page.locator(f'button[role="radio"][value="{ident}"]'))
 
     async def _cerrar_lista_filtro(self):
-        if await self.page.locator(
-            '[data-component="dropdown-content"]:visible, '
-            '[data-component="store-list"]:visible').count():
-            await self.page.keyboard.press("Escape")
+        # Escape no cierra estos dropdowns (log de 6.16.2). Usar el mismo
+        # disparador y comprobar el cierre, conservando la selección pendiente.
+        for campo in ("Marca", "Tienda"):
+            if await self._lista_en_pantalla(campo) is None:
+                continue
+            panel = await self._abrir_filtro()
+            boton = panel.get_by_text(campo, exact=True).locator(
+                'xpath=following-sibling::button[1]')
+            await self._pulsar_control_filtro(boton)
+            limite = time.monotonic() + 5
+            while await self._lista_en_pantalla(campo) is not None:
+                if time.monotonic() >= limite:
+                    raise RuntimeError(f"No se cerró la lista de {campo} de Rappi")
+                await self.page.wait_for_timeout(100)
 
     async def _tienda_verificada(self):
         dato = getattr(self.page, '_todo_tienda', None)
@@ -203,10 +248,9 @@ class SeleccionTiendaRappi:
                 raise RuntimeError("Rappi no confirmó una única tienda seleccionada")
             await self._cerrar_lista_filtro()
             panel = await self._abrir_filtro()
-            if sin_cambio:
-                await self._cerrar_filtro()
-            else:
-                await panel.get_by_role('button', name='Aplicar filtro', exact=True).click()
+            log.info("%s: tienda seleccionada y verificada; aplicando filtro", self.nombre)
+            await self._pulsar_control_filtro(
+                panel.get_by_role('button', name='Aplicar filtro', exact=True))
             await self._esperar_panel(abierto=False, timeout=15000)
             if not sin_cambio:
                 # Una URL/header nuevos pueden preceder a la respuesta de

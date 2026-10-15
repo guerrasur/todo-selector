@@ -65,6 +65,8 @@ class Seleccion(unittest.IsolatedAsyncioTestCase):
         r._selector_tienda=AsyncMock(return_value=p)
         r._cerrar_filtro=AsyncMock()
         r._esperar_panel=AsyncMock()
+        async def pulsar(boton): await boton.click()
+        r._pulsar_control_filtro=pulsar
         return p,r
 
     async def test_busca_tienda_en_otra_marca_y_recarga(self):
@@ -75,10 +77,10 @@ class Seleccion(unittest.IsolatedAsyncioTestCase):
         p.reload.assert_awaited_once()
         await r._exigir_tienda()
 
-    async def test_misma_tienda_no_aplica_ni_recarga(self):
+    async def test_misma_tienda_confirma_aplicar_sin_recargar(self):
         p,r=self.crear('AR100')
         await r._seleccionar_tienda(forzar=True)
-        self.assertEqual(p.aplicados,[])
+        self.assertEqual(p.aplicados,['100'])
         p.reload.assert_not_awaited()
         self.assertTrue(await r._tienda_verificada())
 
