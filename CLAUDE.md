@@ -1,5 +1,19 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.16.4 — lecturas y filtros repetidos
+
+asegurar_sesion no debe forzar _seleccionar_tienda después de ir_al_menu:
+ese método ya valida la Page compartida por storeId, URL y nombre visible.
+Forzarlo descartaba la caché y aplicaba dos veces por preparación, y otra
+vez por cada comprobación. La recarga de confirmación tras escribir sigue.
+La lectura nueva parte del switch y sube a una fila con un solo switch,
+Editar y nombre; no exige menu-product-description ni imagen. Excluye
+párrafos de descripción/tags. Cero filas leídas produce error diagnóstico.
+Las lecturas generales se posponen mientras queden ids de la tanda Rappi.
+Conectividad antigua no se navega desde Portal Aliados; su badge queda sin
+confirmar hasta adaptar Gestión de tiendas. Pruebas: probar_rappi_filas.py
+(lxml de desarrollo), probar_rappi_dropdowns.py y probar_rappi_tanda.py.
+
 ## Corrección v6.16.3 — dropdowns y Aplicar filtro
 
 La lista de Marca ya se había abierto al fallar la segunda llamada a

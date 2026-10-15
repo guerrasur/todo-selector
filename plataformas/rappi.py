@@ -220,17 +220,23 @@ class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
     # del botón: dice closed/open para el popup, no disponibilidad.
     SELECTOR_TOGGLE_NUEVO = (
         '[data-component="menu-item-availability-switch"] button[role="switch"]')
+    # La descripción es opcional. La fila se reconoce por el switch de
+    # producto, el lápiz Editar y un nombre, sin depender de la descripción.
     XPATH_FILA_NUEVA = (
-        'xpath=ancestor::*[.//*[@data-component="menu-product-description"]'
-        ' and .//*[@data-component="menu-item-availability-switch"]][1]')
+        'xpath=ancestor::*[.//button[@aria-label="Editar"]'
+        ' and count(.//*[@data-component="menu-item-availability-switch"]'
+        '//button[@role="switch"])=1'
+        ' and .//p[not(ancestor::*[@data-component="menu-product-description"'
+        ' or @data-component="menu-product-tags"])]][1]')
+    XPATH_NOMBRE_NUEVO = (
+        'xpath=.//p[not(ancestor::*[@data-component="menu-product-description"'
+        ' or @data-component="menu-product-tags"])]')
 
     def _filas_nuevas(self):
-        return self.page.locator(
-            '[data-component="menu-product-description"]').locator(self.XPATH_FILA_NUEVA)
+        return self.page.locator(self.SELECTOR_TOGGLE_NUEVO).locator(self.XPATH_FILA_NUEVA)
 
     def _nombres_nuevos(self):
-        return self.page.locator('[data-component="menu-product-description"]').locator(
-            'xpath=preceding-sibling::div//p')
+        return self._filas_nuevas().locator(self.XPATH_NOMBRE_NUEVO)
 
     async def tarjetas_del_nombre(self, nombre_remoto: str) -> list:
         if await self._filas_nuevas().count():
@@ -274,9 +280,15 @@ class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         # aparezca al menos uno DE PRODUCTO es buena evidencia de que la
         # carta cargo (ver SELECTOR_TOGGLE_PRODUCTO).
         try:
-            await self.page.wait_for_selector(
-                self.SELECTOR_TOGGLE_PRODUCTO, timeout=15000
-            )
+            if self._portal_nuevo():
+                await self._nombres_nuevos().first.wait_for(state="visible", timeout=15000)
+                if not await self._tienda_verificada():
+                    # El selector puede aparecer después de domcontentloaded.
+                    # Validar una vez renderizado, sin forzar otra aplicación.
+                    await self._seleccionar_tienda()
+                    await self._nombres_nuevos().first.wait_for(state="visible", timeout=15000)
+            else:
+                await self.page.wait_for_selector(self.SELECTOR_TOGGLE_PRODUCTO, timeout=15000)
         except Exception:
             # Sin esto, lo unico que se sabe es "el menu no cargo", que es
             # cierto y no alcanza para arreglar nada: la pantalla se ve
@@ -284,9 +296,6 @@ class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
             log.warning("%s: la carta no cargo. %s",
                         self.nombre, await self.huella_de_pantalla())
             return False
-
-        if self._portal_nuevo():
-            await self._seleccionar_tienda(forzar=True)
 
         # El menu ya esta: recien ahora existe la franja que se come los
         # clicks. Va aca y no en apagar()/prender() porque asegurar_sesion()
@@ -443,12 +452,9 @@ class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
     def _tarjeta(self, nombre_remoto: str):
         """Locator de la tarjeta del producto.
 
-        TODO-SELECTOR: no tenemos el HTML completo de la tarjeta todavia.
-        En vez de asumir una profundidad fija de ancestros, subimos desde
-        el nombre exacto hasta el primer ancestro que TAMBIEN contenga el
-        toggle de disponibilidad (data-testid confirmado). Asi evitamos
-        depender de cuantos <div> hay entre el nombre y el resto de la
-        tarjeta.
+        En Portal Aliados se usa la fila que contiene nombre, switch y
+        Editar, con o sin descripción. El portal anterior conserva su
+        selector por data-testid. La identidad sigue siendo el nombre exacto.
         """
         nuevas = self._nombres_nuevos().filter(
             has_text=re.compile(r"^" + re.escape(nombre_remoto) + r"$")
@@ -477,17 +483,15 @@ class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         ).first
 
     async def listar_productos(self) -> list[str]:
-        """Los nombres salen del alt de la foto del producto.
-
-        CONFIRMADO POR HTML (2026-07-27): cada tarjeta arranca con
-        <img data-testid="catalog-item-image" alt="Nombre del producto
-        500 ml">. Es mas simple y mas estable que subir desde el nombre.
-        OJO: un producto sin foto no va a aparecer aca.
-        """
+        """Nombres de filas con switch y Editar; en el portal viejo, alt de foto."""
         await self.ir_al_menu()
-        if await self._filas_nuevas().count():
-            return [n.strip() for n in await self._nombres_nuevos().all_text_contents()
-                    if n.strip()]
+        if self._portal_nuevo() or await self._filas_nuevas().count():
+            nombres = [n.strip() for n in await self._nombres_nuevos().all_text_contents()
+                       if n.strip()]
+            if not nombres:
+                raise RuntimeError("Rappi no publicó filas de productos reconocibles. "
+                                   + await self.huella_de_pantalla())
+            return nombres
         imgs = self.page.locator('img[data-testid="catalog-item-image"]')
         nombres = []
         for i in range(await imgs.count()):
@@ -495,6 +499,13 @@ class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
             if alt and alt.strip():
                 nombres.append(alt.strip())
         return nombres
+
+    async def leer_todos(self) -> dict:
+        salida = await super().leer_todos()
+        if self._portal_nuevo() and not salida:
+            raise RuntimeError("Rappi no pudo leer el estado de ningún producto. "
+                               + await self.huella_de_pantalla())
+        return salida
 
     # De donde sale el nombre de la categoria de una tarjeta. Los dos
     # caminos estan VISTOS en el DOM (el <li data-testid="menu-category">
@@ -1268,6 +1279,11 @@ class Rappi(SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         confirmar, es None y el motivo explica cual de los pasos fallo.
         """
         self.diagnostico_tienda = {}
+        if self._portal_nuevo():
+            # Conectividad del portal anterior no está confirmada en Portal
+            # Aliados. No salir de la carta a una ruta antigua en cada ronda.
+            self.diagnostico_tienda = {"motivo": "El estado general de la tienda requiere adaptar Gestión de tiendas"}
+            return None
 
         if not self.brand_id_conectividad or not self.store_id:
             self.diagnostico_tienda = {

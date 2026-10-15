@@ -107,6 +107,13 @@ class Dropdowns(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(p._todo_tienda['store_id'],'AR100')
                 p.keyboard.press.assert_not_awaited()
 
+    async def test_seleccion_ya_verificada_no_repite_aplicar(self):
+        p=Portal(False);r=adaptador(p,'AR200')
+        await r._seleccionar_tienda()
+        await r._seleccionar_tienda()
+        self.assertEqual(p.aplicados,['200'])
+        self.assertEqual(p.reload.await_count,1)
+
     async def test_misma_tienda_tambien_pulsa_aplicar_una_vez(self):
         p=Portal(False);r=adaptador(p,'AR100')
         await r._seleccionar_tienda(forzar=True)

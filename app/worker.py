@@ -1286,6 +1286,10 @@ class Worker:
         salida = {}
 
         for nombre in objetivo:
+            if (plataforma is None and nombre in ("rappi", "rappi_comun")
+                    and self._tanda_rappi):
+                salida[nombre] = {"error": "lectura pospuesta hasta terminar la tanda de Rappi"}
+                continue
             plat = self.plataformas.get(nombre)
             if plat is None:
                 salida[nombre] = {"error": "no hay pestaña"}

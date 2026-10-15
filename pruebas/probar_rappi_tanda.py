@@ -80,6 +80,15 @@ class Tandas(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(operar('rappi'),operar('rappi_comun'))
         self.assertEqual(eventos,['rappi inicio','rappi fin','rappi_comun inicio','rappi_comun fin'])
 
+    async def test_lectura_general_no_cambia_tienda_en_medio_de_tanda(self):
+        w=self.worker;w.modo_simulado=False;w._tanda_rappi=[123]
+        w.plataformas={'rappi':SimpleNamespace(), 'rappi_comun':SimpleNamespace()}
+        w._preparar=AsyncMock()
+        salida=await w.sincronizar_estados()
+        self.assertIn('pospuesta',salida['rappi']['error'])
+        self.assertIn('pospuesta',salida['rappi_comun']['error'])
+        w._preparar.assert_not_awaited()
+
     async def test_activar_y_desactivar_comun_no_abre_ni_cierra_pagina(self):
         w=self.worker
         pagina=SimpleNamespace(close=AsyncMock())
