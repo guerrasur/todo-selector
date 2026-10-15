@@ -338,6 +338,11 @@ class Worker:
     async def _registrar_diagnostico_rappi(self, nombre, plat):
         """Comparar lector directo y selectores anteriores sin tocar productos."""
         try:
+            previas = await plat._capturar_carta_nueva()
+            log.warning("DIAG_RAPPI_ANTES %s", json.dumps({
+                "tienda": nombre, "productos": len(previas),
+                "categorias": await plat._categorias_carta_nueva()}, ensure_ascii=False))
+            categorias = await plat._abrir_categorias_carta_nueva()
             filas = await plat._capturar_carta_nueva()
             error_selector = ""
             try:
@@ -349,6 +354,7 @@ class Worker:
                 "tienda": nombre, "store_id": plat.store_id, "url": plat.page.url,
                 "nombre_visible": await plat._nombre_tienda_actual(),
                 "directo": len(filas), "xpath": len(anteriores),
+                "categorias": categorias,
                 "error_selector": error_selector,
                 "nombres_xpath": anteriores,
                 "nombres_dom": plat._diagnostico_dom["nombres_dom"],

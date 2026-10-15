@@ -1,5 +1,21 @@
 # Todo-Selector — contexto para Claude Code
 
+## Diagnóstico v6.16.6 — desplegar categorías antes de leer
+
+El log 6.16.5 verificó ambas tiendas y coincidencia de lectores para 13
+ensaladas. Las capturas y el HTML confirman que el título es un button con
+aria-expanded y un hijo div > span.font-body-medium. Switch y more también
+tienen aria-expanded: excluir role=switch y aria-haspopup. No usar nombres
+de categorías ni pulsar Activa. CartaRappi abre solamente títulos cerrados,
+comprueba tienda antes de cada clic, exige reducción de cerradas en 5 s y
+limita el recorrido. La apertura normal no recarga ni aplica filtros.
+El diagnóstico registra DIAG_RAPPI_ANTES y, tras abrir, DIAG_RAPPI_RESUMEN con
+categorias abiertas y las filas. Continúan todas las guardas de 6.16.5:
+esta versión todavía no cambia disponibilidad ni precios. El lector
+operativo y el flujo de precios siguen sin adaptarse a esta apertura;
+no levantar la pausa hasta validar la carta completa y el apagado en vivo.
+Pruebas: probar_rappi_categorias.py y probar_rappi_diagnostico_dom.py.
+
 ## Diagnóstico v6.16.5 — Rappi en pausa
 
 Esta versión es de detección, no una corrección de operaciones. En iniciar()

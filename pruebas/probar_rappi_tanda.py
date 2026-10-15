@@ -123,14 +123,16 @@ class Diagnostico(Tandas):
         plat._diagnostico_dom = {'nombres_dom': ['Ejemplo'], 'switches_dom': 1}
         plat._capturar_carta_nueva = AsyncMock(return_value=[
             {'nombre': 'Ejemplo', 'aria': 'false', 'disponible': False}])
+        plat._categorias_carta_nueva = AsyncMock(return_value=[])
+        plat._abrir_categorias_carta_nueva = AsyncMock(return_value=[])
         plat._nombre_tienda_actual = AsyncMock(return_value='Sucursal ficticia')
         plat._tienda_verificada = AsyncMock(return_value=True)
         plat.apagar = AsyncMock(); plat.prender = AsyncMock()
         with self.assertLogs('worker', level='WARNING') as logs:
             await self.worker._registrar_diagnostico_rappi('rappi', plat)
         mensajes = [r.getMessage() for r in logs.records]
-        resumen = json.loads(mensajes[0].split(' ', 1)[1])
-        producto = json.loads(mensajes[1].split(' ', 1)[1])
+        resumen = json.loads(next(m for m in mensajes if m.startswith('DIAG_RAPPI_RESUMEN ')).split(' ', 1)[1])
+        producto = json.loads(next(m for m in mensajes if m.startswith('DIAG_RAPPI_FILA ')).split(' ', 1)[1])
         self.assertEqual(resumen['directo'], 1)
         self.assertEqual(resumen['xpath'], 1)
         self.assertEqual(producto['aria_xpath'], 'false')

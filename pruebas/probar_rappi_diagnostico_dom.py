@@ -26,7 +26,7 @@ def fila(nombre, aria, descripcion=True):
             '<button aria-label="Editar"><svg></svg></button></div></div><div class="h-px"></div></div>')
 
 
-def capturar(markup):
+def capturar(markup, script=None):
     runner = r'''
 const fs = require('fs');
 const {parseHTML} = require('linkedom');
@@ -38,7 +38,7 @@ if (antes !== document.toString()) throw Error('El diagnóstico modificó el DOM
 process.stdout.write(JSON.stringify(salida));
 '''
     r = subprocess.run(['node', '-e', runner], input=json.dumps(
-        {'html': markup, 'script': CartaRappi.JS_CAPTURAR_CARTA}),
+        {'html': markup, 'script': script or CartaRappi.JS_CAPTURAR_CARTA}),
         text=True, capture_output=True)
     if r.returncode:
         raise AssertionError(r.stderr)
@@ -46,6 +46,22 @@ process.stdout.write(JSON.stringify(salida));
 
 
 class DiagnosticoDOM(unittest.TestCase):
+    def test_encabezados_excluyen_switch_more_y_otras_expansiones(self):
+        markup = ''
+        for i in range(4):
+            markup += (f'<div class="flex min-h-16 items-center justify-between px-5 py-3">'
+                f'<button class="flex items-center gap-3 text-left" aria-expanded="{str(i == 0).lower()}">'
+                f'<svg></svg><div><span class="font-body-medium text-strong text-base">Categoría {i}</span>'
+                '<div><span>Con productos incompletos</span></div></div></button>'
+                '<div><div data-component="menu-item-availability-switch"><span>Activa</span>'
+                '<button role="switch" aria-expanded="false" aria-checked="true" aria-haspopup="dialog"></button>'
+                '</div><button aria-label="Personalizar disponibilidad"></button>'
+                '<button aria-label="more" aria-expanded="false" aria-haspopup="dialog"></button></div></div>')
+        markup += '<button aria-expanded="false">Menú ajeno</button>'
+        script = '() => (' + CartaRappi.JS_CATEGORIAS_CARTA + ')(' + json.dumps(CartaRappi.SELECTOR_CATEGORIA_CARTA) + ')'
+        self.assertEqual(capturar(markup, script), [
+            {'nombre': f'Categoría {i}', 'abierta': i == 0} for i in range(4)])
+
     def test_22_filas_completas_sin_alterar_dom(self):
         nombres = [f'Producto ficticio {i}' for i in range(22)]
         d = capturar(''.join(fila(n, 'true' if i % 2 else 'false', i % 3)
