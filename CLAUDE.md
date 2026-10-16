@@ -1,5 +1,17 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.16.10 — leer tienda detrás del modal
+
+El log 6.16.9 llega al segundo modal y falla en _exigir_tienda antes de
+«Sí, desactivar». La guarda de geometría descartaba el encabezado cuando
+Radix marca el fondo inert/aria-hidden. _selector_tienda permite leer ese
+fondo, manteniendo caja dentro del viewport, display/visibility, unicidad,
+nombre exacto, URL y caché de tienda. No habilita interacciones por JS ni
+cambia atributos del DOM. Drawers/dropdowns mantienen la exclusión normal.
+Pruebas ejecutan el JS real con cajas controladas y el apagado con la guarda
+real en ambas duraciones; cambiar nombre/URL/caché aún impide confirmar.
+No se verificó este ajuste en el portal real.
+
 ## Corrección v6.16.9 — confirmación final del apagado Rappi
 
 El HTML real confirma un segundo role=dialog cuyo aria-labelledby contiene

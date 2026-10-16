@@ -121,9 +121,18 @@ assert.deepEqual(geometria([fuera,abierto]),[1]);
 assert.deepEqual(geometria([panel(1000,0,1480,700)]),[]);
 assert.deepEqual(geometria([panel(0,700,480,1400)]),[]);
 assert.deepEqual(geometria([panel(0,0,480,700,true)]),[]);
+// El encabezado inerte detrás del modal sigue siendo legible. Las copias
+// fuera del viewport o con display/visibility ocultos nunca son candidatas.
+const fondo=panel(0,0,240,60,true);
+assert.deepEqual(geometria([fuera,fondo],true),[1]);
+assert.deepEqual(geometria([fondo,panel(250,0,490,60,true)],true),[0,1]);
+assert.deepEqual(geometria([fuera],true),[]);
 assert.deepEqual(geometria([panel(-400,0,80,700)]),[0]);
 const hidden=panel(0,0,480,700);hidden.estilo.visibility='hidden';
 assert.deepEqual(geometria([hidden]),[]);
+assert.deepEqual(geometria([hidden],true),[]);
+const none=panel(0,0,240,60,true);none.estilo.display='none';
+assert.deepEqual(geometria([none,fondo],true),[1]);
 '''
         p=subprocess.run(['node','-e',script],input=Rappi.JS_PANELES_EN_PANTALLA,
             text=True,capture_output=True)

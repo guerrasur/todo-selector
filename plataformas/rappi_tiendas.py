@@ -30,12 +30,12 @@ class SeleccionTiendaRappi:
 
     # :visible también incluye drawers cerrados con translateX(-100%).
     # La caja debe intersectar el viewport; no basta con tener tamaño.
-    JS_PANELES_EN_PANTALLA = """els => els.flatMap((el, i) => {
+    JS_PANELES_EN_PANTALLA = """(els, leerFondoModal = false) => els.flatMap((el, i) => {
         const r = el.getBoundingClientRect();
         const estilo = getComputedStyle(el);
         const ancho = Math.min(r.right, innerWidth) - Math.max(r.left, 0);
         const alto = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
-        return !el.closest('[inert], [aria-hidden="true"]') &&
+        return (leerFondoModal || !el.closest('[inert], [aria-hidden="true"]')) &&
             estilo.display !== 'none' && estilo.visibility !== 'hidden' &&
             ancho > 1 && alto > 1 ? [i] : [];
     })"""
@@ -60,7 +60,12 @@ class SeleccionTiendaRappi:
 
     async def _selector_tienda(self):
         botones = self.page.locator('[data-component="store-select"]')
-        indices = await botones.evaluate_all(self.JS_PANELES_EN_PANTALLA)
+        # Radix marca el fondo inert/aria-hidden mientras confirma el apagado.
+        # El encabezado conserva tienda y caja visible: leerlo no es interactuar
+        # con el fondo. Mantener geometría, unicidad, nombre y URL; los clicks
+        # normales de Playwright siguen respetando el bloqueo del modal.
+        # Drawers y dropdowns sí conservan el filtro de accesibilidad habitual.
+        indices = await botones.evaluate_all(self.JS_PANELES_EN_PANTALLA, True)
         if len(indices) > 1:
             raise RuntimeError("Hay más de un selector de tienda de Rappi en pantalla")
         return botones.nth(indices[0]) if indices else None
