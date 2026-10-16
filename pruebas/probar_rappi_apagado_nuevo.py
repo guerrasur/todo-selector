@@ -1,5 +1,6 @@
 """Duración por value y diálogo ligado al switch; sin acceso a portales."""
 import sys
+import asyncio
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -8,7 +9,7 @@ from plataformas.rappi import Rappi
 from plataformas.base import ResultadoEstado
 
 
-def crear(por_hoy=True, segundo=False):
+def crear(por_hoy=True):
     page = MagicMock(url='https://restaurantes.rappi.com/menu?storeIds=AR100')
     page.wait_for_timeout = AsyncMock()
     r = Rappi(page, store_id='AR100', brand_id='AR10')
@@ -29,8 +30,7 @@ def crear(por_hoy=True, segundo=False):
     etiquetas = radio.locator.return_value.locator.return_value
     etiquetas.all_text_contents = AsyncMock(return_value=[r.TXT_POR_HOY if por_hoy else r.TXT_INDEFINIDO])
     confirmar = MagicMock()
-    confirmar.filter.return_value = confirmar
-    confirmar.wait_for = AsyncMock(side_effect=None if segundo else TimeoutError('Sin segundo modal'))
+    confirmar.wait_for = AsyncMock()
     page.get_by_role.return_value = confirmar
     boton = confirmar.get_by_role.return_value
     boton.count = AsyncMock(return_value=1)
@@ -47,16 +47,72 @@ class ApagadoNuevo(unittest.IsolatedAsyncioTestCase):
         r.page.locator.assert_called_once_with('[role="dialog"][id="radix-ejemplo"]')
         dialogo.locator.assert_called_once_with('button[role="radio"][value="today"]')
         radio.click.assert_awaited_once()
-        boton.click.assert_not_awaited()
+        boton.click.assert_awaited_once()
+        r.page.get_by_role.assert_called_once_with(
+            'dialog', name='¿Desactivar producto?', exact=True)
+        confirmar = r.page.get_by_role.return_value
+        self.assertEqual(confirmar.wait_for.await_args_list, [
+            unittest.mock.call(state='visible', timeout=15000),
+            unittest.mock.call(state='hidden', timeout=15000),
+        ])
         r.recargar_y_preparar.assert_awaited_once()
         r.leer_estado.assert_awaited_once_with('Producto ficticio')
 
     async def test_indefinido_y_confirmacion_adicional_acotada(self):
-        r, _, dialogo, radio, _, boton = crear(False, True)
+        r, _, dialogo, radio, _, boton = crear(False)
         self.assertTrue(await r._apagar_portal_nuevo('Producto ficticio', False))
         dialogo.locator.assert_called_once_with('button[role="radio"][value="indefinitely"]')
         radio.click.assert_awaited_once()
         boton.click.assert_awaited_once()
+
+    async def test_confirmacion_tardia_para_ambas_duraciones(self):
+        for por_hoy in (True, False):
+            with self.subTest(por_hoy=por_hoy):
+                r, _, _, _, _, boton = crear(por_hoy)
+
+                async def esperar(state, timeout):
+                    if state == 'visible':
+                        # Reproduce un modal que aparece después del límite
+                        # anterior: el timeout debe impedir seguir sin pulsar.
+                        await asyncio.wait_for(asyncio.sleep(2.1), timeout / 1000)
+
+                r.page.get_by_role.return_value.wait_for.side_effect = esperar
+                self.assertTrue(await r._apagar_portal_nuevo('Producto ficticio', por_hoy))
+                boton.click.assert_awaited_once()
+                r.recargar_y_preparar.assert_awaited_once()
+
+    async def test_sin_confirmacion_no_recarga_ni_declara_exito(self):
+        r, _, _, _, _, boton = crear()
+        r.page.get_by_role.return_value.wait_for.side_effect = TimeoutError('Sin segundo modal')
+        with self.assertRaises(TimeoutError):
+            await r._apagar_portal_nuevo('Producto ficticio', True)
+        boton.click.assert_not_awaited()
+        r.recargar_y_preparar.assert_not_awaited()
+        r.leer_estado.assert_not_awaited()
+
+    async def test_confirmacion_ambigua_no_pulsa(self):
+        r, _, _, _, _, boton = crear()
+        boton.count.return_value = 2
+        with self.assertRaisesRegex(RuntimeError, 'inequívoca'):
+            await r._apagar_portal_nuevo('Producto ficticio', True)
+        boton.click.assert_not_awaited()
+        r.recargar_y_preparar.assert_not_awaited()
+
+    async def test_tienda_cambiada_antes_de_confirmar_no_pulsa(self):
+        r, _, _, _, _, boton = crear()
+        r._exigir_tienda.side_effect = [None, None, RuntimeError('Cambió la tienda')]
+        with self.assertRaisesRegex(RuntimeError, 'Cambió la tienda'):
+            await r._apagar_portal_nuevo('Producto ficticio', True)
+        boton.click.assert_not_awaited()
+        r.recargar_y_preparar.assert_not_awaited()
+
+    async def test_modal_sigue_abierto_no_recarga(self):
+        r, _, _, _, _, boton = crear()
+        r.page.get_by_role.return_value.wait_for.side_effect = [None, TimeoutError('Sigue abierto')]
+        with self.assertRaises(TimeoutError):
+            await r._apagar_portal_nuevo('Producto ficticio', True)
+        boton.click.assert_awaited_once()
+        r.recargar_y_preparar.assert_not_awaited()
 
     async def test_estado_sigue_prendido_no_da_ok(self):
         r, *_ = crear()

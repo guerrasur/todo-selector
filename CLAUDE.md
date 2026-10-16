@@ -1,5 +1,15 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.16.9 — confirmación final del apagado Rappi
+
+El HTML real confirma un segundo role=dialog cuyo aria-labelledby contiene
+«¿Desactivar producto?», con botón exacto «Sí, desactivar», después de elegir
+today o indefinitely. Es obligatorio: esperar hasta 15 s por el diálogo,
+verificar tienda antes de pulsar y esperar su cierre antes de _confirmar.
+No capturar el timeout para continuar sin confirmar ni recargar a los 2 s.
+No depender del id Radix ni buscar botones globales. La recarga/relectura
+sigue siendo la condición de éxito. Regresiones: probar_rappi_apagado_nuevo.py.
+
 ## Corrección v6.16.8 — lecturas entre operaciones de Rappi
 
 El log real 6.16.7 confirmó lectura de wraps ya apagados. No demostró un

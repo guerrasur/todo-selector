@@ -849,21 +849,19 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         log.info("%s: apagando '%s', duración %s", self.nombre, nombre_remoto, valor)
         await radio.click(timeout=5000)
 
-        # Algunas versiones muestran una confirmación adicional. Acotar al
-        # diálogo y al texto conocido; nunca buscar Guardar/Aplicar globales.
-        confirmar = self.page.get_by_role('dialog').filter(
-            has=self.page.get_by_text('¿Desactivar producto?', exact=True))
-        try:
-            await confirmar.wait_for(state='visible', timeout=2000)
-        except Exception:
-            confirmar = None
-        if confirmar is not None:
-            boton = confirmar.get_by_role('button', name='Sí, desactivar', exact=True)
-            if await boton.count() != 1:
-                raise RuntimeError('No hay una confirmación de apagado inequívoca')
-            await self._exigir_tienda()
-            await boton.click(timeout=5000)
-        await self.page.wait_for_timeout(1500)
+        # El portal confirma después de elegir la duración. No recargar si
+        # tarda en aparecer: se perdería el apagado todavía sin guardar.
+        # El nombre accesible proviene de aria-labelledby, no del id Radix.
+        confirmar = self.page.get_by_role(
+            'dialog', name='¿Desactivar producto?', exact=True)
+        await confirmar.wait_for(state='visible', timeout=15000)
+        boton = confirmar.get_by_role('button', name='Sí, desactivar', exact=True)
+        if await boton.count() != 1:
+            raise RuntimeError('No hay una confirmación de apagado inequívoca')
+        await self._exigir_tienda()
+        log.info("%s: confirmando desactivación de '%s'", self.nombre, nombre_remoto)
+        await boton.click(timeout=5000)
+        await confirmar.wait_for(state='hidden', timeout=15000)
         return await self._confirmar(nombre_remoto, esperado_disponible=False)
 
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
