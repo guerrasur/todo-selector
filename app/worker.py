@@ -1231,13 +1231,18 @@ class Worker:
             return {"error": f"no hay pestaña de {plataforma} (simulado={self.modo_simulado})"}
 
         if (plataforma in ("rappi", "rappi_comun")
-                and getattr(plat, "_portal_nuevo", lambda: False)()):
-            # El adaptador ya devuelve desconocido para Gestión de tiendas.
-            # No preparar/navegar la carta solo para obtener ese mismo None.
-            return {"abierta": None, "motivo":
-                    "El estado general de la tienda requiere adaptar Gestión de tiendas"}
+                and (self._tanda_rappi or self._tareas_operacion_rappi)):
+            return {**self.estado_tiendas.get(plataforma, {"abierta": None}),
+                    "pospuesta": True,
+                    "motivo": "Lectura de tienda pospuesta hasta terminar las operaciones de Rappi"}
 
         async with self.bloqueo(plataforma):
+            # Una operación pudo entrar mientras este lector esperaba el lock.
+            if (plataforma in ("rappi", "rappi_comun")
+                    and (self._tanda_rappi or self._tareas_operacion_rappi)):
+                return {**self.estado_tiendas.get(plataforma, {"abierta": None}),
+                        "pospuesta": True,
+                        "motivo": "Lectura de tienda pospuesta hasta terminar las operaciones de Rappi"}
             listo, motivo = await self._preparar(plataforma)
             if not listo:
                 return {"error": motivo}

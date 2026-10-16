@@ -134,13 +134,42 @@ class Coordinacion(Tandas):
         self.assertIn('falta configurar', motivos[0])
         self.assertEqual(w._tareas_operacion_rappi, set())
 
-    async def test_estado_general_no_prepara_carta_si_no_esta_adaptado(self):
+    async def test_estado_general_se_pospone_durante_operaciones(self):
         w = self.worker; w.modo_simulado = False
         w.plataformas['rappi'] = SimpleNamespace(_portal_nuevo=lambda: True)
         w._preparar = AsyncMock()
+        w._tanda_rappi = [123]
+        w.estado_tiendas['rappi'] = {'abierta': True, 'detalle': 'Activo'}
         resultado = await w.estado_tienda('rappi')
-        self.assertIsNone(resultado['abierta'])
-        self.assertIn('Gestión de tiendas', resultado['motivo'])
+        self.assertTrue(resultado['abierta'])
+        self.assertTrue(resultado['pospuesta'])
+        w._preparar.assert_not_awaited()
+
+    async def test_estado_general_adaptado_lee_tras_preparar(self):
+        from plataformas.base import ResultadoTienda
+        w = self.worker; w.modo_simulado = False
+        leer = AsyncMock(return_value=ResultadoTienda(True, 'Activo'))
+        w.plataformas['rappi'] = SimpleNamespace(leer_estado_tienda=leer)
+        w._preparar = AsyncMock(return_value=(True, ''))
+        resultado = await w.estado_tienda('rappi')
+        self.assertEqual(resultado, {'abierta': True, 'detalle': 'Activo'})
+        w._preparar.assert_awaited_once_with('rappi')
+        leer.assert_awaited_once()
+
+    async def test_lector_de_tienda_esperando_lock_cede_a_operacion_nueva(self):
+        w = self.worker; w.modo_simulado = False
+        w.plataformas['rappi'] = SimpleNamespace(leer_estado_tienda=AsyncMock())
+        w._preparar = AsyncMock()
+        w.estado_tiendas['rappi'] = {'abierta': False, 'detalle': 'Inactivo'}
+        lock = w.bloqueo('rappi')
+        await lock.acquire()
+        lector = asyncio.create_task(w.estado_tienda('rappi'))
+        await asyncio.sleep(0)
+        w._tareas_operacion_rappi.add(object())
+        lock.release()
+        resultado = await lector
+        self.assertFalse(resultado['abierta'])
+        self.assertTrue(resultado['pospuesta'])
         w._preparar.assert_not_awaited()
 
 class Diagnostico(Tandas):

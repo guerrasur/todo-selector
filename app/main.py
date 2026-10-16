@@ -258,6 +258,7 @@ def listar_productos(db: Session = Depends(get_db)):
         .all()
     )
 
+    revision = catalogo.revision_vinculos(productos, config.plataformas_activas())
     salida = []
     for p in productos:
         estados = {e.plataforma: e for e in p.estados}
@@ -278,6 +279,7 @@ def listar_productos(db: Session = Depends(get_db)):
                            for plat, est in estados.items()
                            if est.categoria_portal},
             "pausado": bool(p.pausado),
+            "revision_vinculos": revision[p.id],
             "alias": alias,
             "estados": {
                 plat: {
@@ -306,6 +308,10 @@ def encolar_accion(data: AccionIn, db: Session = Depends(get_db)):
         raise HTTPException(400, f"plataforma desconocida: {desconocidas[0]}")
 
     activas = config.plataformas_activas()
+    revision = catalogo.revision_vinculos(
+        db.query(Producto).filter_by(activo=True).all(), activas)[producto.id]
+    if revision["duplicados"]:
+        raise HTTPException(409, "El producto comparte publicaciones con otra fila; revisá los duplicados en Carta")
 
     creadas, salteadas = [], []
     for plat in dict.fromkeys(data.plataformas):
@@ -908,6 +914,9 @@ def vincular(data: VincularIn, db: Session = Depends(get_db)):
     Fusiona si ya estaban cargados por separado. Acepta dos plataformas o
     las que sean: con las dos tiendas de Rappi son tres.
     """
+    # Serializar comprobación de dueño y escritura: dos clicks desde pestañas
+    # distintas no pueden crear dos propietarios para la misma publicación.
+    db.execute(text("BEGIN IMMEDIATE"))
     nombres = data.todos()
 
     desconocidas = [p for p in nombres if p not in config.plataformas_activas()]
@@ -945,6 +954,7 @@ def enlazar(data: EnlazarIn, db: Session = Depends(get_db)):
     las dos principales (PedidosYa/Rappi) — hoy, Rappi Común: un plato que
     ya se apaga en las otras dos y ahora también hay que apagarlo ahí.
     """
+    db.execute(text("BEGIN IMMEDIATE"))
     if data.plataforma not in config.plataformas_activas():
         raise HTTPException(400, f"{data.plataforma} no está activa en esta "
                                  f"instalación")
@@ -979,6 +989,7 @@ def separar(data: SepararIn, db: Session = Depends(get_db)):
 @app.post("/api/agregar")
 def agregar(data: AgregarIn, db: Session = Depends(get_db)):
     """Carga un producto que existe en una sola plataforma."""
+    db.execute(text("BEGIN IMMEDIATE"))
     try:
         producto = catalogo.agregar(db, data.plataforma, data.nombre_remoto,
                                     categoria=data.categoria)
@@ -1070,7 +1081,7 @@ def renombrar(data: RenombrarIn, db: Session = Depends(get_db)):
         raise HTTPException(400, f"ya hay un producto que se llama «{nombre}»")
 
     catalogo.guardar_paso(db, f"renombrar '{producto.nombre}' a '{nombre}'")
-    producto.nombre = nombre
+    catalogo.cambiar_nombre(db, producto, nombre)
     catalogo.marcar_manual(db)
     db.commit()
     return {"ok": True, "producto": _ver_producto(producto)}
@@ -1153,6 +1164,7 @@ def ver_catalogo(db: Session = Depends(get_db)):
         "manual": catalogo.es_manual(db),
         "deshacer": catalogo.hay_para_deshacer(db),
         "productos": [_ver_producto(p) for p in productos],
+        "revision_vinculos": catalogo.revision_vinculos(productos, config.plataformas_activas()),
     }
 
 

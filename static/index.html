@@ -1357,7 +1357,9 @@ function pintarTiendas(tiendas, faltaConfig = []) {
     // hace nada ahí. Sin esto, el botón que no reacciona parece un bug.
     const enPausa = PAUSADAS.has(plat);
     if (enPausa) span.classList.add('pausada');
-    span.textContent = `${punto} ${NOMBRE_PLAT[plat] || plat}` +
+    const estado = info && !info.error && typeof info.abierta === 'boolean'
+      ? (info.abierta ? ' · abierta' : ' · cerrada') : '';
+    span.textContent = `${punto} ${NOMBRE_PLAT[plat] || plat}${estado}` +
                        (enPausa ? ' · en pausa' : '');
     span.title = motivo;
     cont.appendChild(span);
@@ -1739,6 +1741,47 @@ function titulo(texto, clase, aclaracion) {
   return h;
 }
 
+function revisionDe(item) {
+  return item.revision_vinculos || {
+    faltantes: PLATS.filter(plat => !item.estados[plat]), duplicados: [],
+  };
+}
+
+function vinculoPendiente(item) {
+  const r = revisionDe(item);
+  return r.faltantes.length > 0 || r.duplicados.length > 0;
+}
+
+function pintarPendientes(cont, productos) {
+  if (!productos.length) return;
+  const bloque = document.createElement('details');
+  bloque.className = 'grupo';
+  const resumen = document.createElement('summary');
+  resumen.textContent = `Vínculos pendientes — ${productos.length}`;
+  const ayuda = document.createElement('p');
+  ayuda.className = 'ayuda';
+  ayuda.textContent = 'Estos productos tienen plataformas sin vincular o publicaciones repetidas. Completá sus vínculos en Carta para reunirlos en una sola fila.';
+  bloque.append(resumen, ayuda);
+  for (const item of productos) {
+    const fila = document.createElement('div');
+    fila.className = 'par';
+    const texto = document.createElement('div');
+    const r = revisionDe(item);
+    texto.textContent = item.nombre + (r.faltantes.length
+      ? ' · Falta vincular: ' + r.faltantes.map(p => NOMBRE_PLAT[p]).join(', ') : '') +
+      (r.duplicados.length ? ' · Publicación repetida: ' + r.duplicados.map(p => NOMBRE_PLAT[p]).join(', ') : '');
+    const corregir = document.createElement('button');
+    corregir.textContent = r.duplicados.length ? 'Revisar duplicados' : 'Completar vínculo';
+    corregir.onclick = async () => {
+      await completarVinculo(item);
+      if (r.duplicados.length) await revisarDuplicados();
+    };
+    fila.append(texto, corregir);
+    bloque.appendChild(fila);
+  }
+  cont.appendChild(bloque);
+}
+
 function pintarProductos(productos) {
   const cont = document.getElementById('lista');
   // Conservar solo-dashboard: navegación decide la visibilidad incluso
@@ -1755,7 +1798,7 @@ function pintarProductos(productos) {
   // Cuántos hay prendidos, sobre la carta entera: es un número de cabecera
   // y no tiene que bailar con lo que estés buscando.
   const prendidos = productos.filter(
-    p => !p.pausado && grupoDe(p) === 'prendido').length;
+    p => !p.pausado && !vinculoPendiente(p) && grupoDe(p) === 'prendido').length;
   document.getElementById('cuenta-prendidos').textContent =
     `${prendidos} prendido${prendidos === 1 ? '' : 's'}`;
 
@@ -1764,6 +1807,10 @@ function pintarProductos(productos) {
     cont.textContent = 'No hay ningún producto que coincida.';
     return;
   }
+
+  const pendientes = productos.filter(vinculoPendiente);
+  pintarPendientes(cont, pendientes);
+  productos = productos.filter(p => !vinculoPendiente(p));
 
   // Los pausados van al final y apagados de color: siguen en la carta del
   // portal pero este mes no se venden, y no tienen que estorbar arriba.
@@ -1778,6 +1825,7 @@ function pintarProductos(productos) {
   // están apagados: la vista es lo que está vendiéndose.
   if (vista === 'solo') pausados = pausados.filter(p => grupoDe(p) !== 'apagado');
 
+  if (!pintados && !pausados.length && pendientes.length) return;
   if (!pintados && !pausados.length) {
     cont.classList.add('vacio');
     cont.textContent = filtro
@@ -2734,6 +2782,8 @@ async function ejecutarPeligro(cont, boton) {
   // limpian, la pantalla Carta pinta un segundo la carta de antes.
   carta = null;
   catalogo = null;
+  borradorVinculo = {};
+  nombreVinculo = '';
 
   // El paso 2 no es opcional: es el motivo por el que borraste. Se va
   // derecho a la Carta y la lectura arranca sola, igual que en el primer
@@ -2868,6 +2918,8 @@ async function restablecerAjustes() {
 
 let carta = null;        // ultimo /api/carta
 let catalogo = null;     // ultimo /api/catalogo
+let borradorVinculo = {}; // selecciones manuales sobreviven al repintado
+let nombreVinculo = '';
 
 function panelCarta() { return document.getElementById('panel-carta'); }
 
@@ -3191,15 +3243,22 @@ function pintarCarta() {
          a mano» se queda: esa explica una acción que no es evidente. -->
     <button id="btn-leer-carta">${carta ? 'Volver a leer los portales' : 'Leer los portales'}</button>
     <button id="btn-duplicados">Revisar duplicados</button>
+    <button id="btn-rearmar">Rearmar vínculos desde cero</button>
     <button id="btn-precios">Precios (beta)</button>
     <button id="btn-deshacer"${catalogo && catalogo.deshacer ? '' : ' disabled'}>
       ${catalogo && catalogo.deshacer
         ? 'Deshacer: ' + catalogo.deshacer : 'Nada para deshacer'}
     </button>
     <div id="revision-duplicados" aria-live="polite"></div>
+    <div id="reinicio-carta"></div>
     <div id="carta-cuerpo"></div>`;
   document.getElementById('btn-leer-carta').onclick = leerCarta;
   document.getElementById('btn-duplicados').onclick = revisarDuplicados;
+  document.getElementById('btn-rearmar').onclick = () => {
+    const cont = document.getElementById('reinicio-carta');
+    pintarBotonPeligro(cont);
+    confirmarPeligro(cont, cont.querySelector('button'));
+  };
   document.getElementById('btn-precios').onclick = abrirPrecios;
   document.getElementById('btn-deshacer').onclick = (e) =>
     accionCarta('/api/deshacer', {}, e.target);
@@ -3231,7 +3290,7 @@ function pintarCarta() {
   for (const plat of platsCarta()) {
     const sueltos = nombresSueltos(plat);
     cuerpo.appendChild(grupo(
-      `Solo en ${NOMBRE_PLAT[plat] || plat} — ${sueltos.length}`,
+      `Pendientes de vincular · ${NOMBRE_PLAT[plat] || plat} — ${sueltos.length}`,
       sueltos.map(n => filaSuelto(plat, n))));
   }
 
@@ -3285,15 +3344,30 @@ function vinculoActual(plataforma, remoto) {
   return otros.length ? otros.join(' + ') : null;
 }
 
+async function completarVinculo(item) {
+  borradorVinculo = item.plataformas ? { ...item.plataformas } :
+    Object.fromEntries(PLATS.filter(p => item.estados[p]).map(p => [p, item.alias[p] || item.nombre]));
+  nombreVinculo = '';
+  mostrarPantalla('carta');
+  if (!carta) {
+    const guardada = await fetch('/api/carta?releer=false').then(r => r.json());
+    if (!guardada.sin_lectura) carta = guardada;
+  }
+  if (!carta) await leerCarta();
+  else await refrescarCarta();
+  document.getElementById('vinculador-manual')?.scrollIntoView({block:'start'});
+}
+
 function vinculadorManual() {
   const div = document.createElement('div');
   div.className = 'grupo';
+  div.id = 'vinculador-manual';
   div.innerHTML = `
     <h3>Vincular a mano</h3>
     <div class="ayuda">
-      Si sabés que dos son el mismo plato y la app no lo propuso, elegilos acá.
-      Si alguno ya estaba vinculado con otro, ese otro no se pierde: queda
-      como producto suelto.
+      Elegí la publicación del mismo producto en cada plataforma. Se guarda
+      una sola fila con los botones para todas. Los vínculos se conservan
+      al actualizar y reiniciar la app.
     </div>`;
 
   // 'manual' la distingue de las filas de la carta: esta contiene TODOS los
@@ -3327,14 +3401,17 @@ function vinculadorManual() {
       op.textContent = con ? `${n}   → hoy va con «${con}»` : n;
       sel.appendChild(op);
     }
+    sel.value = borradorVinculo[plataforma] || '';
     lado.append(quien, sel);
-    sel.onchange = avisarDeLoQueRompe;
+    sel.onchange = () => {
+      borradorVinculo[plataforma] = sel.value;
+      avisarDeLoQueRompe();
+    };
     return { lado, sel };
   };
 
-  // Uno por portal. Con las dos tiendas de Rappi son tres, y se puede
-  // elegir cualquier combinación de dos o tres: un plato que está en
-  // PedidosYa y en la tienda Común pero no en Turbo es un caso real.
+  // Una publicación por plataforma activa. Las incompletas se corrigen acá
+  // y no generan botones de operación independientes en el dashboard.
   const selectores = {};
   for (const plat of platsCarta()) selectores[plat] = armar(plat);
 
@@ -3348,13 +3425,22 @@ function vinculadorManual() {
     for (const [plat, s] of Object.entries(selectores)) {
       if (s.sel.value) nombres[plat] = s.sel.value;
     }
-    if (Object.keys(nombres).length < 2) {
-      alert('Elegí al menos dos portales.');
+    if (Object.keys(nombres).length !== platsCarta().length) {
+      alert('Elegí el mismo producto en todas las plataformas activas.');
       return;
     }
-    accionCarta('/api/vincular', { nombres }, boton);
+    accionCarta('/api/vincular', {
+      nombres, nombre: nombreVinculo.trim() || nombres[platsCarta()[0]],
+    }, boton);
   };
   acc.appendChild(boton);
+
+  const nombre = document.createElement('input');
+  nombre.placeholder = 'Nombre único (opcional)';
+  nombre.setAttribute('aria-label', 'Nombre único del producto');
+  nombre.value = nombreVinculo;
+  nombre.oninput = () => { nombreVinculo = nombre.value; };
+  acc.appendChild(nombre);
 
   const aviso = document.createElement('div');
   aviso.className = 'ayuda';
@@ -3379,11 +3465,12 @@ function vinculadorManual() {
     }
     aviso.textContent = sueltos.size
       ? 'Ojo: al vincular estos, ' + [...sueltos].join(' y ') +
-        ' se queda solo, con su propio botón. Si no lo usás, pausalo.'
+        ' queda pendiente de vincular. Revisalo antes de continuar.'
       : '';
   }
 
   fila.append(...platsCarta().map(p => selectores[p].lado), acc, aviso);
+  avisarDeLoQueRompe();
   div.appendChild(fila);
   return div;
 }
@@ -3506,15 +3593,22 @@ function filaPar(par) {
   function refrescar() {
     const b = acc.querySelector('button.on');
     if (!b) return;
-    b.disabled = elegidas.size < 2;
-    b.title = elegidas.size < 2
-      ? 'Elegí al menos dos portales'
+    b.disabled = elegidas.size !== platsCarta().length;
+    b.title = elegidas.size !== platsCarta().length
+      ? 'Elegí el mismo producto en todas las plataformas activas'
       : 'Que se apaguen con el mismo botón: ' +
         [...elegidas].map(p => NOMBRE_PLAT[p]).join(' y ');
   }
 
   if (vinculado) {
-    acc.appendChild(etiquetaHecho('un solo botón'));
+    const completo = platsCarta().every(p => productos[0].plataformas[p]);
+    acc.appendChild(etiquetaHecho(completo ? 'un solo botón' : 'vínculo incompleto'));
+    if (!completo) {
+      const completar = document.createElement('button');
+      completar.textContent = 'Completar vínculo';
+      completar.onclick = () => completarVinculo(productos[0]);
+      acc.appendChild(completar);
+    }
     // Con dos portales alcanza un botón: separar cualquiera de los dos deja
     // lo mismo. Con tres hay que decir CUÁL se va, y ahí "Separar" a secas
     // no alcanza — además de que dos botones con el mismo texto no se
@@ -3536,10 +3630,18 @@ function filaPar(par) {
     b.onclick = () => {
       const elegido = {};
       for (const plat of elegidas) elegido[plat] = nombres[plat];
-      accionCarta('/api/vincular', { nombres: elegido }, b);
+      accionCarta('/api/vincular', {
+        nombres: elegido, nombre: elegido[platsCarta()[0]],
+      }, b);
     };
     acc.appendChild(b);
     refrescar();
+    if (plats.length < platsCarta().length) {
+      const completar = document.createElement('button');
+      completar.textContent = 'Completar vínculo';
+      completar.onclick = () => completarVinculo({plataformas:nombres});
+      acc.appendChild(completar);
+    }
   }
 
   div.appendChild(acc);
@@ -3562,15 +3664,13 @@ function filaSuelto(plataforma, nombre) {
 
   if (cargado) {
     div.classList.add('ok');
-    acc.appendChild(etiquetaHecho('cargado'));
-  } else {
-    const b = document.createElement('button');
-    b.textContent = 'Agregar';
-    b.title = 'Cargarlo en la app para poder apagarlo desde acá';
-    b.onclick = () => accionCarta('/api/agregar',
-                                  { plataforma, nombre_remoto: nombre }, b);
-    acc.appendChild(b);
+    acc.appendChild(etiquetaHecho(platsCarta().every(p => cargado.plataformas[p])
+      ? 'un solo botón' : 'vínculo incompleto'));
   }
+  const b = document.createElement('button');
+  b.textContent = 'Completar vínculo';
+  b.onclick = () => completarVinculo(cargado || {plataformas:{[plataforma]:nombre}});
+  acc.appendChild(b);
 
   div.appendChild(acc);
   return div;
@@ -3600,6 +3700,7 @@ async function accionCarta(url, cuerpo, boton) {
       boton.textContent = antes;
       return;
     }
+    if (url === '/api/vincular') { borradorVinculo = {}; nombreVinculo = ''; }
     await refrescarCarta();
     await cargar();
   } catch (e) {

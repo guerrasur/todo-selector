@@ -1,5 +1,36 @@
 # Todo-Selector — contexto para Claude Code
 
+## Actualización v6.17 — vínculos persistentes y estado de tiendas
+
+El usuario espera una sola fila por producto con todas las plataformas
+activas. El dashboard separa faltantes y publicaciones repetidas en Vínculos
+pendientes, sin controles de disponibilidad propios; Carta permite completar
+los selectores y conserva el borrador al repintar. Ya no ofrece Agregar para
+una publicación suelta; manual y propuestas requieren todas las plataformas.
+No fusionar nombres similares automáticamente. El reinicio del catálogo es
+una limpieza inicial OPCIONAL desde Carta, con la vista previa/backup/deshacer
+existentes; jamás se ejecuta al actualizar ni es mantenimiento periódico.
+
+Renombrar el canónico perdía los remotos implícitos. cambiar_nombre conserva
+TODOS los nombres remotos al renombrar desde API o vincular, incluso la tienda
+no incluida en una reasignación parcial. Respetar flush/expire por autoflush=False.
+buscar_por_remoto comprueba dueños explícitos e implícitos y rechaza ambigüedad;
+agregar/enlazar/vincular serializan comprobación y escritura con BEGIN IMMEDIATE.
+La API de acciones rechaza filas con publicaciones duplicadas. No se agregó
+una equivalencia automática ni una restricción SQL sobre nombres del portal.
+
+rappi_estado_tienda.py lee /stores?storeIds=<store_id> dentro del lock del worker.
+Identifica la fila por nombre exacto verificado en _todo_tienda (fallback al
+nombre configurado), valida URL/id, tabla y fila únicas y coherencia entre
+badge Activo/Inactivo e input.checked. No pulsa toggles. Regresa al menú;
+si aparece verificación, conserva esa pantalla. Los lectores se posponen
+durante tanda/operaciones, también al esperar lock, conservando el badge previo.
+El frontend muestra abierta/cerrada además del color. Falta validarlo en vivo.
+
+Pruebas: probar_vinculos_persistentes.py, probar_vinculos_ui.js,
+probar_rappi_estado_tienda_nuevo.py (linkedom solo desarrollo), probar_rappi_tanda.py
+y regresiones de catálogo, duplicados, diferencias y última intención.
+
 ## Corrección v6.16.10 — leer tienda detrás del modal
 
 El log 6.16.9 llega al segundo modal y falla en _exigir_tienda antes de

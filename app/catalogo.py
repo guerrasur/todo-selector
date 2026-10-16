@@ -283,21 +283,44 @@ def nombre_remoto(producto: Producto, plataforma: str) -> str | None:
 
 def buscar_por_remoto(db, plataforma: str, remoto: str) -> Producto | None:
     """El producto que en `plataforma` se llama `remoto`, si esta cargado."""
-    alias = (db.query(AliasPlataforma)
-             .join(Producto)
-             .filter(AliasPlataforma.plataforma == plataforma,
-                     AliasPlataforma.nombre_remoto == remoto,
-                     Producto.activo.is_(True))
-             .first())
-    if alias is not None:
-        return db.query(Producto).get(alias.producto_id)
+    # Incluir tanto alias explícitos como el nombre canónico implícito.
+    # Preferir .first() podía esconder que dos filas poseían la misma clave.
+    encontrados = [p for p in db.query(Producto).filter_by(activo=True).all()
+                   if nombre_remoto(p, plataforma) == remoto]
+    if len(encontrados) > 1:
+        raise ValueError(f"'{remoto}' está asignado a varios productos en "
+                         f"{NOMBRE_PLATAFORMA.get(plataforma, plataforma)}; "
+                         "revisá los duplicados en Carta")
+    return encontrados[0] if encontrados else None
 
-    # Sin alias, el canonico es el nombre remoto. Igual tiene que existir en
-    # esa plataforma: si no, es otro producto que se llama parecido.
-    producto = db.query(Producto).filter_by(nombre=remoto, activo=True).first()
-    if producto is not None and nombre_remoto(producto, plataforma) == remoto:
-        return producto
-    return None
+
+def cambiar_nombre(db, producto, nombre):
+    """Cambiar el rótulo local conserva TODOS los nombres remotos implícitos."""
+    db.flush()
+    db.expire(producto, ['alias', 'estados'])
+    remotos = {plat: nombre_remoto(producto, plat) for plat in PLATAFORMAS}
+    producto.nombre = nombre
+    for plat, remoto in remotos.items():
+        if remoto is not None:
+            _poner_alias(db, producto, plat, remoto)
+    db.flush()
+    db.expire(producto, ['alias'])
+
+
+def revision_vinculos(productos, activas):
+    """Integridad del catálogo; no infiere equivalencias entre nombres."""
+    productos = [p for p in productos if p.activo]
+    dueños = {}
+    for p in productos:
+        for plat in activas:
+            remoto = nombre_remoto(p, plat)
+            if remoto is not None:
+                dueños.setdefault((plat, remoto), []).append(p.id)
+    return {p.id: {
+        "faltantes": [plat for plat in activas if nombre_remoto(p, plat) is None],
+        "duplicados": [plat for plat in activas
+                       if len(dueños.get((plat, nombre_remoto(p, plat)), [])) > 1],
+    } for p in productos}
 
 
 NOMBRE_PLATAFORMA = {"pedidosya": "PedidosYa", "rappi": "Rappi",
@@ -464,7 +487,12 @@ def vincular_varios(db, nombres: dict, nombre: str = None,
 
     if encontrados and all(p.id == encontrados[0].id for p in encontrados) \
             and len(encontrados) == len(orden):
-        return encontrados[0]                        # ya estaban vinculados
+        producto = encontrados[0]
+        if nombre and nombre != producto.nombre:
+            guardar_paso(db, f"renombrar '{producto.nombre}' a '{nombre}'")
+            cambiar_nombre(db, producto, _nombre_libre(db, nombre, excluir_id=producto.id))
+            marcar_manual(db)
+        return producto                             # ya estaban vinculados
 
     guardar_paso(db, "vincular " + " con ".join(
         f"'{nombres[p]}' ({NOMBRE_PLATAFORMA.get(p, p)})" for p in orden))
@@ -509,7 +537,7 @@ def vincular_varios(db, nombres: dict, nombre: str = None,
                 _absorber(db, destino=producto, origen=otro)
 
     if nombre:
-        producto.nombre = _nombre_libre(db, nombre, excluir_id=producto.id)
+        cambiar_nombre(db, producto, _nombre_libre(db, nombre, excluir_id=producto.id))
 
     for plat in orden:
         _poner_alias(db, producto, plat, nombres[plat])

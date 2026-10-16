@@ -53,11 +53,12 @@ from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, Resulta
 from .rappi_precios import PreciosRappi
 from .rappi_tiendas import SeleccionTiendaRappi
 from .rappi_carta import CartaRappi
+from .rappi_estado_tienda import EstadoTiendaPortalRappi
 
 log = logging.getLogger("rappi")
 
 
-class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
+class Rappi(EstadoTiendaPortalRappi, CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
     nombre = "rappi"
 
     # La marca y la tienda son las TUYAS: salen de Ajustes y no tienen
@@ -1334,10 +1335,7 @@ class Rappi(CartaRappi, SeleccionTiendaRappi, PreciosRappi, PlataformaBase):
         """
         self.diagnostico_tienda = {}
         if self._portal_nuevo():
-            # Conectividad del portal anterior no está confirmada en Portal
-            # Aliados. No salir de la carta a una ruta antigua en cada ronda.
-            self.diagnostico_tienda = {"motivo": "El estado general de la tienda requiere adaptar Gestión de tiendas"}
-            return None
+            return await self._leer_estado_tienda_nuevo()
 
         if not self.brand_id_conectividad or not self.store_id:
             self.diagnostico_tienda = {
