@@ -1,5 +1,26 @@
 # Todo-Selector — contexto para Claude Code
 
+## Corrección v6.17.1 — verificación humana de PedidosYa
+
+HTML confirmado: .px-captcha-container visible, #px-captcha y un iframe
+titulado Human verification challenge que puede estar oculto. No leer ni
+guardar tokens o Reference ID. PedidosYa.en_verificacion observa los marcos
+sin interactuar con el desafío. Se corta antes de navegar, recargar, cerrar
+popups y aplicar fallbacks de click. Si aparece en una operación, esta
+vuelve a pendiente sin gastar intentos mediante VERIFICACION.
+
+El worker sondea sin navegar y omite el sondeo si la pestaña está ocupada.
+Solo origen=captcha en PedidosYa sale automáticamente tras intervención
+humana, desafío ausente y menú visible; error/página vacía/tiempo transcurrido
+no liberan la cola. Esta es la única excepción a la salida manual de regla 16:
+Rappi y las pausas activadas manualmente siguen requiriendo el botón.
+La UI separa los avisos e instrucciones de CAPTCHA y código de acceso.
+
+Pruebas: probar_pedidosya_verificacion.py (12 escenarios, dobles de página y
+cola SQLite real), probar_verificacion_ui.js, probar_verificacion.py,
+probar_pedidosya_rappi_alertas.py y probar_accion_ui.js. No validado en el
+portal real; la descarga del navegador de pruebas no estuvo disponible.
+
 ## Actualización v6.17 — vínculos persistentes y estado de tiendas
 
 El usuario espera una sola fila por producto con todas las plataformas
@@ -635,7 +656,10 @@ columna sigue sin estar cubierto.
     pasan por `_preparar` tienen su propia guarda: `aplicar_config` (no le
     cierra la pestaña), `_procesar_pendientes` (la cola espera) y
     `_refrescar_estado_tiendas` (se saltea, no pisa el badge con un error).
-    **Se sale SOLO con el botón del usuario**: nada de timeouts ni de
+    **Para Rappi y pausas manuales se sale SOLO con el botón del usuario**:
+    PedidosYa con origen=captcha puede retomar al desaparecer el desafío y
+    volver el menú visible, después de que la persona lo resuelva (v6.17.1).
+    Para los códigos de acceso, nada de timeouts ni de
     chequeos automáticos — un plazo que vence solo cortaría justo cuando
     está esperando el mail, que es peor que no tener nada. Y la activación
     **manual** es la defensa principal, no el plan B: la detección

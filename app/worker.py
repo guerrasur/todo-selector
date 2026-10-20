@@ -99,6 +99,9 @@ VERIFICACION = "verificacion"
 # usuario en el detalle de una operacion que no arranca.
 MSG_VERIFICACION = ("verificación en dos pasos en curso: la pestaña es tuya "
                     "hasta que aprietes «Ya terminé de verificar»")
+MSG_VERIFICACION_HUMANA = (
+    "PedidosYa pide verificar que sos humano: mantené pulsado Press & Hold "
+    "en su pestaña. Las operaciones esperan y continúan al volver el menú.")
 # La plataforma no esta activa en esta instalacion (no tiene pestaña). No se
 # arregla reintentando: reintentar tres veces por producto solo llena la cola
 # de errores identicos.
@@ -323,6 +326,8 @@ class Worker:
                     self.motivo_sesion.pop(nombre, None)
                     log.info("Sesion %s: OK", nombre)
                 else:
+                    if await self._detectar_verificacion(nombre, plat):
+                        continue
                     # "REQUIERE LOGIN" era el titulo que mandaba al usuario a
                     # loguearse sin que nadie hubiera visto un login.
                     log.info("Sesion %s: %s", nombre,
@@ -425,6 +430,7 @@ class Worker:
     async def _loop_cola(self):
         while self.corriendo:
             try:
+                await self._actualizar_verificacion_humana()
                 await self._procesar_pendientes()
             except Exception as e:
                 log.exception("Error en loop de cola: %s", e)
@@ -572,9 +578,8 @@ class Worker:
                                 "en la ventana del navegador y sale sola.",
                                 op.id, op.plataforma)
                 else:
-                    log.info("op#%s en espera: %s esta en verificación manual. "
-                             "Sale cuando aprietes «Ya terminé de verificar».",
-                             op.id, op.plataforma)
+                    log.info("op#%s en espera: %s", op.id,
+                             self._mensaje_verificacion(op.plataforma))
                 db.commit()
                 return
 
@@ -669,6 +674,7 @@ class Worker:
 
     async def _ejecutar_sin_turno(self, plat, plataforma, accion, nombre_remoto):
         from plataformas.base import NombreAmbiguo, DuracionNoConfirmada
+        from plataformas.pedidosya import VerificacionHumanaPendiente
 
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
@@ -679,7 +685,7 @@ class Worker:
             # reintento a los 60 s — o sea, le navega la pestaña al usuario
             # justo mientras espera el codigo.
             if self.en_verificacion(plataforma):
-                return False, motivo, VERIFICACION
+                return False, self._mensaje_verificacion(plataforma), VERIFICACION
             # Sin los ids de la sucursal no hay a donde ir: reintentar no lo
             # arregla y "sesion caida" manda al usuario a loguearse, que no
             # es el problema.
@@ -699,6 +705,8 @@ class Worker:
                 return False, f"accion desconocida: {accion}", ""
 
             if not ok:
+                if await self._detectar_verificacion(plataforma, plat):
+                    return False, self._mensaje_verificacion(plataforma), VERIFICACION
                 # Puede que haya fallado por deslogueo en el medio
                 sigue_ok = await plat.asegurar_sesion()
                 self.sesion_ok[plataforma] = sigue_ok
@@ -707,6 +715,10 @@ class Worker:
 
             return ok, ("" if ok else getattr(plat, "ultimo_error_producto", "")
                         or "no se pudo confirmar el cambio"), ""
+        except VerificacionHumanaPendiente:
+            self.congelar_por_verificacion(
+                plataforma, origen="captcha", detalle=MSG_VERIFICACION_HUMANA)
+            return False, MSG_VERIFICACION_HUMANA, VERIFICACION
         except DuracionNoConfirmada as e:
             return False, str(e), DURACION_NO_CONFIRMADA
         except NombreAmbiguo as e:
@@ -714,6 +726,8 @@ class Worker:
             # productos. Reintentar clickearia uno al azar tres veces.
             return False, str(e), AMBIGUO
         except Exception as e:
+            if await self._detectar_verificacion(plataforma, plat):
+                return False, self._mensaje_verificacion(plataforma), VERIFICACION
             log.exception("Excepcion en %s.%s('%s')", plataforma, accion, nombre_remoto)
             return False, _resumen(e), ""
 
@@ -829,7 +843,12 @@ class Worker:
         # su propia guarda: aplicar_config (no le cierra la pestaña) y
         # _procesar_pendientes (la cola espera sin gastar intentos).
         if self.en_verificacion(plataforma):
-            return False, MSG_VERIFICACION
+            return False, self._mensaje_verificacion(plataforma)
+
+        # PedidosYa puede pedir verificación encima de un menú ya cargado.
+        # Mirar ANTES del reload: los toggles detrás del popup no son sesión lista.
+        if plataforma == "pedidosya" and await self._detectar_verificacion(plataforma, plat):
+            return False, self._mensaje_verificacion(plataforma)
 
         # Sin los datos de la sucursal no hay a donde navegar: la URL sale
         # con los ids vacios y carga cualquier cosa. Y la sesion queda en
@@ -870,7 +889,7 @@ class Worker:
             # el cartel te mandaba a loguearte justo cuando ya estabas
             # verificando, y encima con sonido y el titulo parpadeando.
             if await self._detectar_verificacion(plataforma, plat):
-                return False, MSG_VERIFICACION
+                return False, self._mensaje_verificacion(plataforma)
             return False, await self._motivo_de_sesion_fallida(plataforma, plat)
 
         # Volvio la sesion: lo que estaba esperando puede salir ya.
@@ -940,10 +959,49 @@ class Worker:
                         "verificacion: %s", plataforma, _resumen(e, 120))
             return False
 
+        humana = plataforma == "pedidosya"
         self.congelar_por_verificacion(
-            plataforma, origen="detectada",
-            detalle="la pestaña quedo en la pantalla de verificación en dos pasos")
+            plataforma, origen="captcha" if humana else "detectada",
+            detalle=(MSG_VERIFICACION_HUMANA if humana else
+                     "la pestaña quedo en la pantalla de verificación en dos pasos"))
         return True
+
+    def _mensaje_verificacion(self, plataforma):
+        datos = self.verificacion.get(plataforma, {})
+        return (MSG_VERIFICACION_HUMANA if datos.get("origen") == "captcha"
+                else MSG_VERIFICACION)
+
+    async def _actualizar_verificacion_humana(self):
+        """Observa PedidosYa sin navegar. Solo este desafío admite salida automática.
+
+        Rappi y las pausas manuales siguen requiriendo el botón del usuario.
+        Un error, pestaña vacía o desafío invisible sin menú no liberan la cola.
+        """
+        plat = self.plataformas.get("pedidosya")
+        if self.modo_simulado or plat is None:
+            return
+        turno = self.bloqueo("pedidosya")
+        if turno.locked():
+            return  # el sondeo no demora las operaciones de las otras tiendas
+        async with turno:
+            try:
+                datos = self.verificacion.get("pedidosya", {})
+                if datos and datos.get("origen") != "captcha":
+                    return
+                if await self._detectar_verificacion("pedidosya", plat):
+                    return
+                if datos.get("origen") != "captcha" or not await plat.verificacion_resuelta():
+                    return
+                salida = await self.terminar_verificacion("pedidosya", leer=False)
+                if "pedidosya" not in salida["liberadas"]:
+                    return
+                # El menú acaba de volver: no recargar por antigüedad al retomar.
+                self.ultimo_refresco["pedidosya"] = datetime.now()
+                self.sesion_ok["pedidosya"] = True
+                self.motivo_sesion.pop("pedidosya", None)
+                log.info("PedidosYa: verificación humana resuelta; se retoma la cola")
+            except Exception as e:
+                log.warning("No pude comprobar la verificación humana: %s", _resumen(e, 120))
 
     def en_verificacion(self, plataforma: str) -> bool:
         """True si nadie puede tocar la pestaña de esa plataforma."""
@@ -971,10 +1029,8 @@ class Worker:
                 "origen": origen,
                 "detalle": detalle,
             }
-            log.warning("%s CONGELADA por verificación manual (%s). Nadie "
-                        "recarga ni navega esa pestaña, y lo encolado espera "
-                        "quieto, hasta que aprietes «Ya terminé de verificar».",
-                        nombre, origen)
+            log.warning("%s CONGELADA por verificación (%s). %s",
+                        nombre, origen, self._mensaje_verificacion(nombre))
         return afectadas
 
     def empezar_verificacion(self, plataforma: str) -> dict:
@@ -991,11 +1047,12 @@ class Worker:
 
     async def terminar_verificacion(self, plataforma: str,
                                     leer: bool = True) -> dict:
-        """El boton «Ya terminé de verificar». La UNICA salida de este modo.
+        """El boton «Ya terminé de verificar», y la salida observada del CAPTCHA.
 
         No hay timeout ni chequeo automatico que lo apague: el usuario puede
         estar diez minutos esperando el mail, y cortarlo ahi seria peor que
-        no tener nada.
+        no tener nada. Solo el desafío de PedidosYa admite salida automática,
+        después de observar que desapareció y volvió el menú.
 
         Al salir se lee de nuevo, por las dudas: mientras estuvo congelada la
         app no miro nada, y la ronda pudo haberse salteado varias vueltas.
@@ -1009,6 +1066,18 @@ class Worker:
         # congelada para siempre, sin ningun boton que la suelte.
         familia = config.familia_de_sesion(plataforma, solo_activas=False)
         afectadas = [p for p in familia if p in self.verificacion]
+
+        # El botón tampoco libera PedidosYa si el desafío sigue abierto.
+        if "pedidosya" in afectadas:
+            plat = self.plataformas.get("pedidosya")
+            if plat is not None and self.verificacion["pedidosya"]["origen"] == "captcha":
+                try:
+                    resuelta = await plat.verificacion_resuelta()
+                except Exception:
+                    resuelta = False
+                if not resuelta:
+                    return {"liberadas": [], "leyendo": False,
+                            "verificacion": self.verificacion_ui()}
 
         for nombre in afectadas:
             self.verificacion.pop(nombre, None)

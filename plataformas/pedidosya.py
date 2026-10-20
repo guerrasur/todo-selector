@@ -62,6 +62,10 @@ from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, Resulta
 log = logging.getLogger("pedidosya")
 
 
+class VerificacionHumanaPendiente(RuntimeError):
+    """El portal requiere intervención humana; la operación queda pendiente."""
+
+
 class PedidosYa(PlataformaBase):
     nombre = "pedidosya"
 
@@ -111,6 +115,60 @@ class PedidosYa(PlataformaBase):
     # apagados) y #toppings-category.
     SELECTOR_CATEGORIAS = "wk-menu-list wk-menu-list-category-item"
 
+    # HTML confirmado por el usuario. El iframe interior puede estar oculto
+    # mientras el contenedor sigue bloqueando la carta. No leer tokens.
+    SELECTOR_VERIFICACION = (
+        '.px-captcha-container, #px-captcha, '
+        'iframe[title="Human verification challenge"]'
+    )
+
+    async def en_verificacion(self) -> bool:
+        """Solo observa: nunca pulsa ni modifica la verificación."""
+        for marco in self.page.frames:
+            indicadores = marco.locator(self.SELECTOR_VERIFICACION)
+            for i in range(await indicadores.count()):
+                if await indicadores.nth(i).is_visible():
+                    return True
+        return False
+
+    async def verificacion_resuelta(self) -> bool:
+        """Ausencia del desafío Y menú visible; no basta un DOM vacío."""
+        if await self.en_verificacion():
+            return False
+        return await self.page.locator("label.mat-slide-toggle-label").first.is_visible()
+
+    async def _exigir_sin_verificacion(self):
+        if await self.en_verificacion():
+            raise VerificacionHumanaPendiente(
+                "PedidosYa pide verificar que sos humano: mantené pulsado "
+                "Press & Hold en su pestaña; la cola espera sin perder el progreso.")
+
+    async def ir_al_menu(self):
+        await self._exigir_sin_verificacion()
+        await super().ir_al_menu()
+        await self._exigir_sin_verificacion()
+
+    async def clickear(self, locator, timeout=8000, que="elemento", profundo=False):
+        await self._exigir_sin_verificacion()
+        resultado = await super().clickear(locator, timeout, que, profundo)
+        await self._exigir_sin_verificacion()
+        return resultado
+
+    async def _diagnosticar(self, objetivo):
+        # Si apareció durante el click normal, cortar antes de los fallbacks.
+        await self._exigir_sin_verificacion()
+        return await super()._diagnosticar(objetivo)
+
+    async def clickear_por_js(self, locator, profundo=False, timeout=8000):
+        await self._exigir_sin_verificacion()
+        return await super().clickear_por_js(locator, profundo, timeout)
+
+    async def recargar_y_preparar(self, por_que="", asentar=1500):
+        await self._exigir_sin_verificacion()
+        lista = await super().recargar_y_preparar(por_que, asentar)
+        await self._exigir_sin_verificacion()
+        return lista
+
     # Cada fila es el <label class="mat-slide-toggle-label"> de Angular
     # Material, que envuelve nombre + toggle. Su `for` apunta al <input> de
     # esa fila y nada mas, asi que identifica la fila sin ambiguedad.
@@ -148,6 +206,7 @@ class PedidosYa(PlataformaBase):
         `aria-disabled="true"` o un <fieldset disabled> padre (verificado
         contra Playwright 1.61). Ver inspeccionar().
         """
+        await self._exigir_sin_verificacion()
         boton = self.page.get_by_role("button", name=self.RE_PLAY_SOUND)
         if await boton.count() > 0:
             try:
@@ -178,6 +237,8 @@ class PedidosYa(PlataformaBase):
             return False
 
     async def asegurar_sesion(self) -> bool:
+        if await self.en_verificacion():
+            return False
         await self.ir_al_menu()
 
         # Antes que nada: si hay un popup abierto, tapa parte de la lista
@@ -201,7 +262,7 @@ class PedidosYa(PlataformaBase):
             await self.page.wait_for_selector(
                 "input.mat-slide-toggle-input", timeout=15000
             )
-            return True
+            return not await self.en_verificacion()
         except Exception:
             return False
 
@@ -275,12 +336,15 @@ class PedidosYa(PlataformaBase):
         try:
             entro = await self.clickear(cats.nth(indice), timeout=5000,
                                         que=f"categoria #{indice}")
+        except VerificacionHumanaPendiente:
+            raise
         except Exception as e:
             log.warning("No pude abrir la categoria #%s: %s",
                         indice, " ".join(str(e).split())[:100])
             return False
 
         await self.page.wait_for_timeout(1500)
+        await self._exigir_sin_verificacion()
         if await self._nombres_visibles() != antes:
             return True
 
@@ -298,12 +362,15 @@ class PedidosYa(PlataformaBase):
         try:
             tag = await self.clickear_por_js(cats.nth(indice), profundo=True,
                                              timeout=5000)
+        except VerificacionHumanaPendiente:
+            raise
         except Exception as e:
             log.warning("Tampoco pude abrir la categoria #%s: %s",
                         indice, " ".join(str(e).split())[:100])
             return False
 
         await self.page.wait_for_timeout(1500)
+        await self._exigir_sin_verificacion()
         cambio = await self._nombres_visibles() != antes
         log.info("Categoria #%s por JS sobre <%s>: %s", indice, tag,
                  "cambio la lista" if cambio else "sigue sin cambiar")
@@ -478,7 +545,10 @@ class PedidosYa(PlataformaBase):
         try:
             await self.clickear(self.page.get_by_text(opcion),
                                 que=f"opcion {opcion.pattern}")
+        except VerificacionHumanaPendiente:
+            raise
         except Exception:
+            await self._exigir_sin_verificacion()
             # No sirve saber que no encontramos el texto: lo que hace falta
             # es saber que decia el popup que si se abrio.
             log.error("No encontre %s en el popup. Lo que hay abierto dice: %s",
