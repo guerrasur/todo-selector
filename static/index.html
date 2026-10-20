@@ -978,6 +978,7 @@ function pasoVerificacion(antes, resaltado, despues) {
 }
 
 function pintarVerificacion(cont, verif, hayMas) {
+  const humana = verif.every(v => v.origen === 'captcha');
   const caja = document.createElement('div');
   caja.className = 'bloque-verif';
   if (hayMas) caja.style.marginBottom = '14px';
@@ -992,7 +993,11 @@ function pintarVerificacion(cont, verif, hayMas) {
   sub.className = 'sub';
   // Por qué está congelada, en una línea: sin esto, un cartel que dice
   // "congelado" parece que algo se rompió.
-  sub.textContent =
+  sub.textContent = humana
+    ? 'PedidosYa pide confirmar que sos humano. La app conserva la cola y ' +
+      'espera sin recargar ni tocar esa pestaña. Cuando completes la ' +
+      'verificación y vuelva el menú, continuará automáticamente.'
+    :
     'Estás haciendo la verificación en dos pasos, así que esa pestaña es ' +
     'tuya: la app no la va a recargar, ni navegar, ni cerrar. ' +
     (verif.some(v => v.origen === 'detectada')
@@ -1003,7 +1008,12 @@ function pintarVerificacion(cont, verif, hayMas) {
   caja.appendChild(sub);
 
   const pasos = document.createElement('ol');
-  for (const [antes, resaltado, despues] of PASOS_VERIFICACION) {
+  const instrucciones = humana ? [
+    ['Abrí la pestaña de ', 'PedidosYa', ' en el navegador de la app.'],
+    ['Mantené pulsado ', 'Press & Hold', ' hasta completar la verificación.'],
+    ['Esperá a que vuelva el menú. ', '', 'La cola se reanudará sola.'],
+  ] : PASOS_VERIFICACION;
+  for (const [antes, resaltado, despues] of instrucciones) {
     pasos.appendChild(pasoVerificacion(antes, resaltado, despues));
   }
   // El último va aparte y resaltado: es el único que apaga el modo, y
@@ -1011,7 +1021,7 @@ function pintarVerificacion(cont, verif, hayMas) {
   const ultimo = pasoVerificacion('Recién ahí apretá ',
                                   'Ya terminé de verificar', '.');
   ultimo.className = 'final';
-  pasos.appendChild(ultimo);
+  if (!humana) pasos.appendChild(ultimo);
   caja.appendChild(pasos);
 
   const pie = document.createElement('div');
@@ -1019,7 +1029,7 @@ function pintarVerificacion(cont, verif, hayMas) {
 
   const boton = document.createElement('button');
   boton.className = 'grande off';
-  boton.textContent = 'Ya terminé de verificar';
+  boton.textContent = humana ? 'Volver a comprobar' : 'Ya terminé de verificar';
   boton.onclick = () => terminarVerificacion(verif[0].plataforma, boton);
   pie.appendChild(boton);
 
@@ -1030,7 +1040,8 @@ function pintarVerificacion(cont, verif, hayMas) {
   nota.className = 'en-espera';
   nota.textContent = total
     ? `${total} operación${total === 1 ? '' : 'es'} esperando en la cola: ` +
-      'no se perdieron, salen solas apenas apretes el botón.'
+      (humana ? 'continúan cuando completes la verificación.'
+              : 'no se perdieron, salen solas apenas apretes el botón.')
     : 'Lo que pidas mientras tanto queda encolado y sale solo cuando termines.';
   pie.appendChild(nota);
 
@@ -1038,13 +1049,12 @@ function pintarVerificacion(cont, verif, hayMas) {
   cont.appendChild(caja);
 }
 
-// El botón del header. Congela SIEMPRE Rappi: es el único portal que pide
-// esto (PedidosYa se reloguea solo), y el backend se encarga de arrastrar a
-// Rappi Común, que entra con la misma cuenta.
+// El botón del header congela Rappi y Rappi Común, que comparten cuenta.
+// El CAPTCHA de PedidosYa se detecta y se muestra en su propio aviso.
 function actualizarBotonVerificacion() {
   const b = document.getElementById('btn-verificacion');
   if (!b) return;
-  const activo = VERIFICANDO.size > 0;
+  const activo = VERIFICANDO.has('rappi') || VERIFICANDO.has('rappi_comun');
   b.classList.toggle('activo', activo);
   b.disabled = activo;
   b.textContent = activo ? 'Verificando…' : 'Rappi me pide código';
@@ -1127,7 +1137,10 @@ function pintarAlertas(alertas) {
   panel.appendChild(cont);
 
   // Primero de todo: si estás verificando, es lo único que estás por hacer.
-  if (verif.length) pintarVerificacion(cont, verif, hayProblemas);
+  const humanas = verif.filter(v => v.origen === 'captcha');
+  const codigos = verif.filter(v => v.origen !== 'captcha');
+  if (humanas.length) pintarVerificacion(cont, humanas, hayProblemas || codigos.length);
+  if (codigos.length) pintarVerificacion(cont, codigos, hayProblemas);
 
   if (caidas.length) {
     const t = document.createElement('div');
