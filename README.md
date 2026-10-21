@@ -1,5 +1,15 @@
 # Todo-Selector
 
+## Versión 6.17.2 — aviso propio para la verificación humana de PedidosYa
+
+Cuando aparece «Press & Hold», avisa con una notificación específica y tres
+notas ascendentes, distintas del aviso de sesión caída de Rappi. La pestaña
+parpadea con «PedidosYa: verificación humana» y el estado deja de decir que
+espera un código. Avisa una vez por cada aparición; si se resuelve y vuelve
+a aparecer, vuelve a avisar. Requiere habilitar las notificaciones con 🔔.
+La persona completa la prueba en PedidosYa; la cola conserva su pausa y
+reanudación existentes. No cambia la interacción con el portal.
+
 ## Versión 6.14 — prender productos con diferencias
 
 El aviso de diferencias incluye «Prender los que tienen diferencia».

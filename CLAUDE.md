@@ -1,5 +1,19 @@
 # Todo-Selector — contexto para Claude Code
 
+## Versión 6.17.2 — aviso propio para la verificación humana de PedidosYa
+
+Cuando aparece «Press & Hold», avisa con una notificación específica y tres
+notas ascendentes, distintas del aviso de sesión caída de Rappi. La pestaña
+parpadea con «PedidosYa: verificación humana» y el estado deja de decir que
+espera un código. Avisa una vez por cada aparición; si se resuelve y vuelve
+a aparecer, vuelve a avisar. Requiere habilitar las notificaciones con 🔔.
+La persona completa la prueba en PedidosYa; la cola conserva su pausa y
+reanudación existentes. No cambia la interacción con el portal.
+
+Validación: node pruebas/probar_avisos_verificacion_ui.js,
+node pruebas/probar_verificacion_ui.js y node pruebas/probar_accion_ui.js.
+Las notificaciones nativas y el sonido no se probaron en un escritorio real.
+
 ## Corrección v6.17.1 — verificación humana de PedidosYa
 
 HTML confirmado: .px-captcha-container visible, #px-captcha y un iframe

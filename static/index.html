@@ -562,7 +562,7 @@
        funcionar siempre es que lo aprietes vos ANTES de empezar. -->
   <button id="btn-verificacion" class="solo-dashboard"
           title="Apretalo cuando Rappi te pida el código de verificación. La app deja de tocar esa pestaña hasta que le digas que terminaste.">Rappi me pide código</button>
-  <button id="btn-avisos" class="solo-dashboard" title="Click para que te avise con una notificación si se cae una sesión">🔔</button>
+  <button id="btn-avisos" class="solo-dashboard" title="Click para que te avise con una notificación si se cae una sesión o PedidosYa pide verificar que sos humano">🔔</button>
   <!-- Estos dos quedan visibles siempre (dashboard y pantallas): son la
        navegación a Ajustes/Carta, no solo el botón para abrirlas. Con
        margin-left:auto en el primero de los dos que quede a la vista. -->
@@ -656,16 +656,18 @@ function nombrarPlataformas() {
 
 const TITULO_NORMAL = document.title;
 let sesionesCaidasAntes = new Set();     // para detectar la TRANSICION, no el estado
+let verificacionesHumanasAntes = new Set();
+let tituloAviso = null;
 let parpadeoTitulo = null;               // id del setInterval, o null si no hay nada caido
 
-function sonarAviso() {
+function sonarAviso(humana = false) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    for (const inicio of [0, 0.22]) {
+    for (const [indice, inicio] of (humana ? [0, 0.24, 0.48] : [0, 0.22]).entries()) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.value = 880;
+      osc.frequency.value = humana ? [523.25, 659.25, 783.99][indice] : 880;
       gain.gain.setValueAtTime(0.001, ctx.currentTime + inicio);
       gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + inicio + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + inicio + 0.18);
@@ -683,7 +685,7 @@ function actualizarBotonAvisos() {
   const permiso = (typeof Notification === 'undefined') ? 'unsupported' : Notification.permission;
   if (permiso === 'granted') {
     b.textContent = '🔔';
-    b.title = 'Avisos activados: te va a avisar con una notificación si Rappi o PedidosYa piden loguearse de nuevo';
+    b.title = 'Avisos activados: te va a avisar con una notificación si hay que iniciar sesión o completar la verificación humana de PedidosYa';
     b.disabled = true;
   } else if (permiso === 'denied' || permiso === 'unsupported') {
     b.textContent = '🔕';
@@ -693,36 +695,66 @@ function actualizarBotonAvisos() {
     b.disabled = true;
   } else {
     b.textContent = '🔔?';
-    b.title = 'Click para que te avise con una notificación si se cae una sesión';
+    b.title = 'Click para que te avise con una notificación si se cae una sesión o PedidosYa pide verificar que sos humano';
     b.disabled = false;
   }
 }
 
 function avisarSesionCaida(plataformas) {
   sonarAviso();
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    const quienes = plataformas.map(p => NOMBRE_PLAT[p]).join(', ');
-    new Notification('Todo-Selector: sesión caída', {
-      body: `${quienes} pide${plataformas.length === 1 ? '' : 'n'} que te vuelvas a loguear en la ventana del navegador.`,
-    });
-  }
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const quienes = plataformas.map(p => NOMBRE_PLAT[p] || p).join(', ');
+      new Notification('Todo-Selector: sesión caída', {
+        body: `${quienes} pide${plataformas.length === 1 ? '' : 'n'} que te vuelvas a loguear en la ventana del navegador.`,
+      });
+    }
+  } catch (e) { /* El aviso en pantalla sigue disponible. */ }
 }
 
-// Alterna el titulo de la pestaña mientras haya algo caído, para que se
-// note aunque el usuario tenga otra pestaña al frente (y por ende no
-// reciba notificaciones del SO, que solo saltan con el navegador atras).
-function actualizarParpadeoTitulo(hayCaidas) {
-  if (hayCaidas && !parpadeoTitulo) {
+function avisarVerificacionHumana() {
+  sonarAviso(true);
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification('PedidosYa: verificá que sos humano', {
+        body: 'Abrí la pestaña de PedidosYa y mantené pulsado «Press & Hold». La cola espera y continuará cuando vuelva el menú.',
+        tag: 'todo-selector-pedidosya-verificacion-humana',
+      });
+    }
+  } catch (e) { /* El aviso en pantalla sigue disponible. */ }
+}
+
+// El callback lee el aviso actual: puede cambiar sin reiniciar el intervalo.
+function actualizarParpadeoTitulo(hayCaidas, hayHumana = false) {
+  tituloAviso = hayHumana
+    ? (hayCaidas ? '✋ Verificación humana · ⚠️ Login pendiente — Todo-Selector'
+                 : '✋ PedidosYa: verificación humana — Todo-Selector')
+    : (hayCaidas ? '⚠️ Login pendiente — Todo-Selector' : null);
+  if (tituloAviso && !parpadeoTitulo) {
     let mostrando = false;
     parpadeoTitulo = setInterval(() => {
-      document.title = mostrando ? TITULO_NORMAL : '⚠️ Login pendiente — Todo-Selector';
+      document.title = mostrando ? TITULO_NORMAL : tituloAviso;
       mostrando = !mostrando;
     }, 1500);
-  } else if (!hayCaidas && parpadeoTitulo) {
+  } else if (!tituloAviso && parpadeoTitulo) {
     clearInterval(parpadeoTitulo);
     parpadeoTitulo = null;
     document.title = TITULO_NORMAL;
   }
+}
+
+function actualizarAvisosSistema(s) {
+  const verificacion = s.verificacion || {};
+  const caidas = s.simulado ? [] : PLATS.filter(p => s.sesiones?.[p] === false
+    && !(s.falta_sucursal || []).includes(p) && !verificacion[p]);
+  const humanas = s.simulado ? [] : PLATS.filter(p => p === 'pedidosya'
+    && verificacion[p]?.origen === 'captcha');
+  const nuevas = caidas.filter(p => !sesionesCaidasAntes.has(p));
+  if (nuevas.length) avisarSesionCaida(nuevas);
+  if (humanas.some(p => !verificacionesHumanasAntes.has(p))) avisarVerificacionHumana();
+  sesionesCaidasAntes = new Set(caidas);
+  verificacionesHumanasAntes = new Set(humanas);
+  actualizarParpadeoTitulo(caidas.length > 0, humanas.length > 0);
 }
 
 // producto_id + '|' + plataforma  ->  por qué la app no puede confirmar que
@@ -1412,10 +1444,14 @@ function pintarSistema(s) {
   //
   // Dice lo que está pasando, no el nombre de la bandera que lo prendió:
   // «CONGELADO» era la palabra del código y no explicaba nada solo.
-  const congelado = VERIFICANDO.size
-    ? 'Esperando el código de ' +
-      [...VERIFICANDO].map(p => NOMBRE_PLAT[p] || p).join(' y ')
-    : '';
+  const humana = [...VERIFICANDO].filter(p => s.verificacion[p].origen === 'captcha');
+  const codigos = [...VERIFICANDO].filter(p => !humana.includes(p));
+  const congelado = [
+    humana.length ? 'Verificación humana pendiente: ' +
+      humana.map(p => NOMBRE_PLAT[p] || p).join(' y ') : '',
+    codigos.length ? 'Esperando el código de ' +
+      codigos.map(p => NOMBRE_PLAT[p] || p).join(' y ') : '',
+  ].filter(Boolean).join(' · ');
 
   if (s.simulado) {
     // Idem: «MODO SIMULADO» es el nombre de STOCKSWITCH_SIMULADO, una
@@ -1450,13 +1486,8 @@ function pintarSistema(s) {
       el.className = 'badge';
     }
 
-    // Avisar solo en la TRANSICION a caido (incluye el caso de arrancar la
-    // pantalla con la sesion ya caida), no en cada poll mientras sigue asi.
-    const nuevas = caidas.filter(p => !sesionesCaidasAntes.has(p));
-    if (nuevas.length) avisarSesionCaida(nuevas);
-    sesionesCaidasAntes = new Set(caidas);
-    actualizarParpadeoTitulo(caidas.length > 0);
   }
+  actualizarAvisosSistema(s);
 
   const p = document.getElementById('pendientes');
   p.textContent = s.operaciones_pendientes
