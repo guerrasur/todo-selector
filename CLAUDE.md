@@ -1,5 +1,17 @@
 # Todo-Selector — contexto para Claude Code
 
+## Versión 6.17.3 — revisión de avisos y sonido
+
+- El audio se habilita con una interacción de mouse o teclado y reutiliza
+  un único AudioContext para los avisos posteriores. No deja notas pendientes
+  en un contexto suspendido; libera osciladores y ganancias al terminar.
+- El estado del sistema informa el motivo de la sesión. Si no cargó el menú,
+  muestra ese problema sin disparar la notificación de iniciar sesión.
+- Pruebas de CAPTCHA, Rappi, cola, API, transiciones de avisos, sonido y badge.
+  Arranque y cinco rutas HTTP comprobados en modo simulado. La prueba con
+  navegador real quedó bloqueada por la descarga incompleta de Chromium;
+  falta validar notificación nativa, audio y portal real en un escritorio.
+
 ## Versión 6.17.2 — aviso propio para la verificación humana de PedidosYa
 
 Cuando aparece «Press & Hold», avisa con una notificación específica y tres

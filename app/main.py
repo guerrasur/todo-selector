@@ -671,6 +671,7 @@ def estado_sistema(db: Session = Depends(get_db)):
         "simulado": MODO_SIMULADO,
         "arrancado_en": ARRANCADO_EN.isoformat(timespec="seconds"),
         "sesiones": worker.sesion_ok,
+        "motivos_sesion": dict(worker.motivo_sesion),
         # Las que esta instalación usa de verdad. La pantalla dibuja los
         # chips y los botones de «Apagar todo» con ESTO y no con una lista
         # fija: una plataforma opcional que nadie configuró no tiene por qué

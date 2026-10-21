@@ -660,9 +660,29 @@ let verificacionesHumanasAntes = new Set();
 let tituloAviso = null;
 let parpadeoTitulo = null;               // id del setInterval, o null si no hay nada caido
 
+let audioAvisos = null;
+
+function prepararAudioAvisos() {
+  try {
+    if (!audioAvisos || audioAvisos.state === 'closed') {
+      audioAvisos = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioAvisos.state === 'suspended') {
+      audioAvisos.resume().catch(() => {});
+    }
+    return audioAvisos;
+  } catch (e) { return null; }
+}
+
+// Chrome exige un gesto para habilitar audio. Se reutiliza el mismo contexto
+// para que los avisos posteriores también suenen con la pestaña en segundo plano.
+document.addEventListener('pointerdown', prepararAudioAvisos, {capture: true, passive: true});
+document.addEventListener('keydown', prepararAudioAvisos, {capture: true});
+
 function sonarAviso(humana = false) {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = prepararAudioAvisos();
+    if (!ctx || ctx.state !== 'running') return;
     for (const [indice, inicio] of (humana ? [0, 0.24, 0.48] : [0, 0.22]).entries()) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -673,6 +693,7 @@ function sonarAviso(humana = false) {
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + inicio + 0.18);
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
       osc.start(ctx.currentTime + inicio);
       osc.stop(ctx.currentTime + inicio + 0.2);
     }
@@ -743,10 +764,16 @@ function actualizarParpadeoTitulo(hayCaidas, hayHumana = false) {
   }
 }
 
+function sesionesCaidas(s) {
+  return PLATS.filter(p => s.sesiones?.[p] === false
+    && !(s.falta_sucursal || []).includes(p)
+    && !(s.verificacion || {})[p]
+    && (s.motivos_sesion || {})[p] !== 'menu_no_cargo');
+}
+
 function actualizarAvisosSistema(s) {
   const verificacion = s.verificacion || {};
-  const caidas = s.simulado ? [] : PLATS.filter(p => s.sesiones?.[p] === false
-    && !(s.falta_sucursal || []).includes(p) && !verificacion[p]);
+  const caidas = s.simulado ? [] : sesionesCaidas(s);
   const humanas = s.simulado ? [] : PLATS.filter(p => p === 'pedidosya'
     && verificacion[p]?.origen === 'captcha');
   const nuevas = caidas.filter(p => !sesionesCaidasAntes.has(p));
@@ -1469,10 +1496,10 @@ function pintarSistema(s) {
     // loguearse de nuevo —con sonido, notificación y el título parpadeando—
     // es pedirle justo lo contrario de lo que tiene que hacer, que es
     // quedarse quieta en esa pantalla esperando el código.
-    const faltaSucursal = s.falta_sucursal || [];
-    const caidas = PLATS.filter(p => s.sesiones[p] === false
-                                     && !faltaSucursal.includes(p)
-                                     && !VERIFICANDO.has(p));
+    const caidas = sesionesCaidas(s);
+    const sinMenu = PLATS.filter(p => s.sesiones?.[p] === false
+      && (s.motivos_sesion || {})[p] === 'menu_no_cargo'
+      && !faltaSucursal.includes(p) && !VERIFICANDO.has(p));
     if (congelado) {
       // Va antes que "Login pendiente" a propósito: «logueate de nuevo» es
       // lo contrario de lo que tenés que hacer mientras esperás el código.
@@ -1480,6 +1507,9 @@ function pintarSistema(s) {
       el.className = 'badge alerta';
     } else if (caidas.length) {
       el.textContent = 'Login pendiente: ' + caidas.map(p => NOMBRE_PLAT[p]).join(', ');
+      el.className = 'badge alerta';
+    } else if (sinMenu.length) {
+      el.textContent = 'No cargó el menú: ' + sinMenu.map(p => NOMBRE_PLAT[p] || p).join(', ');
       el.className = 'badge alerta';
     } else {
       el.textContent = 'Conectado';
