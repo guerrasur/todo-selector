@@ -335,11 +335,11 @@ pisa lecturas o acciones posteriores. Los snapshots anteriores siguen válidos.
 `_absorber` no debe llamar `separar` si destino y origen tienen el MISMO nombre
 remoto. `vincular_varios` itera productos únicos antes de separar y absorber.
 Pruebas: `python pruebas/probar_duplicados.py` y
-`node pruebas/probar_duplicados_ui.js`. Detalles en `CAMBIOS-6.10.md`.
+`node pruebas/probar_duplicados_ui.js`. Detalles en `docs/cambios/CAMBIOS-6.10.md`.
 
 ## Actualización v6.9 (2026-09-17)
 
-Leer `CAMBIOS-6.9.md` antes de modificar cola o verificaciones. `app/cola.py`
+Leer `docs/cambios/CAMBIOS-6.9.md` antes de modificar cola o verificaciones. `app/cola.py`
 centraliza la identidad de la última intención y el estado transitorio. No
 recuperar la deduplicación contra CUALQUIER operación viva: apagar → prender →
 apagar son tres intenciones, no un doble click. No reintentar una operación

@@ -1,5 +1,7 @@
 # Todo-Selector
 
+[Historial de cambios](docs/cambios/README.md)
+
 ## Versión 6.17.3 — revisión de avisos y sonido
 
 - El audio se habilita con una interacción de mouse o teclado y reutiliza
@@ -115,7 +117,7 @@ Luego usar **Volver a leer los portales** para confirmar los estados; si las
 copias se contradecían, se muestra «sin leer» hasta tener evidencia nueva.
 
 También se corrigió la fusión que separaba de nuevo un nombre remoto idéntico
-y podía generar más copias. Ver [CAMBIOS-6.10.md](CAMBIOS-6.10.md).
+y podía generar más copias. Ver [CAMBIOS-6.10.md](docs/cambios/CAMBIOS-6.10.md).
 
 ## Versión 6.9 — correcciones de cola y confirmaciones
 
@@ -131,7 +133,7 @@ cambiarla desde el portal, sin reactivar el producto ni declarar éxito. El camb
 automático de duración sobre un apagado existente sigue pendiente de validar con
 el DOM real; las descripciones históricas de más abajo no garantizan esa operación.
 
-Detalle, pruebas y límites: [CAMBIOS-6.9.md](CAMBIOS-6.9.md).
+Detalle, pruebas y límites: [CAMBIOS-6.9.md](docs/cambios/CAMBIOS-6.9.md).
 
 App local para apagar/prender productos en **PedidosYa** y **Rappi** desde una
 sola pantalla, sin entrar a cada portal.
