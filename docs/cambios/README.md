@@ -2,6 +2,7 @@
 
 Notas por versión, de la más reciente a la más antigua.
 
+- [Versión 6.17.4](CAMBIOS-6.17.4.md)
 - [Versión 6.17.1](CAMBIOS-6.17.1.md)
 - [Versión 6.17](CAMBIOS-6.17.md)
 - [Versión 6.16.10](CAMBIOS-6.16.10.md)

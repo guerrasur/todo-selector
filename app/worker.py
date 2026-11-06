@@ -992,14 +992,15 @@ class Worker:
                     return
                 if datos.get("origen") != "captcha" or not await plat.verificacion_resuelta():
                     return
-                salida = await self.terminar_verificacion("pedidosya", leer=False)
+                salida = await self.terminar_verificacion("pedidosya", leer=True)
                 if "pedidosya" not in salida["liberadas"]:
                     return
                 # El menú acaba de volver: no recargar por antigüedad al retomar.
                 self.ultimo_refresco["pedidosya"] = datetime.now()
                 self.sesion_ok["pedidosya"] = True
                 self.motivo_sesion.pop("pedidosya", None)
-                log.info("PedidosYa: verificación humana resuelta; se retoma la cola")
+                log.info("PedidosYa: verificación humana resuelta; se retoma la cola "
+                         "y se relee la carta")
             except Exception as e:
                 log.warning("No pude comprobar la verificación humana: %s", _resumen(e, 120))
 
@@ -1109,7 +1110,10 @@ class Worker:
             if nombre not in self.plataformas:
                 continue
             try:
-                await self.sincronizar_estados(nombre)
+                resultado = await self.sincronizar_estados(
+                    nombre, sostener=config.activo("sostener_apagados"))
+                for caso in resultado.get(nombre, {}).get("revividos", []):
+                    await self._reencolar_si_revivio(caso)
             except Exception as e:
                 log.exception("Leyendo %s despues de la verificación: %s",
                               nombre, e)
@@ -1424,6 +1428,8 @@ class Worker:
         Eso queda como APAGADO_AJENO y la ronda de reverificacion lo deja
         en paz; solo sostiene lo que apago la app.
         """
+        from plataformas.pedidosya import VerificacionHumanaPendiente
+
         if self.modo_simulado:
             return {"error": "modo simulado: no hay navegador"}
 
@@ -1447,6 +1453,11 @@ class Worker:
                     continue
                 try:
                     leidos = await plat.leer_todos()
+                except VerificacionHumanaPendiente:
+                    self.congelar_por_verificacion(
+                        nombre, origen="captcha", detalle=MSG_VERIFICACION_HUMANA)
+                    salida[nombre] = {"error": self._mensaje_verificacion(nombre)}
+                    continue
                 except Exception as e:
                     log.exception("Leyendo el estado de %s", nombre)
                     salida[nombre] = {"error": _resumen(e)}

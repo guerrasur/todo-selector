@@ -449,9 +449,9 @@ class PedidosYa(PlataformaBase):
         await self.ir_al_menu()
         total = await self.page.locator(self.SELECTOR_CATEGORIAS).count()
         if total == 0:
-            log.warning("No encuentro la lista de categorias (%s)",
-                        self.SELECTOR_CATEGORIAS)
-            return {}
+            await self._exigir_sin_verificacion()
+            raise RuntimeError("PedidosYa: no cargó la lista de categorías; "
+                               "no se pudo leer la carta")
 
         salida = {}
         for indice in range(total):
@@ -483,6 +483,11 @@ class PedidosYa(PlataformaBase):
 
                 self._categoria_de[nombre] = indice
 
+        # El desafío también puede aparecer al leer la última categoría,
+        # después del chequeo del click. Esa pasada no confirma la carta.
+        await self._exigir_sin_verificacion()
+        if not salida:
+            raise RuntimeError("PedidosYa: no se pudo leer ningún producto")
         return salida
 
     async def inspeccionar(self, nombre_remoto: str) -> dict:

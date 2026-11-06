@@ -2,6 +2,14 @@
 
 [Historial de cambios](docs/cambios/README.md)
 
+## Versión 6.17.4 — relectura después del bloqueo de PedidosYa
+
+Al completar «Press & Hold» y volver el menú, la app relee automáticamente
+la carta para confirmar los estados y resolver los avisos de datos viejos.
+La lectura respeta las operaciones pendientes y el ajuste de sostener apagados.
+Si vuelve a aparecer el bloqueo, espera nuevamente sin guardar la lectura
+interrumpida como válida. Cerrá y volvé a abrir la app para actualizar.
+
 ## Versión 6.17.3 — revisión de avisos y sonido
 
 - El audio se habilita con una interacción de mouse o teclado y reutiliza
