@@ -37,10 +37,17 @@ class GestorPrecios:
     def validar_tiendas(self, tiendas):
         if not tiendas or len(tiendas) != len(set(tiendas)):
             raise ValueError("Elegí al menos una tienda, sin repetir")
+        if "pedidosya" in tiendas:
+            raise ValueError("Precios de PedidosYa está en desarrollo: falta adaptar la lectura "
+                             "y el editor al HTML del portal. Todavía no se modifican precios.")
         if any(p not in self.tiendas() for p in tiendas):
             raise ValueError("Precios beta solo admite tiendas Rappi configuradas")
 
     def contexto(self, plataforma):
+        if plataforma == "pedidosya":
+            from plataformas.pedidosya_precios import DestinoPreciosPedidosYa
+            url = config.texto("pedidosya_precios_url")
+            return DestinoPreciosPedidosYa.desde_url(url).contexto if url else []
         claves = ("rappi_brand_id", "rappi_store_id") if plataforma == "rappi" else (
             "rappi_brand_id", "rappi_comun_store_id")
         return [config.texto(c) for c in claves]

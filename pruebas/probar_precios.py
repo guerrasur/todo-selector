@@ -91,6 +91,26 @@ class Lotes(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError): self.plan(tiendas=["pedidosya"])
         self.assertNotIn("pedidosya", self.g.tiendas())
 
+    async def test_destino_pedidosya_configurable_sin_habilitar_escritura(self):
+        from plataformas.pedidosya_precios import DestinoPreciosPedidosYa as Destino
+        self.assertEqual(self.g.contexto("pedidosya"), [])
+        opcion = config.POR_CLAVE["pedidosya_precios_url"]
+        self.assertEqual(config._validar(opcion, ""), "")
+        with self.assertRaises(ValueError):
+            config._validar(opcion, "https://ejemplo.com/")
+        for vendor, menu in (("100001", "200001"), ("100002", "200002")):
+            destino = Destino(vendor, menu)
+            with SessionLocal() as db:
+                config.guardar(db, {"pedidosya_precios_url": destino.url}); db.commit()
+            config.recargar()
+            self.assertEqual(self.g.contexto("pedidosya"), [vendor, menu])
+            with self.assertRaisesRegex(ValueError, "en desarrollo"):
+                await self.g.leer(["pedidosya"])
+            self.assertNotIn("pedidosya", self.g.tiendas())
+        with SessionLocal() as db:
+            config.guardar(db, {"pedidosya_precios_url": ""}); db.commit()
+        config.recargar()
+
     async def test_doble_ejecutar_no_duplica(self):
         p = self.plan(); a = self.g.ejecutar(p["plan"]); b = self.g.ejecutar(p["plan"])
         self.assertEqual(a["id"], b["id"]); await self.g.tarea

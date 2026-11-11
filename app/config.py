@@ -243,6 +243,16 @@ OPCIONES = (
               "la URL: /menus/PY_AR/<esto>. Son números.",
     ),
     Opcion(
+        clave="pedidosya_precios_url",
+        titulo="Enlace del menú de precios de PedidosYa",
+        defecto="",
+        tipo="texto_libre",
+        grupo="Sucursal",
+        opcional=True,
+        ayuda="Pegá el enlace completo de menu-management-v2 con vendor y activeMenuId. "
+              "Precios de PedidosYa está en desarrollo; este enlace no cambia la disponibilidad.",
+    ),
+    Opcion(
         clave="rappi_brand_id",
         titulo="brandId de Rappi",
         defecto="",
@@ -523,6 +533,12 @@ def tiendas_pausadas() -> list[str]:
 # ---------- Escribir ----------
 
 def _validar(opcion: Opcion, valor: Any) -> Any:
+    if opcion.clave == "pedidosya_precios_url":
+        from plataformas.pedidosya_precios import DestinoPreciosPedidosYa
+        if isinstance(valor, str) and not valor.strip():
+            return ""
+        return DestinoPreciosPedidosYa.desde_url(valor).url
+
     if opcion.tipo == "bool":
         return bool(valor)
 
