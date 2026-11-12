@@ -19,8 +19,9 @@ from app import worker as modulo_worker
 from app.database import Base
 from app.models import EstadoItem, Operacion, Producto
 from app.worker import Worker, VERIFICACION
-from plataformas.base import PlataformaBase
-from plataformas.pedidosya import PedidosYa, VerificacionHumanaPendiente
+from plataformas.base import PlataformaBase, ResultadoEstado
+from plataformas.pedidosya import (ApagadoSinConfirmar, PedidosYa,
+                                   VerificacionHumanaPendiente)
 
 
 class Indicadores:
@@ -225,46 +226,131 @@ class VerificacionPedidosYa(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.w.ultima_lectura)
         self.assertEqual(self.w.no_encontrados["pedidosya"], ["aviso previo"])
 
-    async def test_relectura_respeta_sostener_y_confirma_revividos(self):
-        self.w.sincronizar_estados = AsyncMock(return_value={
-            "pedidosya": {"revividos": [{"producto_id": 1}]}})
+    async def test_relectura_de_pedidosya_tras_captcha_solo_lee(self):
+        self.w.sincronizar_estados = AsyncMock(return_value={"pedidosya": {}})
         self.w._reencolar_si_revivio = AsyncMock()
         self.w._refrescar_estado_tiendas = AsyncMock()
         with patch.object(modulo_worker.config, "activo", return_value=True):
             await Worker._leer_despues_de_verificar(self.w, ["pedidosya"])
-        self.w.sincronizar_estados.assert_awaited_once_with("pedidosya", sostener=True)
-        self.w._reencolar_si_revivio.assert_awaited_once_with({"producto_id": 1})
+        self.w.sincronizar_estados.assert_awaited_once_with("pedidosya", sostener=False)
+        self.w._reencolar_si_revivio.assert_not_awaited()
+
+    async def test_rondas_y_verificacion_rapida_respetan_pedidosya_prendido(self):
+        motor = create_engine("sqlite://", poolclass=StaticPool)
+        self.addCleanup(motor.dispose)
+        Base.metadata.create_all(motor)
+        sesiones = sessionmaker(bind=motor, autoflush=False)
+        with sesiones() as db:
+            p = Producto(nombre="Flan")
+            p.estados = [EstadoItem(plataforma="pedidosya", estado=EstadoItem.APAGADO_HOY)]
+            db.add(p)
+            db.commit()
+            ident = p.id
+
+        with patch.object(modulo_worker, "SessionLocal", sesiones), \
+             patch.object(modulo_worker.config, "tienda_pausada", return_value=False), \
+             patch.object(modulo_worker.config, "activo", return_value=True):
+            resultado = self.w._guardar_estados("pedidosya", {"Flan": True}, sostener=True)
+            self.assertEqual(resultado["revividos"], [])
+            with sesiones() as db:
+                est = db.query(EstadoItem).one()
+                self.assertEqual(est.estado, EstadoItem.PRENDIDO)
+                est.estado = EstadoItem.APAGADO_INDEF
+                db.commit()
+
+            self.w._anotar_reverificacion(
+                ident, "pedidosya", EstadoItem.APAGADO_INDEF, None, "Flan",
+                ResultadoEstado(disponible=True, detalle="switch"), "verificación rápida")
+            with sesiones() as db:
+                self.assertEqual(db.query(EstadoItem).one().estado, EstadoItem.PRENDIDO)
+                self.assertEqual(db.query(Operacion).count(), 0)
+
+    async def test_cola_retirada_y_sin_reintento_demorado_para_apagados(self):
+        motor = create_engine("sqlite://", poolclass=StaticPool)
+        self.addCleanup(motor.dispose)
+        Base.metadata.create_all(motor)
+        sesiones = sessionmaker(bind=motor, autoflush=False)
+        with sesiones() as db:
+            p = Producto(nombre="Flan")
+            p.estados = [EstadoItem(plataforma="pedidosya", estado=EstadoItem.APAGANDO)]
+            db.add(p)
+            db.flush()
+            automatica = Operacion(producto_id=p.id, plataforma="pedidosya",
+                                   accion="apagar_hoy", detalle="reintento: revivio a los 120s")
+            db.add(automatica)
+            db.commit()
+            ident = automatica.id
+
+        self.w._ejecutar = AsyncMock()
+        with patch.object(modulo_worker, "SessionLocal", sesiones):
+            await self.w._procesar_pendientes()
+            self.w._ejecutar.assert_not_awaited()
+            with sesiones() as db:
+                op = db.get(Operacion, ident)
+                self.assertEqual(op.estado, Operacion.CANCELADA)
+                self.assertEqual(db.query(EstadoItem).one().estado, EstadoItem.DESCONOCIDO)
+                op.estado = Operacion.ERROR
+                op.finalizada_en = datetime.now() - timedelta(hours=1)
+                db.commit()
+            self.assertEqual(self.w._reencolar_fallidas(), [])
+
+    async def test_apagado_explicito_fallido_se_intenta_una_vez(self):
+        motor = create_engine("sqlite://", poolclass=StaticPool)
+        self.addCleanup(motor.dispose)
+        Base.metadata.create_all(motor)
+        sesiones = sessionmaker(bind=motor, autoflush=False)
+        with sesiones() as db:
+            p = Producto(nombre="Flan")
+            p.estados = [EstadoItem(plataforma="pedidosya", estado=EstadoItem.APAGANDO)]
+            db.add(p)
+            db.flush()
+            db.add(Operacion(producto_id=p.id, plataforma="pedidosya", accion="apagar_hoy"))
+            db.commit()
+
+        self.w._ejecutar = AsyncMock(return_value=(False, "sin confirmación", ""))
+        with patch.object(modulo_worker, "SessionLocal", sesiones):
+            await self.w._procesar_pendientes()
+            await self.w._procesar_pendientes()
+        self.w._ejecutar.assert_awaited_once_with("pedidosya", "apagar_hoy", "Flan")
+        with sesiones() as db:
+            op = db.query(Operacion).one()
+            self.assertEqual((op.estado, op.intentos), (Operacion.ERROR, 1))
+
+    async def test_captcha_despues_de_enviar_apagado_no_repite_la_orden(self):
+        self.pagina.captcha = True
+        self.w._preparar = AsyncMock(return_value=(True, ""))
+        self.plat.apagar = AsyncMock(side_effect=ApagadoSinConfirmar("Revisá el portal."))
+        exito, detalle, motivo = await self.w._ejecutar_sin_turno(
+            self.plat, "pedidosya", "apagar_hoy", "Flan")
+        self.assertEqual((exito, detalle, motivo), (False, "Revisá el portal.", ""))
+        self.assertTrue(self.w.en_verificacion("pedidosya"))
 
     async def test_lector_no_devuelve_carta_vacia_como_lectura_valida(self):
-        self.pagina.captcha = False
         self.plat.ir_al_menu = AsyncMock()
-        vacio = Mock(count=AsyncMock(return_value=0))
-        with patch.object(self.pagina, "locator", return_value=vacio):
-            # No hay indicadores de CAPTCHA ni categorías.
-            with self.assertRaisesRegex(RuntimeError, "categorías"):
-                await self.plat.leer_todos()
+        self.plat._carta_visible = AsyncMock(return_value={
+            "categorias": [], "activa": None, "filas": []})
+        with self.assertRaisesRegex(RuntimeError, "categorías"):
+            await self.plat.leer_todos()
 
     async def test_lector_corta_si_captcha_aparece_en_la_ultima_categoria(self):
         self.pagina.captcha = False
         self.plat.ir_al_menu = AsyncMock()
-        categorias = Mock(count=AsyncMock(return_value=1))
-        filas = Mock(count=AsyncMock(return_value=0))
-        locator_original = self.pagina.locator
+        self.plat._carta_visible = AsyncMock(return_value={
+            "categorias": ["Bebidas"], "activa": "Bebidas", "filas": []})
 
-        def locator(selector):
-            if selector == PedidosYa.SELECTOR_CATEGORIAS:
-                return categorias
-            if selector == "label.mat-slide-toggle-label":
-                return filas
-            return locator_original(selector)
-
-        async def abrir(indice):
+        async def abrir(categoria, categorias, **kwargs):
             self.pagina.captcha = True
+            return [{"nombre": "Agua", "id": "toggle-1", "disponible": True}]
 
         self.plat._abrir_categoria = AsyncMock(side_effect=abrir)
-        with patch.object(self.pagina, "locator", side_effect=locator):
-            with self.assertRaises(VerificacionHumanaPendiente):
-                await self.plat.leer_todos()
+        with self.assertRaises(VerificacionHumanaPendiente):
+            await self.plat.leer_todos()
+        self.assertEqual(await self.plat.categorias_de_productos(), {})
+
+    def test_url_de_menu_con_id_parecido_no_es_el_mismo_menu(self):
+        self.assertTrue(self.plat.en_el_menu())
+        self.pagina.url += "2?ref=portal"
+        self.assertFalse(self.plat.en_el_menu())
 
     async def test_no_libera_pausas_manuales_ni_rappi(self):
         self.w.empezar_verificacion("pedidosya")

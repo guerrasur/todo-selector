@@ -423,9 +423,9 @@ def sucursal_configurable(db):
     revisar(py.url_menu.endswith("/222333"),
             "cambiar de menu no necesita reiniciar la app")
 
-    py._categoria_de["Budín de pan"] = 2
+    py._categorias_leidas["Postres"] = ["Budín de pan"]
     py.configurar(menu_id="444555")
-    revisar(py._categoria_de == {},
+    revisar(py._categorias_leidas == {},
             "y olvida en que categoria vivia cada producto: es otro menu")
 
 

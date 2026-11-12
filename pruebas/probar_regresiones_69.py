@@ -86,10 +86,12 @@ class Regresiones(unittest.IsolatedAsyncioTestCase):
         for clase in (Rappi, PedidosYa):
             falsa = SimpleNamespace(revisar_ambiguedad=AsyncMock(),
                        leer_estado=AsyncMock(return_value=ResultadoEstado(False)),
-                       prender=AsyncMock())
+                       _buscar_producto=AsyncMock(return_value={"disponible": False}),
+                       _click_toggle=AsyncMock(), prender=AsyncMock())
             with self.assertRaises(DuracionNoConfirmada):
                 await clase.apagar(falsa, "Producto de prueba", por_hoy=False)
             falsa.prender.assert_not_called()
+            falsa._click_toggle.assert_not_called()
             self.assertTrue(await clase.apagar(falsa, "Producto de prueba", por_hoy=True))
 
     async def test_duracion_no_se_reintenta_y_no_se_marca_indefinido(self):

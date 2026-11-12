@@ -2,6 +2,18 @@
 
 [Historial de cambios](docs/cambios/README.md)
 
+## Versión 6.17.5 — disponibilidad y lectura de PedidosYa
+
+Cada categoría debe confirmar sus filas antes de que Todo Selector acepte
+la lectura. Los productos con un nombre duplicado o un switch ilegible
+quedan sin confirmar. Para cambiar disponibilidad, la app comprueba el
+menú configurado y el producto que figura en el diálogo.
+
+Las verificaciones de PedidosYa actualizan la disponibilidad según el portal.
+Si un apagado solicitado falla, la cola muestra el error para que puedas
+revisarlo y decidir si volvés a pedirlo. Cerrá y volvé a abrir la app desde
+el lanzador para actualizar.
+
 ## Versión 6.17.4 — relectura después del bloqueo de PedidosYa
 
 Al completar «Press & Hold» y volver el menú, la app relee automáticamente

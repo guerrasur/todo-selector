@@ -31,6 +31,7 @@ RAIZ = Path(__file__).resolve().parent
 sys.path.insert(0, str(RAIZ.parent))
 
 from playwright.async_api import async_playwright          # noqa: E402
+from plataformas.base import NombreAmbiguo
 from plataformas.pedidosya import PedidosYa                # noqa: E402
 
 PUERTO = 8777
@@ -76,7 +77,7 @@ async def escenario(navegador, query: str, titulo: str):
     class PedidosYaLocal(PedidosYa):
         url_menu = BASE + query
 
-    plat = PedidosYaLocal(pagina)
+    plat = PedidosYaLocal(pagina, menu_id="LOCAL")
     await pagina.goto(plat.url_menu)
     # Arrancamos con Budin de pan apagado, como estaba en el log.
     await pagina.evaluate("localStorage.setItem('apagados', '[\"Budin de pan\"]')")
@@ -135,10 +136,59 @@ async def escenario(navegador, query: str, titulo: str):
     revisar(len(cats) == 12, f"y las trae de las 3 categorias ({len(cats)})")
 
     # Sin ninguna lectura previa no se inventa nada: {} es "no se" (regla 8).
-    otra = PedidosYaLocal(pagina)
+    otra = PedidosYaLocal(pagina, menu_id="LOCAL")
     revisar(await otra.categorias_de_productos() == {},
             "sin haber leido todavia, no afirma ninguna categoria")
 
+    await pagina.close()
+
+
+async def regresiones_lectura(navegador):
+    pagina = await navegador.new_page()
+
+    class PedidosYaLocal(PedidosYa):
+        url_menu = BASE
+        ESPERA_CATEGORIA = 3
+
+    plat = PedidosYaLocal(pagina, menu_id="LOCAL")
+
+    await pagina.goto(BASE + "?demora=1700&sinEstado=Flan+casero")
+    revisar(await plat.asegurar_sesion(), "réplica con categorías lentas")
+    todos = await plat.leer_todos()
+    revisar(len(todos) == 11 and "Flan casero" not in todos,
+            "espera la categoría nueva y deja sin confirmar el switch ilegible")
+    revisar((await plat.categorias_de_productos()).get("Budin de pan") == "Platos",
+            "los productos de la categoría lenta quedan en su grupo")
+    revisar(await plat.leer_estado("Flan casero") is None,
+            "un switch ilegible devuelve estado desconocido")
+
+    await pagina.goto(BASE + "?trabada=Platos")
+    await plat.asegurar_sesion()
+    try:
+        await plat.leer_todos()
+    except RuntimeError as e:
+        revisar("Platos" in str(e) and not await plat.categorias_de_productos(),
+                "descarta la carta si una categoría no confirma el cambio")
+    else:
+        revisar(False, "una categoría trabada debe descartar la carta")
+
+    await pagina.goto(BASE + "?duplicado=1")
+    await plat.asegurar_sesion()
+    revisar("Budin de pan" not in await plat.leer_todos(),
+            "un nombre repetido queda fuera de la lectura de disponibilidad")
+    try:
+        await plat.prender("Budin de pan")
+    except NombreAmbiguo:
+        revisar(True, "un duplicado en otra categoría bloquea el cambio")
+    else:
+        revisar(False, "un duplicado en otra categoría debe bloquear el cambio")
+
+    await pagina.goto(BASE + "?otroPopup=Otro+producto")
+    await plat.asegurar_sesion()
+    revisar(not await plat.apagar("Tarta de verdura"),
+            "no confirma un diálogo de otro producto")
+    revisar((await plat.leer_estado("Tarta de verdura")).disponible,
+            "el producto sigue disponible si el diálogo tenía otro nombre")
     await pagina.close()
 
 
@@ -151,6 +201,7 @@ async def main():
                             "A) popup de sonido cerrable (como en produccion)")
             await escenario(navegador, "?popup=pegado&handler=hijo",
                             "B) backdrop pegado: todos los clicks por JS")
+            await regresiones_lectura(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()

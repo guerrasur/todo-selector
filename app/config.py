@@ -149,11 +149,11 @@ OPCIONES = (
     ),
     Opcion(
         clave="sostener_apagados",
-        titulo="Volver a apagar lo que el portal revive",
+        titulo="Volver a apagar en Rappi",
         defecto=True,
         grupo="Ritmo",
-        ayuda="Si se apaga, la ronda sigue leyendo y actualizando la pantalla "
-              "pero no reencola nada por su cuenta.",
+        ayuda="Mantiene los apagados que hiciste con Todo Selector en Rappi. "
+              "PedidosYa muestra el estado que informa su portal.",
     ),
     Opcion(
         clave="verificacion_rapida",
@@ -180,12 +180,13 @@ OPCIONES = (
     ),
     Opcion(
         clave="max_intentos",
-        titulo="Reintentos por operación",
+        titulo="Intentos por operación",
         defecto=3,
         tipo="entero",
         grupo="Ritmo",
         minimo=1,
         maximo=10,
+        ayuda="Los apagados de PedidosYa se intentan una vez por orden.",
     ),
     # Los 3 reintentos de arriba son seguidos, de a 2 segundos: sirven para
     # un click que no entro, no para un portal que esta teniendo un mal
@@ -201,8 +202,8 @@ OPCIONES = (
         minimo=0,
         maximo=240,
         unidad="minutos",
-        ayuda="0 = no reintentar. Solo si en el medio no pediste otra cosa "
-              "para ese producto y sigue haciendo falta.",
+        ayuda="0 = no reintentar. Los apagados fallidos de PedidosYa requieren "
+              "una nueva orden.",
     ),
     Opcion(
         clave="max_reintentos_automaticos",

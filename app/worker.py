@@ -3,7 +3,7 @@
 Diseño:
   - UN navegador persistente: PedidosYa y una pestaña compartida por ambos Rappi.
   - La UI nunca espera al navegador: encola una Operacion y devuelve enseguida.
-  - Cada 5 min se revisa todo lo apagado (PedidosYa a veces lo revive solo).
+  - Periódicamente se relee la disponibilidad de los portales.
 """
 
 import asyncio
@@ -498,6 +498,21 @@ class Worker:
                 db.commit()
                 return
 
+            apagado_pedidosya = op.plataforma == "pedidosya" and op.accion != "prender"
+            reintento_heredado = (op.intentos or op.auto_reintentos
+                                 or (op.detalle or "").startswith((
+                                     "reintento: revivio a los ",
+                                     "reintento automatico: se habia revivido",
+                                 )))
+            if apagado_pedidosya and reintento_heredado:
+                op.estado = Operacion.CANCELADA
+                op.finalizada_en = ahora
+                op.detalle = "apagado automático de PedidosYa retirado de la cola"
+                db.flush()
+                cola.reflejar_pendiente(db, op.producto_id, op.plataforma)
+                db.commit()
+                return
+
             op.estado = Operacion.EN_CURSO
             op.intentos += 1
             db.commit()
@@ -512,7 +527,9 @@ class Worker:
                 db.commit()
                 return
 
-            max_intentos = config.entero("max_intentos")
+            # Si el resultado de un apagado de PedidosYa quedó incierto,
+            # otro intento podría repetirlo después de un cambio en el portal.
+            max_intentos = 1 if apagado_pedidosya else config.entero("max_intentos")
             nombre_remoto = self._nombre_remoto(db, producto, op.plataforma)
 
             log.info("op#%s %s '%s' en %s (intento %s/%s)",
@@ -674,7 +691,7 @@ class Worker:
 
     async def _ejecutar_sin_turno(self, plat, plataforma, accion, nombre_remoto):
         from plataformas.base import NombreAmbiguo, DuracionNoConfirmada
-        from plataformas.pedidosya import VerificacionHumanaPendiente
+        from plataformas.pedidosya import ApagadoSinConfirmar, VerificacionHumanaPendiente
 
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
@@ -715,6 +732,9 @@ class Worker:
 
             return ok, ("" if ok else getattr(plat, "ultimo_error_producto", "")
                         or "no se pudo confirmar el cambio"), ""
+        except ApagadoSinConfirmar as e:
+            await self._detectar_verificacion(plataforma, plat)
+            return False, str(e), ""
         except VerificacionHumanaPendiente:
             self.congelar_por_verificacion(
                 plataforma, origen="captcha", detalle=MSG_VERIFICACION_HUMANA)
@@ -738,7 +758,7 @@ class Worker:
                .filter_by(producto_id=producto_id, plataforma=plataforma).first())
         if (producto is None or not producto.activo or producto.pausado
                 or config.tienda_pausada(plataforma)
-                or not config.activo("sostener_apagados")
+                or (plataforma != "pedidosya" and not config.activo("sostener_apagados"))
                 or est is None or est.estado != estado
                 or estado not in EstadoItem.APAGADOS_PROPIOS
                 or cola.ultima_id(db, producto_id, plataforma) != operacion_id):
@@ -758,7 +778,11 @@ class Worker:
             if (est is None or
                     self._nombre_remoto(db, producto, plataforma) != nombre_remoto):
                 return
-            if real.disponible:
+            if real.disponible and plataforma == "pedidosya":
+                est.estado = EstadoItem.PRENDIDO
+                est.detalle = ""
+                est.verificado_en = datetime.now()
+            elif real.disponible:
                 db.add(Operacion(
                     producto_id=producto_id, plataforma=plataforma,
                     accion=("apagar_hoy" if estado == EstadoItem.APAGADO_HOY
@@ -1111,7 +1135,8 @@ class Worker:
                 continue
             try:
                 resultado = await self.sincronizar_estados(
-                    nombre, sostener=config.activo("sostener_apagados"))
+                    nombre, sostener=(nombre != "pedidosya"
+                                      and config.activo("sostener_apagados")))
                 for caso in resultado.get(nombre, {}).get("revividos", []):
                     await self._reencolar_si_revivio(caso)
             except Exception as e:
@@ -1364,6 +1389,8 @@ class Worker:
         como se llaman SUS productos y aca se decide cuales son el mismo.
         No toca la base: propone, y la confirmacion es del usuario.
         """
+        from plataformas.pedidosya import VerificacionHumanaPendiente
+
         # Leer las dos cartas tarda como un minuto. Guardamos la ultima para
         # que abrir la pantalla no la dispare de nuevo: recargar el navegador
         # obligaba a esperar otra vez, y la carta no cambia tan seguido.
@@ -1393,6 +1420,10 @@ class Worker:
                     continue
                 try:
                     cartas[nombre] = await plat.listar_productos()
+                except VerificacionHumanaPendiente:
+                    self.congelar_por_verificacion(
+                        nombre, origen="captcha", detalle=MSG_VERIFICACION_HUMANA)
+                    errores[nombre] = self._mensaje_verificacion(nombre)
                 except Exception as e:
                     log.exception("Leyendo la carta de %s", nombre)
                     errores[nombre] = _resumen(e)
@@ -1645,7 +1676,7 @@ class Worker:
                     # Un producto en pausa se lee igual (la lectura trae la
                     # carta entera de todos modos) pero no se sostiene: es
                     # justamente lo que el usuario pidio sacarse de encima.
-                    if (sostener and not producto.pausado
+                    if (sostener and plataforma != "pedidosya" and not producto.pausado
                             and est.estado in EstadoItem.APAGADOS_PROPIOS):
                         # Lo apagamos nosotros y esta prendido: se revivio.
                         # No lo pisamos: primero hay que confirmarlo.
@@ -1774,7 +1805,7 @@ class Worker:
     # ---------- Reverificacion ----------
 
     async def _loop_reverificacion(self):
-        """PedidosYa a veces revive productos apagados. Chequeamos periodicamente.
+        """Actualiza periódicamente la disponibilidad leída de los portales.
 
         Se duerme de a un minuto en vez de los 15 de una: asi cambiar el
         intervalo desde Ajustes (o ponerlo en 0) tiene efecto en el minuto,
@@ -1950,6 +1981,9 @@ class Worker:
         if (op.auto_reintentos or 0) >= tope:
             return f"ya lleva {op.auto_reintentos} reintentos automaticos"
 
+        if op.plataforma == "pedidosya" and op.accion != "prender":
+            return "los apagados fallidos de PedidosYa requieren una nueva orden"
+
         if op.plataforma not in activas:
             return "esa plataforma no esta activa en esta instalacion"
 
@@ -2004,6 +2038,8 @@ class Worker:
 
     async def _reencolar_si_revivio(self, caso: dict):
         plataforma = caso["plataforma"]
+        if plataforma == "pedidosya":
+            return
         plat = self.plataformas.get(plataforma)
         if plat is None:
             return

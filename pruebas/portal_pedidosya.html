@@ -58,6 +58,12 @@ const POPUP = params.get("popup") || "cerrable";
 const HANDLER = params.get("handler") || "hijo";
 
 const apagados = new Set(JSON.parse(localStorage.getItem("apagados") || '["Budin de pan"]'));
+const DEMORA = Number(params.get("demora")) || 0;
+const TRABADA = params.get("trabada");
+const SIN_ESTADO = params.get("sinEstado");
+const OTRO_POPUP = params.get("otroPopup");
+const DUPLICADO = params.get("duplicado");
+if (DUPLICADO) CATEGORIAS[2][1].push("Budin de pan");
 let categoriaActual = 0;   // el portal siempre arranca en la primera
 
 function guardar() {
@@ -76,7 +82,12 @@ function pintarCategorias() {
     item.appendChild(inner);
     // Aca esta el quid: donde se cuelga el listener.
     (HANDLER === "host" ? item : inner)
-      .addEventListener("click", () => { categoriaActual = i; pintarProductos(); });
+      .addEventListener("click", () => {
+        if (TRABADA === nombre) return;
+        const cambiar = () => { categoriaActual = i; pintarProductos(); };
+        if (DEMORA) setTimeout(cambiar, DEMORA);
+        else cambiar();
+      });
     cont.appendChild(item);
   });
 }
@@ -101,6 +112,7 @@ function pintarProductos() {
       '<span class="mat-slide-toggle-content">' +
         '<p class="item-name">' + nombre + '</p>' +
       '</span>';
+    if (SIN_ESTADO === nombre) label.querySelector("input").setAttribute("aria-checked", "mixed");
     label.querySelector("input").addEventListener("change", (ev) => {
       // Prender es directo; apagar abre el popup de dos opciones.
       if (ev.target.checked) {
@@ -119,12 +131,20 @@ function abrirPopupApagado(nombre) {
   const back = document.createElement("div");
   back.className = "cdk-overlay-backdrop";
   const caja = document.createElement("div");
-  caja.className = "popup";
-  caja.innerHTML = "<h3>" + nombre + "</h3>" +
+  caja.className = "popup cdk-overlay-pane";
+  caja.innerHTML = "<h3>" + (OTRO_POPUP || nombre) + "</h3>" +
     '<p class="opcion" id="hoy">Unavailable for today</p>' +
     '<p class="opcion" id="indef">Unavailable indefinitely</p>';
   document.body.append(back, caja);
+  const escapar = ev => {
+    if (ev.key !== "Escape") return;
+    document.removeEventListener("keydown", escapar);
+    back.remove(); caja.remove();
+    pintarProductos();
+  };
+  document.addEventListener("keydown", escapar);
   caja.querySelectorAll(".opcion").forEach(op => op.addEventListener("click", () => {
+    document.removeEventListener("keydown", escapar);
     apagados.add(nombre);
     guardar();
     back.remove(); caja.remove();

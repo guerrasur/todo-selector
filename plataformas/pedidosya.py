@@ -53,17 +53,26 @@ aria-checked ("true"/"false") sobre el <input>.
 =========================================================================
 """
 
+import asyncio
+import json
 import logging
 import re
+from time import monotonic
 from typing import Optional
+from urllib.parse import urlsplit
 
-from .base import DuracionNoConfirmada, PlataformaBase, ResultadoEstado, ResultadoTienda
+from .base import (DuracionNoConfirmada, NombreAmbiguo, PlataformaBase,
+                   ResultadoEstado, ResultadoTienda)
 
 log = logging.getLogger("pedidosya")
 
 
 class VerificacionHumanaPendiente(RuntimeError):
     """El portal requiere intervención humana; la operación queda pendiente."""
+
+
+class ApagadoSinConfirmar(RuntimeError):
+    """El portal pudo haber recibido el apagado antes de fallar la confirmación."""
 
 
 class PedidosYa(PlataformaBase):
@@ -90,9 +99,9 @@ class PedidosYa(PlataformaBase):
     # Buscabamos el texto en castellano, no lo encontrabamos, y por eso
     # fallaba el apagado aunque el click estuviera entrando bien.
     # Se aceptan los dos idiomas por si el portal cambia de locale.
-    TXT_POR_HOY = re.compile(r"(no disponible por hoy|unavailable for today)", re.I)
+    TXT_POR_HOY = re.compile(r"^(no disponible por hoy|unavailable for today)$", re.I)
     TXT_INDEFINIDO = re.compile(
-        r"(no disponible indefinidamente|unavailable indefinitely)", re.I)
+        r"^(no disponible indefinidamente|unavailable indefinitely)$", re.I)
 
     # Popup de "Let's make sure the application can play sounds" que sale
     # al reloguear (una vez por dia).
@@ -143,24 +152,37 @@ class PedidosYa(PlataformaBase):
                 "PedidosYa pide verificar que sos humano: mantené pulsado "
                 "Press & Hold en su pestaña; la cola espera sin perder el progreso.")
 
+    def en_el_menu(self) -> bool:
+        if not self.configurado:
+            return False
+        actual = urlsplit(self.page.url)
+        esperado = urlsplit(self.url_menu)
+        return ((actual.scheme, actual.netloc, actual.path.rstrip("/"))
+                == (esperado.scheme, esperado.netloc, esperado.path.rstrip("/")))
+
+    async def _exigir_menu(self):
+        await self._exigir_sin_verificacion()
+        if not self.en_el_menu():
+            raise RuntimeError("PedidosYa no está en el menú configurado en Ajustes.")
+
     async def ir_al_menu(self):
         await self._exigir_sin_verificacion()
         await super().ir_al_menu()
         await self._exigir_sin_verificacion()
 
     async def clickear(self, locator, timeout=8000, que="elemento", profundo=False):
-        await self._exigir_sin_verificacion()
+        await self._exigir_menu()
         resultado = await super().clickear(locator, timeout, que, profundo)
-        await self._exigir_sin_verificacion()
+        await self._exigir_menu()
         return resultado
 
     async def _diagnosticar(self, objetivo):
         # Si apareció durante el click normal, cortar antes de los fallbacks.
-        await self._exigir_sin_verificacion()
+        await self._exigir_menu()
         return await super()._diagnosticar(objetivo)
 
     async def clickear_por_js(self, locator, profundo=False, timeout=8000):
-        await self._exigir_sin_verificacion()
+        await self._exigir_menu()
         return await super().clickear_por_js(locator, profundo, timeout)
 
     async def recargar_y_preparar(self, por_que="", asentar=1500):
@@ -179,20 +201,13 @@ class PedidosYa(PlataformaBase):
     def __init__(self, page, menu_id: str = None):
         super().__init__(page)
         self.menu_id = menu_id or self.MENU_ID
-        # nombre_remoto -> indice de la categoria donde lo encontramos, para
-        # no tener que recorrerlas todas cada vez.
-        self._categoria_de = {}
+        self._categorias_leidas = {}
 
     def configurar(self, menu_id: str):
-        """Cambia de sucursal sin reiniciar la app. Olvida lo aprendido.
-
-        El mapa de categorias es de ESTE menu: si cambia el local, las
-        categorias son otras y buscar en la #2 de antes no significa nada.
-        """
-        if menu_id and menu_id != self.menu_id:
-            log.info("PedidosYa pasa al menu %s (antes %s)", menu_id, self.menu_id)
+        """Cambia de menú y descarta las categorías de la sucursal anterior."""
+        if menu_id != self.menu_id:
             self.menu_id = menu_id
-            self._categoria_de = {}
+            self._categorias_leidas = {}
 
     async def _cerrar_popups(self) -> bool:
         """Cierra el popup de sonido que PedidosYa muestra al reloguear.
@@ -223,6 +238,7 @@ class PedidosYa(PlataformaBase):
         if await self._hay_overlay():
             texto = await self.texto_overlay()
             log.warning("Cierro un dialogo que quedo abierto: %s", texto or "(sin texto)")
+            await self._exigir_sin_verificacion()
             await self.page.keyboard.press("Escape")
             await self.page.wait_for_timeout(800)
             return True
@@ -262,326 +278,302 @@ class PedidosYa(PlataformaBase):
             await self.page.wait_for_selector(
                 "input.mat-slide-toggle-input", timeout=15000
             )
-            return not await self.en_verificacion()
+            return self.en_el_menu() and not await self.en_verificacion()
         except Exception:
             return False
 
-    async def _click_toggle(self, fila):
-        """Clickea el toggle de la fila.
+    SELECTOR_FILAS = "label.mat-slide-toggle-label"
+    SELECTOR_NOMBRE = ".item-name"
+    SELECTOR_POPUP = ".cdk-overlay-pane:visible"
+    ESPERA_CATEGORIA = 7
+    ESTABILIZACION = 0.45
 
-        OJO: el <input> tiene la clase cdk-visually-hidden de Angular
-        Material y clickearlo directo NO funciona. Verificado contra una
-        pagina de prueba con este mismo HTML: el click al input tarda
-        30.0s exactos y falla. Hay que clickear la barra visible.
-        """
-        barra = fila.locator("span.mat-slide-toggle-bar").first
-        # El <label> entero tambien togglea (semantica de label).
-        objetivo = barra if await barra.count() > 0 else fila
-        await self.clickear(objetivo, timeout=10000, que="toggle")
+    # Leer de una vez evita combinar el nombre de una fila con el switch
+    # de otra mientras Angular reemplaza los productos.
+    JS_CARTA_VISIBLE = r"""
+        ({categorias, filas, nombre}) => {
+            const visible = el => el.getClientRects().length &&
+                getComputedStyle(el).visibility === 'visible' &&
+                !el.closest('[aria-hidden="true"], [inert]');
+            const texto = el => el.innerText.trim().replace(/\s+/g, ' ');
+            const seleccionada = '[aria-current="true"], [aria-selected="true"]';
+            const items = [...document.querySelectorAll(categorias)].filter(visible);
+            const activas = items.filter(el => el.matches(seleccionada) ||
+                [...el.querySelectorAll(seleccionada)].some(visible));
+            return {
+                categorias: items.map(texto),
+                activa: activas.length === 1 ? texto(activas[0]) : null,
+                filas: [...document.querySelectorAll(filas)].filter(visible).map(fila => {
+                    const titulos = [...fila.querySelectorAll(nombre)].filter(visible);
+                    const controles = fila.querySelectorAll('input[type="checkbox"]');
+                    const toggle = controles.length === 1 ? controles[0] : null;
+                    const id = fila.htmlFor;
+                    const aria = toggle?.getAttribute('aria-checked');
+                    const valido = id && toggle && fila.control === toggle &&
+                        toggle.id === id &&
+                        document.querySelectorAll('#' + CSS.escape(id)).length === 1;
+                    let disponible = null;
+                    if (valido) {
+                        if (aria === null) disponible = toggle.checked;
+                        if (aria === 'true' && toggle.checked) disponible = true;
+                        if (aria === 'false' && !toggle.checked) disponible = false;
+                    }
+                    return {nombre: titulos.length === 1 ? texto(titulos[0]) : '',
+                            id, disponible};
+                }),
+            };
+        }
+    """
 
-    async def _nombres_visibles(self) -> list[str]:
-        """Los productos que la pagina tiene renderizados ahora mismo."""
-        filas = self.page.locator("label.mat-slide-toggle-label")
-        nombres = []
-        for i in range(await filas.count()):
-            try:
-                texto = " ".join((await filas.nth(i).inner_text()).split())
-            except Exception:
-                continue
-            if texto:
-                nombres.append(texto)
-        return nombres
-
-    async def categorias_de_productos(self) -> dict:
-        """{nombre: categoria} de lo que dejo la ultima lectura.
-
-        No recorre nada: `listar_productos` y `leer_todos` ya pasan por
-        todas las categorias —es la unica forma de leer la carta entera en
-        este portal— y anotan en cual aparecio cada producto. Volver a
-        recorrerlas aca serian otros dos minutos por la misma informacion.
-
-        Si todavia no se leyo nada, devuelve {}: "no se", no "no tienen".
-        """
-        if not self._categoria_de:
-            return {}
-
-        nombres = await self.categorias()
-        salida = {}
-        for producto, indice in self._categoria_de.items():
-            # El mapa es de indices y los nombres se releen ahora: si el
-            # local reordeno el menu entre la lectura y esto, un indice
-            # puede quedar fuera de rango. Se saltea en vez de inventar.
-            if 0 <= indice < len(nombres) and nombres[indice]:
-                salida[producto] = nombres[indice]
-        return salida
+    async def _carta_visible(self) -> dict:
+        await self._exigir_menu()
+        return await self.page.evaluate(self.JS_CARTA_VISIBLE, {
+            "categorias": self.SELECTOR_CATEGORIAS,
+            "filas": self.SELECTOR_FILAS,
+            "nombre": self.SELECTOR_NOMBRE,
+        })
 
     async def categorias(self) -> list[str]:
-        """Los nombres de las categorias del menu, en orden."""
-        cats = self.page.locator(self.SELECTOR_CATEGORIAS)
-        nombres = []
-        for i in range(await cats.count()):
-            try:
-                nombres.append(" ".join((await cats.nth(i).inner_text()).split()))
-            except Exception:
-                nombres.append("?")
-        return nombres
+        return (await self._carta_visible())["categorias"]
 
-    async def _abrir_categoria(self, indice: int) -> bool:
-        """Clickea la categoria numero `indice`. True si cambio la lista."""
-        cats = self.page.locator(self.SELECTOR_CATEGORIAS)
-        if indice >= await cats.count():
-            return False
+    async def categorias_de_productos(self) -> dict:
+        """Devuelve las categorías de los nombres únicos de la última carta."""
+        salida = {}
+        repetidos = set()
+        for categoria, nombres in self._categorias_leidas.items():
+            for nombre in nombres:
+                if nombre in salida:
+                    repetidos.add(nombre)
+                salida[nombre] = categoria
+        return {nombre: categoria for nombre, categoria in salida.items()
+                if nombre not in repetidos}
 
-        antes = await self._nombres_visibles()
+    @staticmethod
+    def _huella(filas):
+        return [(fila["id"], fila["nombre"]) for fila in filas]
+
+    async def _abrir_categoria(self, categoria, categorias, *, aceptar_cache=True):
+        """Espera filas de la categoría solicitada o devuelve None."""
+        antes = await self._carta_visible()
+        if antes["categorias"] != categorias:
+            raise RuntimeError("Cambió la lista de categorías de PedidosYa durante la lectura.")
+        huella_anterior = self._huella(antes["filas"])
+        nombres_antes = sorted(fila["nombre"] for fila in antes["filas"])
+        conocida = (aceptar_cache
+                    and self._categorias_leidas.get(categoria) == nombres_antes
+                    and list(self._categorias_leidas.values()).count(nombres_antes) == 1)
+        ya_abierta = (len(categorias) == 1 or antes["activa"] == categoria
+                      or (antes["activa"] is None and conocida))
+        if not ya_abierta:
+            selector = self.page.locator(f"{self.SELECTOR_CATEGORIAS}:visible")
+            texto = r"^\s*" + r"\s+".join(map(re.escape, categoria.split())) + r"\s*$"
+            destino = selector.filter(has_text=re.compile(texto))
+            if await destino.count() != 1:
+                return None
+            await self.clickear(destino, timeout=2500, que=f"categoría {categoria}",
+                                profundo=True)
+
+        anterior = None
+        fin = monotonic() + self.ESPERA_CATEGORIA
+        while monotonic() < fin:
+            actual = await self._carta_visible()
+            if actual["categorias"] != categorias:
+                raise RuntimeError("Cambió la lista de categorías de PedidosYa durante la lectura.")
+            filas = actual["filas"]
+            activa = actual["activa"]
+            if (filas and all(fila["nombre"] for fila in filas)
+                    and (activa is None or activa == categoria)
+                    and (ya_abierta or self._huella(filas) != huella_anterior)):
+                if filas == anterior:
+                    return filas
+                anterior = filas
+            else:
+                anterior = None
+            await asyncio.sleep(self.ESTABILIZACION)
+        return None
+
+    async def _leer_carta(self):
+        await self.ir_al_menu()
+        inicial = await self._carta_visible()
+        categorias = inicial["categorias"]
+        if not categorias or "" in categorias or len(set(categorias)) != len(categorias):
+            self._categorias_leidas = {}
+            raise RuntimeError("PedidosYa: no se pudo identificar la lista de categorías.")
+
+        # Empezar por otra categoría permite comprobar el cambio de filas
+        # aunque el portal no anuncie qué categoría tiene seleccionada.
+        iniciales = sorted(fila["nombre"] for fila in inicial["filas"])
+        anterior = inicial["activa"] or next(
+            (cat for cat, nombres in self._categorias_leidas.items() if nombres == iniciales),
+            categorias[0],
+        )
+        orden = [categoria for categoria in categorias if categoria != anterior]
+        if anterior in categorias:
+            orden.append(anterior)
+        leidas = {}
         try:
-            entro = await self.clickear(cats.nth(indice), timeout=5000,
-                                        que=f"categoria #{indice}")
-        except VerificacionHumanaPendiente:
+            for categoria in orden:
+                filas = await self._abrir_categoria(categoria, categorias, aceptar_cache=False)
+                if filas is None:
+                    raise RuntimeError(
+                        f"PedidosYa: no se pudo confirmar la categoría «{categoria}».")
+                leidas[categoria] = filas
+            await self._exigir_menu()
+        except Exception:
+            self._categorias_leidas = {}
             raise
-        except Exception as e:
-            log.warning("No pude abrir la categoria #%s: %s",
-                        indice, " ".join(str(e).split())[:100])
-            return False
 
-        await self.page.wait_for_timeout(1500)
-        await self._exigir_sin_verificacion()
-        if await self._nombres_visibles() != antes:
-            return True
-
-        # El click normal entro y la lista no cambio: la categoria ya estaba
-        # abierta. Es lo que pasa con la primera en cada recorrido.
-        if entro:
-            return False
-
-        # Fue por el fallback JS y no paso nada. CONFIRMADO POR LOG
-        # (2026-07-27): asi fallaron las 3 categorias al reconfirmar op#17.
-        # El handler no esta en <wk-menu-list-category-item> sino adentro,
-        # y un click disparado sobre el custom element no le llega.
-        log.info("La categoria #%s no reacciono al click por JS; "
-                 "reintento sobre el hijo que ocupa el centro", indice)
-        try:
-            tag = await self.clickear_por_js(cats.nth(indice), profundo=True,
-                                             timeout=5000)
-        except VerificacionHumanaPendiente:
-            raise
-        except Exception as e:
-            log.warning("Tampoco pude abrir la categoria #%s: %s",
-                        indice, " ".join(str(e).split())[:100])
-            return False
-
-        await self.page.wait_for_timeout(1500)
-        await self._exigir_sin_verificacion()
-        cambio = await self._nombres_visibles() != antes
-        log.info("Categoria #%s por JS sobre <%s>: %s", indice, tag,
-                 "cambio la lista" if cambio else "sigue sin cambiar")
-        return cambio
-
-    async def _mostrar_producto(self, nombre_remoto: str) -> bool:
-        """Deja el producto en el DOM, cambiando de categoria si hace falta."""
-        if await self._fila(nombre_remoto).count() > 0:
-            return True
-
-        total = await self.page.locator(self.SELECTOR_CATEGORIAS).count()
-        if total == 0:
-            log.warning("No encuentro la lista de categorias (%s)",
-                        self.SELECTOR_CATEGORIAS)
-            return False
-
-        # Empezamos por donde lo encontramos la vez pasada.
-        recordado = self._categoria_de.get(nombre_remoto)
-        orden = ([recordado] if recordado is not None else [])
-        orden += [i for i in range(total) if i != recordado]
-
-        for indice in orden:
-            await self._abrir_categoria(indice)
-            if await self._fila(nombre_remoto).count() > 0:
-                if self._categoria_de.get(nombre_remoto) != indice:
-                    log.info("'%s' esta en la categoria '%s'", nombre_remoto,
-                             (await self.categorias())[indice])
-                self._categoria_de[nombre_remoto] = indice
-                return True
-
-        log.warning("'%s' no aparece en ninguna de las %s categorias",
-                    nombre_remoto, total)
-        return False
-
-    def _fila(self, nombre_remoto: str):
-        """Devuelve el locator de la fila del producto.
-
-        CONFIRMADO: cada fila es el <label class="mat-slide-toggle-label">
-        de Angular Material, que envuelve nombre + toggle. Buscamos el
-        texto exacto (exact=True, cuidado con nombres que son prefijo de
-        otros: 'Tarta de verdura' vs 'Tarta de verdura chica') y subimos al
-        label ancestro.
-        """
-        return self.texto_exacto(nombre_remoto).first.locator(self.XPATH_TARJETA)
+        self._categorias_leidas = {
+            categoria: sorted(fila["nombre"] for fila in leidas[categoria])
+            for categoria in categorias
+        }
+        return {categoria: leidas[categoria] for categoria in categorias}
 
     async def listar_productos(self) -> list[str]:
-        """Recorre todas las categorias: la carta entera, no solo la abierta."""
-        await self.ir_al_menu()
-        total = await self.page.locator(self.SELECTOR_CATEGORIAS).count()
-
-        nombres = []
-        for indice in range(total):
-            await self._abrir_categoria(indice)
-            for nombre in await self._nombres_visibles():
-                if nombre not in nombres:
-                    nombres.append(nombre)
-                # En que categoria vive cada uno se ve al pasar, y hasta
-                # ahora se tiraba: la pantalla mostraba la carta entera bajo
-                # "SIN CATEGORIA". El primero que lo muestra manda, igual
-                # que arriba con el nombre: un producto que aparece en dos
-                # categorias es del portal, no nuestro.
-                self._categoria_de.setdefault(nombre, indice)
-        return nombres
+        carta = await self._leer_carta()
+        return list(dict.fromkeys(fila["nombre"] for filas in carta.values()
+                                  for fila in filas))
 
     async def leer_todos(self) -> dict:
-        """{nombre: disponible} de toda la carta, recorriendo las categorias.
+        carta = await self._leer_carta()
+        categorias = await self.categorias_de_productos()
+        estados = {fila["nombre"]: fila["disponible"] for filas in carta.values()
+                   for fila in filas
+                   if fila["disponible"] is not None and fila["nombre"] in categorias}
+        if not estados:
+            raise RuntimeError("PedidosYa: no se pudo confirmar el estado de ningún producto.")
+        return estados
 
-        Producto por producto seria una busqueda por nombre y un cambio de
-        categoria por cada uno. Aca cada categoria se abre UNA vez y se leen
-        de corrido las filas que tiene a la vista, que es de donde salen el
-        nombre y el aria-checked juntos.
+    def _fila(self, nombre_remoto):
+        nombre = self.page.locator(self.SELECTOR_NOMBRE).and_(
+            self.page.get_by_text(nombre_remoto, exact=True))
+        return self.page.locator(f"{self.SELECTOR_FILAS}:visible").filter(has=nombre)
 
-        De paso deja aprendido en que categoria vive cada producto, asi la
-        primera operacion del dia no tiene que salir a buscarlo.
-        """
+    async def _buscar_producto(self, nombre_remoto, *, verificar_carta=False):
+        self.ultimo_error_producto = ""
         await self.ir_al_menu()
-        total = await self.page.locator(self.SELECTOR_CATEGORIAS).count()
-        if total == 0:
-            await self._exigir_sin_verificacion()
-            raise RuntimeError("PedidosYa: no cargó la lista de categorías; "
-                               "no se pudo leer la carta")
+        categorias = await self.categorias()
+        releida = (verificar_carta or not categorias
+                   or categorias != list(self._categorias_leidas))
+        if releida:
+            await self._leer_carta()
+            categorias = list(self._categorias_leidas)
 
-        salida = {}
-        for indice in range(total):
-            await self._abrir_categoria(indice)
-
-            filas = self.page.locator("label.mat-slide-toggle-label")
-            for i in range(await filas.count()):
-                fila = filas.nth(i)
-                try:
-                    nombre = " ".join((await fila.inner_text()).split())
-                except Exception:
-                    continue
-                if not nombre or nombre in salida:
-                    continue
-
-                toggle = fila.locator(
-                    'input[type="checkbox"], [role="switch"], button[aria-checked]'
-                ).first
-                if await toggle.count() == 0:
-                    continue
-                aria = await toggle.get_attribute("aria-checked")
-                if aria is None:
-                    try:
-                        salida[nombre] = await toggle.is_checked()
-                    except Exception:
-                        continue
-                else:
-                    salida[nombre] = (aria == "true")
-
-                self._categoria_de[nombre] = indice
-
-        # El desafío también puede aparecer al leer la última categoría,
-        # después del chequeo del click. Esa pasada no confirma la carta.
-        await self._exigir_sin_verificacion()
-        if not salida:
-            raise RuntimeError("PedidosYa: no se pudo leer ningún producto")
-        return salida
+        while True:
+            coincidencias = [categoria for categoria, nombres in self._categorias_leidas.items()
+                             for nombre in nombres if nombre == nombre_remoto]
+            if len(coincidencias) > 1:
+                raise NombreAmbiguo(
+                    f"«{nombre_remoto}» aparece más de una vez en PedidosYa "
+                    f"({', '.join(dict.fromkeys(coincidencias))}).")
+            if coincidencias:
+                filas = await self._abrir_categoria(coincidencias[0], categorias)
+                if filas is not None:
+                    encontradas = [fila for fila in filas if fila["nombre"] == nombre_remoto]
+                    if len(encontradas) > 1:
+                        raise NombreAmbiguo(f"«{nombre_remoto}» tiene varias filas en PedidosYa.")
+                    if encontradas:
+                        fila = encontradas[0]
+                        if fila["disponible"] is None:
+                            self.ultimo_error_producto = (
+                                f"No se pudo leer el switch de «{nombre_remoto}» en PedidosYa.")
+                        return fila
+            if releida:
+                self.ultimo_error_producto = f"No se pudo confirmar «{nombre_remoto}» en PedidosYa."
+                return None
+            await self._leer_carta()
+            categorias = list(self._categorias_leidas)
+            releida = True
 
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         await self.ir_al_menu()
-        datos = await self._html_de(self._fila(nombre_remoto))
+        datos = await self._html_de(self._fila(nombre_remoto).first)
         datos["popup_abierto"] = await self._hay_overlay()
         return datos
 
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
-        await self.ir_al_menu()
-        if not await self._mostrar_producto(nombre_remoto):
+        fila = await self._buscar_producto(nombre_remoto)
+        if fila is None or fila["disponible"] is None:
             return None
+        return ResultadoEstado(disponible=fila["disponible"], detalle="switch de PedidosYa")
+
+    async def _click_toggle(self, nombre_remoto, esperado):
+        actual = await self._carta_visible()
+        coincidencias = [fila for fila in actual["filas"] if fila["nombre"] == nombre_remoto]
+        if coincidencias != [esperado]:
+            raise RuntimeError(f"Cambió la fila de «{nombre_remoto}» antes de tocar el switch.")
 
         fila = self._fila(nombre_remoto)
+        ident = json.dumps(esperado["id"], ensure_ascii=False)
+        marcado = ":checked" if esperado["disponible"] else ":not(:checked)"
+        aria = str(esperado["disponible"]).lower()
+        control = (f'input[type="checkbox"]{marcado}'
+                   f':is([aria-checked="{aria}"], :not([aria-checked]))')
+        fila = fila.and_(self.page.locator(f'label[for={ident}]:has({control})'))
+        barra = fila.locator("span.mat-slide-toggle-bar:visible")
+        if await fila.count() != 1 or await barra.count() != 1:
+            raise RuntimeError(f"No se pudo identificar el switch de «{nombre_remoto}».")
+        await self.clickear(barra, timeout=3500, que=f"switch de {nombre_remoto}")
 
-        # CONFIRMADO: el toggle es <input type="checkbox" role="switch"
-        # aria-checked="true|false">. aria-checked es la fuente de verdad.
-        toggle = fila.locator(
-            'input[type="checkbox"], [role="switch"], button[aria-checked]'
-        ).first
-
-        if await toggle.count() == 0:
-            return ResultadoEstado(disponible=False, detalle="toggle no encontrado")
-
-        aria = await toggle.get_attribute("aria-checked")
-        if aria is not None:
-            return ResultadoEstado(disponible=(aria == "true"), detalle=f"aria={aria}")
-
-        try:
-            marcado = await toggle.is_checked()
-            return ResultadoEstado(disponible=marcado, detalle="checkbox")
-        except Exception:
-            clases = await toggle.get_attribute("class") or ""
-            return ResultadoEstado(disponible=False, detalle=f"class={clases}")
+    async def _confirmar(self, nombre_remoto, esperado_disponible, asentar=1500):
+        lista = await self.recargar_y_preparar(
+            por_que=f"reconfirmar «{nombre_remoto}»", asentar=asentar)
+        if not lista:
+            return False
+        estado = await self.leer_estado(nombre_remoto)
+        return estado is not None and estado.disponible == esperado_disponible
 
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
-        # Va ANTES de leer: con un nombre que llega a dos productos, la
-        # lectura tampoco vale (leer_estado usa el mismo `.first`).
-        await self.revisar_ambiguedad(nombre_remoto)
-        estado = await self.leer_estado(nombre_remoto)
-        if estado is None:
+        fila = await self._buscar_producto(nombre_remoto, verificar_carta=True)
+        if fila is None or fila["disponible"] is None:
             return False
-        if not estado.disponible:
+        if not fila["disponible"]:
             if not por_hoy:
-                # El booleano no distingue por hoy de indefinido. No reabrir
-                # ventas para cambiarlo ni afirmar una duración que no vimos.
                 raise DuracionNoConfirmada(
-                    "El producto ya está apagado, pero no pude confirmar que "
-                    "sea indefinido. Cambiá la duración desde el portal; "
-                    "la app no lo volvió a prender.")
-            log.info("'%s' ya estaba apagado, no toco nada", nombre_remoto)
+                    "El producto ya está apagado y el portal no mostró la duración. "
+                    "Podés cambiarla desde PedidosYa.")
             return True
 
-        fila = self._fila(nombre_remoto)
-        await self._click_toggle(fila)
-        await self.page.wait_for_timeout(1500)
-
-        # El popup ofrece las dos opciones
+        await self._click_toggle(nombre_remoto, fila)
         opcion = self.TXT_POR_HOY if por_hoy else self.TXT_INDEFINIDO
+        popup = self.page.locator(self.SELECTOR_POPUP).filter(
+            has=self.page.get_by_text(nombre_remoto, exact=True))
         try:
-            await self.clickear(self.page.get_by_text(opcion),
-                                que=f"opcion {opcion.pattern}")
+            await popup.wait_for(state="visible", timeout=5000)
+            destino = popup.get_by_text(opcion)
+            if await destino.count() != 1:
+                raise RuntimeError("No se pudo identificar la opción de disponibilidad.")
+            await self._exigir_menu()
         except VerificacionHumanaPendiente:
             raise
-        except Exception:
-            await self._exigir_sin_verificacion()
-            # No sirve saber que no encontramos el texto: lo que hace falta
-            # es saber que decia el popup que si se abrio.
-            log.error("No encontre %s en el popup. Lo que hay abierto dice: %s",
-                      opcion.pattern, await self.texto_overlay() or "(nada abierto)")
+        except Exception as e:
+            await self._exigir_menu()
+            log.warning("No se confirmó el diálogo de «%s»: %s", nombre_remoto,
+                        " ".join(str(e).split())[:150])
             await self.page.keyboard.press("Escape")
             return False
 
-        await self.page.wait_for_timeout(3000)
-        return await self._confirmar(nombre_remoto, esperado_disponible=False)
+        detalle = (f"No se pudo confirmar el apagado de «{nombre_remoto}». "
+                   "Revisá su disponibilidad en PedidosYa antes de volver a pedirlo.")
+        try:
+            await self.clickear(destino, que=f"duración de {nombre_remoto}")
+            await popup.wait_for(state="hidden", timeout=5000)
+            await self.page.wait_for_timeout(1500)
+            if await self._confirmar(nombre_remoto, esperado_disponible=False):
+                return True
+        except Exception as e:
+            raise ApagadoSinConfirmar(detalle) from e
+        raise ApagadoSinConfirmar(detalle)
 
     async def prender(self, nombre_remoto: str) -> bool:
-        await self.revisar_ambiguedad(nombre_remoto)
-        estado = await self.leer_estado(nombre_remoto)
-        if estado is None:
+        fila = await self._buscar_producto(nombre_remoto, verificar_carta=True)
+        if fila is None or fila["disponible"] is None:
             return False
-        if estado.disponible:
-            log.info("'%s' ya estaba prendido, no toco nada", nombre_remoto)
+        if fila["disponible"]:
             return True
 
-        fila = self._fila(nombre_remoto)
-        await self._click_toggle(fila)
+        await self._click_toggle(nombre_remoto, fila)
         await self.page.wait_for_timeout(2000)
-
-        # CONFIRMADO EN VIVO (2026-07-27, op#17): prender NO abre
-        # ningun popup. El click sobre el toggle apagado lo prende directo y
-        # queda guardado; la relectura despues de recargar lo encontro
-        # prendido. El popup de dos opciones es solo del lado de apagar,
-        # porque ahi hay que elegir "por hoy" o "indefinidamente".
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
 
     # CONFIRMADO POR /api/esqueleto (2026-07-30): en la barra superior de la
