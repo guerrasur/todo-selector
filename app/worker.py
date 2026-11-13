@@ -724,11 +724,18 @@ class Worker:
             if not ok:
                 if await self._detectar_verificacion(plataforma, plat):
                     return False, self._mensaje_verificacion(plataforma), VERIFICACION
-                # Puede que haya fallado por deslogueo en el medio
+                detalle = getattr(plat, "ultimo_error_producto", "")
                 sigue_ok = await plat.asegurar_sesion()
                 self.sesion_ok[plataforma] = sigue_ok
                 if not sigue_ok:
-                    return False, "se cayo la sesion durante la operacion", SIN_SESION
+                    if await self._detectar_verificacion(plataforma, plat):
+                        return False, self._mensaje_verificacion(plataforma), VERIFICACION
+                    if plataforma != "pedidosya":
+                        return False, "se cayo la sesion durante la operacion", SIN_SESION
+                    motivo = await self._motivo_de_sesion_fallida(plataforma, plat)
+                    if self.motivo_sesion.get(plataforma) != MENU_NO_CARGO:
+                        return False, motivo, SIN_SESION
+                    return False, detalle or motivo, ""
 
             return ok, ("" if ok else getattr(plat, "ultimo_error_producto", "")
                         or "no se pudo confirmar el cambio"), ""

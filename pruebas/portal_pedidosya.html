@@ -64,6 +64,9 @@ const SIN_ESTADO = params.get("sinEstado");
 const OTRO_POPUP = params.get("otroPopup");
 const DEMORA_MENU = Number(params.get("demoraMenu")) || 0;
 const ARIA_OCULTO = params.has("ariaOculto");
+const TECLADO = params.has("teclado");
+const SWITCH_DESHABILITADO = params.get("switchDeshabilitado");
+const SONIDO_TAPADO = params.has("sonidoTapado");
 const DUPLICADO = params.get("duplicado");
 if (DUPLICADO) CATEGORIAS[2][1].push("Budin de pan");
 let categoriaActual = 0;   // el portal siempre arranca en la primera
@@ -114,8 +117,16 @@ function pintarProductos() {
       '<span class="mat-slide-toggle-content">' +
         '<p class="item-name">' + nombre + '</p>' +
       '</span>';
-    if (SIN_ESTADO === nombre) label.querySelector("input").setAttribute("aria-checked", "mixed");
-    label.querySelector("input").addEventListener("change", (ev) => {
+    const input = label.querySelector("input");
+    input.tabIndex = 0;
+    if (SIN_ESTADO === nombre) input.setAttribute("aria-checked", "mixed");
+    if (SWITCH_DESHABILITADO === nombre) input.disabled = true;
+    if (TECLADO) {
+      input.addEventListener("click", ev => {
+        if (ev.detail) ev.preventDefault();
+      });
+    }
+    input.addEventListener("change", (ev) => {
       // Prender es directo; apagar abre el popup de dos opciones.
       if (ev.target.checked) {
         apagados.delete(nombre);
@@ -173,6 +184,12 @@ function popupDeSonido() {
     if (POPUP !== "pegado") carta.removeAttribute("aria-hidden");
   });
   document.body.append(back, caja);
+  if (SONIDO_TAPADO) {
+    btn.focus();
+    const tapa = document.createElement("div");
+    tapa.style = "position: absolute; inset: 0; z-index: 2";
+    caja.append(tapa);
+  }
   if (params.has("captcha") && !sessionStorage.getItem("verificacionResuelta")) {
     const iframe = document.createElement("iframe");
     iframe.id = "px-captcha-modal";

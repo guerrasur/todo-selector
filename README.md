@@ -2,6 +2,13 @@
 
 [Historial de cambios](docs/cambios/README.md)
 
+## Versión 6.17.7 — encendido de productos en PedidosYa
+
+Todo Selector activa por teclado el checkbox exacto del producto y vuelve
+a leer su disponibilidad después de recargar. Si el switch está deshabilitado,
+si el menú queda bloqueado o si el producto sigue apagado, la cola indica
+dónde se detuvo el encendido.
+
 ## Versión 6.17.6 — lectura de PedidosYa y búsqueda por palabras
 
 PedidosYa espera las categorías y los productos después de una recarga o de

@@ -226,8 +226,20 @@ class PedidosYa(PlataformaBase):
                 raise
             except Exception as e:
                 await self._exigir_menu()
+                # El botón puede conservar el foco aunque un aviso tape su centro.
+                if await boton.count() == 1 and await boton.is_enabled():
+                    enfocado = await boton.evaluate("el => el === document.activeElement")
+                    if enfocado:
+                        await self._exigir_menu()
+                        try:
+                            await boton.and_(self.page.locator(":focus")).press("Enter", timeout=1800)
+                        except Exception:
+                            await self._exigir_menu()
+                        else:
+                            await self._exigir_menu()
+                            return True
                 log.warning("PedidosYa: el botón de sonido todavía no responde: %s",
-                            " ".join(str(e).split())[:180])
+                            self._motivo_del_click(e))
                 return False
 
         if await self._hay_overlay():
@@ -503,7 +515,7 @@ class PedidosYa(PlataformaBase):
             return None
         return ResultadoEstado(disponible=fila["disponible"], detalle="switch de PedidosYa")
 
-    async def _click_toggle(self, nombre_remoto, esperado):
+    async def _control_producto(self, nombre_remoto, esperado):
         actual = await self._carta_visible()
         coincidencias = [fila for fila in actual["filas"] if fila["nombre"] == nombre_remoto]
         if coincidencias != [esperado]:
@@ -513,21 +525,51 @@ class PedidosYa(PlataformaBase):
         ident = json.dumps(esperado["id"], ensure_ascii=False)
         marcado = ":checked" if esperado["disponible"] else ":not(:checked)"
         aria = str(esperado["disponible"]).lower()
-        control = (f'input[type="checkbox"]{marcado}'
-                   f':is([aria-checked="{aria}"], :not([aria-checked]))')
-        fila = fila.and_(self.page.locator(f'label[for={ident}]:has({control})'))
-        barra = fila.locator("span.mat-slide-toggle-bar:visible")
-        if await fila.count() != 1 or await barra.count() != 1:
+        selector = (f'input[type="checkbox"][id={ident}]{marcado}'
+                    f':is([aria-checked="{aria}"], :not([aria-checked]))')
+        fila = fila.and_(self.page.locator(f'label[for={ident}]:has({selector})'))
+        control = fila.locator(selector)
+        if await fila.count() != 1 or await control.count() != 1:
             raise RuntimeError(f"No se pudo identificar el switch de «{nombre_remoto}».")
+        return fila, control
+
+    async def _click_toggle(self, nombre_remoto, esperado):
+        fila, _ = await self._control_producto(nombre_remoto, esperado)
+        barra = fila.locator("span.mat-slide-toggle-bar:visible")
+        if await barra.count() != 1:
+            raise RuntimeError(f"No se pudo identificar la barra de «{nombre_remoto}».")
         await self.clickear(barra, timeout=3500, que=f"switch de {nombre_remoto}")
+
+    async def _activar_checkbox(self, nombre_remoto, esperado):
+        _, control = await self._control_producto(nombre_remoto, esperado)
+        if await self._hay_overlay():
+            raise RuntimeError("Hay un diálogo abierto sobre el menú de PedidosYa.")
+        if not await control.is_enabled(timeout=2000):
+            raise RuntimeError(f"PedidosYa tiene deshabilitado el switch de «{nombre_remoto}».")
+        await control.focus(timeout=2000)
+        await self._exigir_menu()
+        enfocado = control.and_(self.page.locator(":focus"))
+        if await enfocado.count() != 1 or await self._hay_overlay():
+            raise RuntimeError(f"No se pudo enfocar el switch de «{nombre_remoto}».")
+        await enfocado.press("Space", timeout=2000)
+        await self._exigir_menu()
 
     async def _confirmar(self, nombre_remoto, esperado_disponible, asentar=1500):
         lista = await self.recargar_y_preparar(
             por_que=f"reconfirmar «{nombre_remoto}»", asentar=asentar)
         if not lista:
+            self.ultimo_error_producto = (
+                "El menú de PedidosYa no quedó listo después de recargar para confirmar el cambio.")
             return False
         estado = await self.leer_estado(nombre_remoto)
-        return estado is not None and estado.disponible == esperado_disponible
+        if estado is None:
+            return False
+        if estado.disponible != esperado_disponible:
+            disponible = "disponible" if estado.disponible else "apagado"
+            self.ultimo_error_producto = (
+                f"Después de recargar, «{nombre_remoto}» sigue {disponible} en PedidosYa.")
+            return False
+        return True
 
     async def apagar(self, nombre_remoto: str, por_hoy: bool = True) -> bool:
         fila = await self._buscar_producto(nombre_remoto, verificar_carta=True)
@@ -578,7 +620,7 @@ class PedidosYa(PlataformaBase):
         if fila["disponible"]:
             return True
 
-        await self._click_toggle(nombre_remoto, fila)
+        await self._activar_checkbox(nombre_remoto, fila)
         await self.page.wait_for_timeout(2000)
         return await self._confirmar(nombre_remoto, esperado_disponible=True)
 

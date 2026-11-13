@@ -211,6 +211,38 @@ async def regresiones_lectura(navegador):
     await pagina.close()
 
 
+async def encendido_con_teclado(navegador):
+    pagina = await navegador.new_page()
+
+    class PedidosYaLocal(PedidosYa):
+        url_menu = BASE
+
+    plat = PedidosYaLocal(pagina, menu_id="LOCAL")
+    await pagina.goto(BASE + "?teclado&sonidoTapado")
+    revisar(await plat.asegurar_sesion(), "cierra por teclado el aviso de sonido enfocado")
+    await plat.leer_estado("Budin de pan")
+    await plat._fila("Budin de pan").locator(".mat-slide-toggle-bar").click(force=True)
+    revisar(not (await plat.leer_estado("Budin de pan")).disponible,
+            "el clic forzado sobre la barra puede entrar sin cambiar el producto")
+    revisar(await plat.prender("Budin de pan"),
+            "Espacio cambia el checkbox exacto y el encendido persiste tras recargar")
+    revisar((await plat.leer_estado("Flan casero")).disponible,
+            "el producto vecino conserva su estado")
+
+    await pagina.evaluate("localStorage.setItem('apagados', JSON.stringify(['Budin de pan']))")
+    await pagina.goto(BASE + "?switchDeshabilitado=Budin+de+pan")
+    revisar(await plat.asegurar_sesion(), "carga el menú con un switch deshabilitado")
+    try:
+        await plat.prender("Budin de pan")
+    except RuntimeError as e:
+        revisar("deshabilitado" in str(e), "explica si el checkbox real está deshabilitado")
+    else:
+        revisar(False, "el checkbox deshabilitado debe detener el encendido")
+    revisar(not (await plat.leer_estado("Budin de pan")).disponible,
+            "el producto deshabilitado sigue apagado")
+    await pagina.close()
+
+
 async def main():
     servidor = servir()
     try:
@@ -221,6 +253,7 @@ async def main():
             await escenario(navegador, "?popup=pegado&handler=hijo",
                             "B) diálogo de sonido que sigue abierto")
             await regresiones_lectura(navegador)
+            await encendido_con_teclado(navegador)
             await navegador.close()
     finally:
         servidor.shutdown()
