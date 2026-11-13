@@ -123,8 +123,9 @@ function pintarPrecios() {
 }
 
 function filasPreciosVisibles() {
+  const palabras = palabrasBusqueda(preciosUI.buscar);
   return (preciosUI.lectura?.filas || []).filter(f => preciosUI.elegidas.has(f.tienda)
-    && plano(f.nombre).includes(plano(preciosUI.buscar)));
+    && coincideBusqueda(f.nombre, palabras));
 }
 
 function cambioIndividualPrecios(f, valor) {

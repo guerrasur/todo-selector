@@ -13,10 +13,8 @@ Reproduce las dos situaciones del log del 2026-07-27:
      relectura no encontraba el producto. Resultado: op#17 dio "fallo"
      sobre un prender que si habia entrado.
 
-  B) El backdrop no se cierra nunca, asi que TODOS los clicks van por el
-     fallback JS. Aca se ve el otro problema: un click disparado sobre
-     <wk-menu-list-category-item> no hace nada, porque el handler vive en
-     un hijo y los eventos suben pero no bajan.
+  B) El diálogo de sonido sigue abierto. La preparación mantiene en
+     espera las acciones hasta que el menú sea utilizable.
 """
 
 import asyncio
@@ -76,6 +74,7 @@ async def escenario(navegador, query: str, titulo: str):
 
     class PedidosYaLocal(PedidosYa):
         url_menu = BASE + query
+        ESPERA_MENU = 3 if "popup=pegado" in query else PedidosYa.ESPERA_MENU
 
     plat = PedidosYaLocal(pagina, menu_id="LOCAL")
     await pagina.goto(plat.url_menu)
@@ -83,7 +82,13 @@ async def escenario(navegador, query: str, titulo: str):
     await pagina.evaluate("localStorage.setItem('apagados', '[\"Budin de pan\"]')")
     await pagina.reload()
 
-    revisar(await plat.asegurar_sesion(), "asegurar_sesion() deja la pagina lista")
+    lista = await plat.asegurar_sesion()
+    if "popup=pegado" in query:
+        revisar(not lista, "un diálogo que sigue abierto impide operar")
+        revisar(await plat._hay_overlay(), "el diálogo persiste en la réplica")
+        await pagina.close()
+        return
+    revisar(lista, "asegurar_sesion() deja la pagina lista")
 
     revisar(await plat.categorias() == ["Bebidas", "Platos", "Tartas"],
             "categorias() lee las 3 del menu")
@@ -152,6 +157,20 @@ async def regresiones_lectura(navegador):
 
     plat = PedidosYaLocal(pagina, menu_id="LOCAL")
 
+    await pagina.goto(BASE + "?captcha&ariaOculto&demoraMenu=1400")
+    revisar(await plat.en_verificacion(), "detecta el iframe px-captcha-modal")
+    revisar(not await plat.asegurar_sesion(), "espera la intervención manual")
+    await pagina.locator("#px-captcha-modal").evaluate(
+        "el => { sessionStorage.setItem('verificacionResuelta', '1'); el.remove(); }")
+    revisar(not await plat.verificacion_resuelta(),
+            "un switch de fondo solo no da por recuperado el menú")
+    await pagina.locator("wk-menu-list-category-item").first.wait_for()
+    revisar(await plat.verificacion_resuelta(),
+            "detecta categorías y productos detrás del aviso de sonido")
+    revisar(await plat.asegurar_sesion(), "cierra el aviso y espera la carta utilizable")
+    revisar(await plat.prender("Budin de pan"),
+            "confirma el encendido aunque las categorías demoren tras la recarga")
+
     await pagina.goto(BASE + "?demora=1700&sinEstado=Flan+casero")
     revisar(await plat.asegurar_sesion(), "réplica con categorías lentas")
     todos = await plat.leer_todos()
@@ -200,7 +219,7 @@ async def main():
             await escenario(navegador, "?popup=cerrable&handler=hijo",
                             "A) popup de sonido cerrable (como en produccion)")
             await escenario(navegador, "?popup=pegado&handler=hijo",
-                            "B) backdrop pegado: todos los clicks por JS")
+                            "B) diálogo de sonido que sigue abierto")
             await regresiones_lectura(navegador)
             await navegador.close()
     finally:

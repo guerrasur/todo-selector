@@ -292,6 +292,13 @@ async def probar_buscador(pagina):
     revisar("Agua chica" in texto,
             "encuentra 'Agua chica' buscando como se llama en Rappi")
 
+    await buscador.fill("VERD TARTA")
+    lista = pagina.locator("#lista")
+    await lista.get_by_text("Tarta de verdura", exact=True).wait_for()
+    await lista.get_by_text("Tarta de choclo", exact=True).wait_for(state="hidden")
+    revisar("Tarta de verdura" in await lista.inner_text(),
+            "encuentra palabras parciales y desordenadas aunque se omita una del medio")
+
     await buscador.fill("zzzzz")
     await pagina.wait_for_timeout(800)
     revisar("No hay ningún producto" in await pagina.locator("#lista").inner_text(),

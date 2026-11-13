@@ -105,7 +105,7 @@ class PedidosYa(PlataformaBase):
 
     # Popup de "Let's make sure the application can play sounds" que sale
     # al reloguear (una vez por dia).
-    RE_PLAY_SOUND = re.compile(r"play\s*sound", re.I)
+    RE_PLAY_SOUND = re.compile(r"^\s*play\s*sound\s*$", re.I)
 
     # CONFIRMADO POR /api/esqueleto (2026-07-27): las categorias del menu
     # son <wk-menu-list-category-item> adentro de <wk-menu-list>:
@@ -127,7 +127,7 @@ class PedidosYa(PlataformaBase):
     # HTML confirmado por el usuario. El iframe interior puede estar oculto
     # mientras el contenedor sigue bloqueando la carta. No leer tokens.
     SELECTOR_VERIFICACION = (
-        '.px-captcha-container, #px-captcha, '
+        '.px-captcha-container, #px-captcha, iframe#px-captcha-modal, '
         'iframe[title="Human verification challenge"]'
     )
 
@@ -141,10 +141,11 @@ class PedidosYa(PlataformaBase):
         return False
 
     async def verificacion_resuelta(self) -> bool:
-        """Ausencia del desafío Y menú visible; no basta un DOM vacío."""
-        if await self.en_verificacion():
+        """Comprueba que volvió el menú, incluso detrás del aviso de sonido."""
+        if await self.en_verificacion() or not self.en_el_menu():
             return False
-        return await self.page.locator("label.mat-slide-toggle-label").first.is_visible()
+        carta = await self._carta_visible(permitir_fondo=True)
+        return self._menu_cargado(carta) and not await self.en_verificacion()
 
     async def _exigir_sin_verificacion(self):
         if await self.en_verificacion():
@@ -209,92 +210,94 @@ class PedidosYa(PlataformaBase):
             self.menu_id = menu_id
             self._categorias_leidas = {}
 
+    def _boton_sonido(self):
+        return self.page.locator("button:visible").filter(has_text=self.RE_PLAY_SOUND)
+
     async def _cerrar_popups(self) -> bool:
-        """Cierra el popup de sonido que PedidosYa muestra al reloguear.
-
-        Aparece una vez por dia. Mientras esta abierto tapa parte de la
-        lista, y un click sobre lo que quede debajo falla con "intercepts
-        pointer events" hasta el timeout.
-
-        OJO: esto NO explica el "element is not enabled" que se vio el
-        2026-07-27. Ese mensaje solo lo produce un `disabled`, un
-        `aria-disabled="true"` o un <fieldset disabled> padre (verificado
-        contra Playwright 1.61). Ver inspeccionar().
-        """
-        await self._exigir_sin_verificacion()
-        boton = self.page.get_by_role("button", name=self.RE_PLAY_SOUND)
-        if await boton.count() > 0:
+        """Cierra el aviso de sonido o un diálogo residual de disponibilidad."""
+        await self._exigir_menu()
+        boton = self._boton_sonido()
+        if await boton.count() == 1:
             try:
-                await boton.first.click(timeout=5000)
-                await self.page.wait_for_timeout(1000)
-                log.info("Popup de sonido cerrado")
+                await boton.click(timeout=1800)
+                await self._exigir_menu()
                 return True
+            except VerificacionHumanaPendiente:
+                raise
             except Exception as e:
-                log.warning("No pude cerrar el popup de sonido: %s", e)
+                await self._exigir_menu()
+                log.warning("PedidosYa: el botón de sonido todavía no responde: %s",
+                            " ".join(str(e).split())[:180])
+                return False
 
-        # Puede haber quedado colgado el popup de disponibilidad de un
-        # intento anterior. Si no se cierra, el proximo click cae sobre el
-        # backdrop y el reintento nace muerto.
         if await self._hay_overlay():
-            texto = await self.texto_overlay()
-            log.warning("Cierro un dialogo que quedo abierto: %s", texto or "(sin texto)")
-            await self._exigir_sin_verificacion()
-            await self.page.keyboard.press("Escape")
-            await self.page.wait_for_timeout(800)
-            return True
-
+            dialogo = self.page.locator(self.SELECTOR_POPUP).filter(
+                has=self.page.get_by_text(self.TXT_POR_HOY)).filter(
+                has=self.page.get_by_text(self.TXT_INDEFINIDO))
+            if await dialogo.count() == 1:
+                await self._exigir_menu()
+                await self.page.keyboard.press("Escape")
+                return True
         return False
 
     async def _hay_overlay(self) -> bool:
-        """Queda algun dialogo tapando el menu? Solo para avisar en el log."""
-        try:
-            return await self.page.locator(".cdk-overlay-backdrop").count() > 0
-        except Exception:
-            return False
+        return (await self.page.locator(".cdk-overlay-backdrop:visible").count() > 0
+                or await self._boton_sonido().count() > 0)
+
+    @staticmethod
+    def _menu_cargado(carta: dict) -> bool:
+        categorias = carta["categorias"]
+        return (bool(categorias) and all(categorias)
+                and len(set(categorias)) == len(categorias)
+                and any(fila["nombre"] for fila in carta["filas"]))
 
     async def asegurar_sesion(self) -> bool:
         if await self.en_verificacion():
             return False
         await self.ir_al_menu()
-
-        # Antes que nada: si hay un popup abierto, tapa parte de la lista
-        # y los clicks que caigan debajo van a fallar por timeout.
-        await self._cerrar_popups()
-        if await self._hay_overlay():
-            log.warning("Hay un dialogo abierto en la pestaña de PedidosYa "
-                        "que no supe cerrar: los clicks pueden fallar")
-
-        # CONFIRMADO: PedidosYa no muestra pantalla de sesion expirada,
-        # se re-loguea solo. Dejamos el chequeo de password como red de
-        # seguridad por si en el futuro llegara a pedir login manual.
-        if await self.page.locator('input[type="password"]').count() > 0:
+        if not self.en_el_menu():
             return False
 
-        # CONFIRMADO: el menu usa toggles Angular Material
-        # (mat-slide-toggle-input). Esperar a que aparezca al menos uno
-        # es mejor evidencia de que el menu cargo que buscar una
-        # categoria por nombre (puede no estar si no hay stock ese dia).
-        try:
-            await self.page.wait_for_selector(
-                "input.mat-slide-toggle-input", timeout=15000
-            )
-            return self.en_el_menu() and not await self.en_verificacion()
-        except Exception:
-            return False
+        fin = monotonic() + self.ESPERA_MENU
+        anterior = None
+        aviso_pendiente = False
+        while monotonic() < fin:
+            await self._exigir_menu()
+            if await self.page.locator('input[type="password"]:visible').count():
+                return False
+
+            carta = await self._carta_visible()
+            aviso_pendiente = await self._hay_overlay()
+            if aviso_pendiente:
+                anterior = None
+                await self._cerrar_popups()
+            elif self._menu_cargado(carta):
+                if anterior == carta["categorias"]:
+                    await self._exigir_menu()
+                    return True
+                anterior = carta["categorias"]
+            else:
+                anterior = None
+            await asyncio.sleep(self.ESTABILIZACION)
+
+        log.warning("PedidosYa: menú sin confirmar (categorías=%d, filas=%d, diálogo=%s)",
+                    len(carta["categorias"]), len(carta["filas"]), aviso_pendiente)
+        return False
 
     SELECTOR_FILAS = "label.mat-slide-toggle-label"
     SELECTOR_NOMBRE = ".item-name"
     SELECTOR_POPUP = ".cdk-overlay-pane:visible"
+    ESPERA_MENU = 15
     ESPERA_CATEGORIA = 7
     ESTABILIZACION = 0.45
 
     # Leer de una vez evita combinar el nombre de una fila con el switch
     # de otra mientras Angular reemplaza los productos.
     JS_CARTA_VISIBLE = r"""
-        ({categorias, filas, nombre}) => {
+        ({categorias, filas, nombre, permitirFondo}) => {
             const visible = el => el.getClientRects().length &&
                 getComputedStyle(el).visibility === 'visible' &&
-                !el.closest('[aria-hidden="true"], [inert]');
+                (permitirFondo || !el.closest('[aria-hidden="true"], [inert]'));
             const texto = el => el.innerText.trim().replace(/\s+/g, ' ');
             const seleccionada = '[aria-current="true"], [aria-selected="true"]';
             const items = [...document.querySelectorAll(categorias)].filter(visible);
@@ -325,12 +328,13 @@ class PedidosYa(PlataformaBase):
         }
     """
 
-    async def _carta_visible(self) -> dict:
+    async def _carta_visible(self, *, permitir_fondo=False) -> dict:
         await self._exigir_menu()
         return await self.page.evaluate(self.JS_CARTA_VISIBLE, {
             "categorias": self.SELECTOR_CATEGORIAS,
             "filas": self.SELECTOR_FILAS,
             "nombre": self.SELECTOR_NOMBRE,
+            "permitirFondo": permitir_fondo,
         })
 
     async def categorias(self) -> list[str]:
@@ -395,8 +399,10 @@ class PedidosYa(PlataformaBase):
     async def _leer_carta(self):
         await self.ir_al_menu()
         inicial = await self._carta_visible()
+        if not self._menu_cargado(inicial) and await self.asegurar_sesion():
+            inicial = await self._carta_visible()
         categorias = inicial["categorias"]
-        if not categorias or "" in categorias or len(set(categorias)) != len(categorias):
+        if not self._menu_cargado(inicial):
             self._categorias_leidas = {}
             raise RuntimeError("PedidosYa: no se pudo identificar la lista de categorías.")
 

@@ -56,7 +56,18 @@ class Pagina:
         self.goto = AsyncMock()
         self.wait_for_timeout = AsyncMock()
         self.wait_for_selector = AsyncMock()
+        self.categorias = True
+        self.evaluate = AsyncMock(side_effect=self.carta)
         self.keyboard = Mock(press=AsyncMock())
+
+    def carta(self, script, opciones):
+        if self.error:
+            raise RuntimeError("pestaña no disponible")
+        return {
+            "categorias": ["Bebidas"] if self.menu and self.categorias else [],
+            "activa": None,
+            "filas": [{"nombre": "Agua", "id": "switch", "disponible": True}] if self.menu else [],
+        }
 
     def locator(self, selector):
         if selector == PedidosYa.SELECTOR_VERIFICACION:
@@ -150,6 +161,10 @@ class VerificacionPedidosYa(unittest.IsolatedAsyncioTestCase):
         await self.w._actualizar_verificacion_humana()
         self.pagina.captcha, self.pagina.menu = False, False
         await self.w._actualizar_verificacion_humana()
+        self.assertTrue(self.w.en_verificacion("pedidosya"))
+        self.pagina.menu, self.pagina.categorias = True, False
+        await self.w._actualizar_verificacion_humana()
+        self.assertTrue(self.w.en_verificacion("pedidosya"))
         self.pagina.error = True
         await self.w._actualizar_verificacion_humana()
         self.assertTrue(self.w.en_verificacion("pedidosya"))
@@ -327,6 +342,7 @@ class VerificacionPedidosYa(unittest.IsolatedAsyncioTestCase):
 
     async def test_lector_no_devuelve_carta_vacia_como_lectura_valida(self):
         self.plat.ir_al_menu = AsyncMock()
+        self.plat.asegurar_sesion = AsyncMock(return_value=False)
         self.plat._carta_visible = AsyncMock(return_value={
             "categorias": [], "activa": None, "filas": []})
         with self.assertRaisesRegex(RuntimeError, "categorías"):
@@ -336,7 +352,8 @@ class VerificacionPedidosYa(unittest.IsolatedAsyncioTestCase):
         self.pagina.captcha = False
         self.plat.ir_al_menu = AsyncMock()
         self.plat._carta_visible = AsyncMock(return_value={
-            "categorias": ["Bebidas"], "activa": "Bebidas", "filas": []})
+            "categorias": ["Bebidas"], "activa": "Bebidas",
+            "filas": [{"nombre": "Agua", "id": "toggle-1", "disponible": True}]})
 
         async def abrir(categoria, categorias, **kwargs):
             self.pagina.captcha = True

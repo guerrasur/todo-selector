@@ -2,6 +2,15 @@
 
 [Historial de cambios](docs/cambios/README.md)
 
+## Versión 6.17.6 — lectura de PedidosYa y búsqueda por palabras
+
+PedidosYa espera las categorías y los productos después de una recarga o de
+«Press & Hold». Si sigue abierto el aviso de sonido, espera a que se cierre
+antes de operar. Reconoce también el iframe de verificación que tapa el aviso.
+
+El buscador acepta palabras parciales en cualquier orden. Por ejemplo,
+«tosc batatas» encuentra «Wrap de pollo a la toscana con batatas».
+
 ## Versión 6.17.5 — disponibilidad y lectura de PedidosYa
 
 Cada categoría debe confirmar sus filas antes de que Todo Selector acepte

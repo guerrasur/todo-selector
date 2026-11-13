@@ -334,7 +334,8 @@ class Worker:
                              await self._motivo_de_sesion_fallida(nombre, plat))
             except Exception as e:
                 self.sesion_ok[nombre] = False
-                log.error("Error verificando sesion %s: %s", nombre, e)
+                if not await self._detectar_verificacion(nombre, plat):
+                    log.error("Error verificando sesion %s: %s", nombre, e)
             if self.rappi_solo_diagnostico and nombre in ("rappi", "rappi_comun"):
                 await self._registrar_diagnostico_rappi(nombre, plat)
 
@@ -591,9 +592,8 @@ class Worker:
                 if motivo == SIN_SESION:
                     self.reintentar_desde[op.plataforma] = (
                         datetime.now() + timedelta(seconds=ESPERA_SIN_SESION))
-                    log.warning("op#%s en espera: %s esta deslogueado. Logueate "
-                                "en la ventana del navegador y sale sola.",
-                                op.id, op.plataforma)
+                    log.warning("op#%s en espera en %s: %s",
+                                op.id, op.plataforma, detalle)
                 else:
                     log.info("op#%s en espera: %s", op.id,
                              self._mensaje_verificacion(op.plataforma))
@@ -902,6 +902,8 @@ class Worker:
         try:
             ok = await plat.asegurar_sesion()
         except Exception as e:
+            if await self._detectar_verificacion(plataforma, plat):
+                return False, self._mensaje_verificacion(plataforma)
             ok = False
             log.error("Error verificando sesion %s: %s", plataforma, e)
 

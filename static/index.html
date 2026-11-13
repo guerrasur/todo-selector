@@ -573,7 +573,7 @@
 <main>
   <div id="panel-busqueda" class="solo-dashboard">
     <input id="buscador" type="search" autocomplete="off"
-           placeholder="Buscar un producto… (por el nombre de cualquiera de los dos portales)">
+           placeholder="Buscar por nombre o por palabras…">
     <button id="btn-limpiar" title="Borrar la búsqueda (Esc)">✕</button>
     <span id="resultado-busqueda"></span>
   </div>
@@ -1559,7 +1559,7 @@ function hora(iso) {
 // adentro de #lista: el input queda afuera para no perder el foco ni lo que
 // estás tecleando mientras se refresca.
 
-let filtro = '';
+let filtro = [];
 
 // producto_id -> Set de plataformas que ELEGISTE clickeando su chip.
 //
@@ -1583,18 +1583,26 @@ function plano(texto) {
                       .toLowerCase();
 }
 
+function palabrasBusqueda(texto) {
+  return plano(texto).match(/[\p{L}\p{N}]+/gu) || [];
+}
+
+function coincideBusqueda(nombre, palabras) {
+  if (!palabras.length) return true;
+  const partes = palabrasBusqueda(nombre);
+  if (palabras.length === 1) return partes.some(parte => parte.includes(palabras[0]));
+  return palabras.every(palabra => partes.some(parte => parte.startsWith(palabra)));
+}
+
 function coincide(item) {
-  if (!filtro) return true;
-  // También por el nombre de cada portal: difieren tanto que buscar
-  // el nombre que usa el otro portal tiene que llegar igual al producto.
-  const donde = [item.nombre, ...Object.values(item.alias || {})];
-  return donde.some(t => plano(t).includes(filtro));
+  const nombres = [item.nombre, ...Object.values(item.alias || {})];
+  return nombres.some(nombre => coincideBusqueda(nombre, filtro));
 }
 
 function aplicarFiltro(texto) {
-  filtro = plano(texto.trim());
+  filtro = palabrasBusqueda(texto);
   document.getElementById('panel-busqueda')
-          .classList.toggle('buscando', filtro !== '');
+          .classList.toggle('buscando', filtro.length > 0);
   cargar();
 }
 
@@ -1867,7 +1875,7 @@ function pintarProductos(productos) {
   productos = productos.filter(coincide);
 
   document.getElementById('resultado-busqueda').textContent =
-    filtro ? `${productos.length} de ${total}` : '';
+    filtro.length ? `${productos.length} de ${total}` : '';
 
   // Cuántos hay prendidos, sobre la carta entera: es un número de cabecera
   // y no tiene que bailar con lo que estés buscando.
@@ -1876,7 +1884,7 @@ function pintarProductos(productos) {
   document.getElementById('cuenta-prendidos').textContent =
     `${prendidos} prendido${prendidos === 1 ? '' : 's'}`;
 
-  if (filtro && !productos.length) {
+  if (filtro.length && !productos.length) {
     cont.classList.add('vacio');
     cont.textContent = 'No hay ningún producto que coincida.';
     return;
@@ -1902,7 +1910,7 @@ function pintarProductos(productos) {
   if (!pintados && !pausados.length && pendientes.length) return;
   if (!pintados && !pausados.length) {
     cont.classList.add('vacio');
-    cont.textContent = filtro
+    cont.textContent = filtro.length
       ? 'Ninguno de los que coinciden está prendido.'
       : 'No hay nada prendido: está toda la carta apagada.';
     return;
