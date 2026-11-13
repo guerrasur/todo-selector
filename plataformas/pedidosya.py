@@ -75,6 +75,10 @@ class ApagadoSinConfirmar(RuntimeError):
     """El portal pudo haber recibido el apagado antes de fallar la confirmación."""
 
 
+class SwitchDeshabilitado(RuntimeError):
+    """El portal impide activar el control de disponibilidad."""
+
+
 class PedidosYa(PlataformaBase):
     nombre = "pedidosya"
 
@@ -503,10 +507,28 @@ class PedidosYa(PlataformaBase):
             categorias = list(self._categorias_leidas)
             releida = True
 
+    @staticmethod
+    async def _motivo_switch_deshabilitado(control):
+        return await control.evaluate("""el => {
+            const bloqueo = el.closest('[disabled], [aria-disabled="true"], [inert]');
+            if (!bloqueo) return el.matches(':disabled')
+                ? 'disabled heredado' : 'el navegador lo informa deshabilitado';
+            const atributos = ['disabled', 'aria-disabled', 'inert']
+                .filter(nombre => bloqueo.hasAttribute(nombre));
+            return bloqueo.localName + ' (' + atributos.join(', ') + ')';
+        }""", timeout=1500)
+
     async def inspeccionar(self, nombre_remoto: str) -> dict:
         await self.ir_al_menu()
-        datos = await self._html_de(self._fila(nombre_remoto).first)
+        fila = self._fila(nombre_remoto)
+        datos = await self._html_de(fila.first)
         datos["popup_abierto"] = await self._hay_overlay()
+        if await fila.count() == 1:
+            control = fila.locator('input[type="checkbox"]')
+            if await control.count() == 1:
+                datos["switch_habilitado"] = await control.is_enabled(timeout=1500)
+                if not datos["switch_habilitado"]:
+                    datos["bloqueo"] = await self._motivo_switch_deshabilitado(control)
         return datos
 
     async def leer_estado(self, nombre_remoto: str) -> Optional[ResultadoEstado]:
@@ -545,7 +567,9 @@ class PedidosYa(PlataformaBase):
         if await self._hay_overlay():
             raise RuntimeError("Hay un diálogo abierto sobre el menú de PedidosYa.")
         if not await control.is_enabled(timeout=2000):
-            raise RuntimeError(f"PedidosYa tiene deshabilitado el switch de «{nombre_remoto}».")
+            motivo = await self._motivo_switch_deshabilitado(control)
+            raise SwitchDeshabilitado(
+                f"PedidosYa tiene deshabilitado el switch de «{nombre_remoto}»: {motivo}.")
         await control.focus(timeout=2000)
         await self._exigir_menu()
         enfocado = control.and_(self.page.locator(":focus"))
@@ -604,6 +628,8 @@ class PedidosYa(PlataformaBase):
         detalle = (f"No se pudo confirmar el apagado de «{nombre_remoto}». "
                    "Revisá su disponibilidad en PedidosYa antes de volver a pedirlo.")
         try:
+            log.info("PedidosYa: se envía el apagado solicitado de «%s» (%s)",
+                     nombre_remoto, "por hoy" if por_hoy else "indefinido")
             await self.clickear(destino, que=f"duración de {nombre_remoto}")
             await popup.wait_for(state="hidden", timeout=5000)
             await self.page.wait_for_timeout(1500)

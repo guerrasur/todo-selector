@@ -235,11 +235,23 @@ async def encendido_con_teclado(navegador):
     try:
         await plat.prender("Budin de pan")
     except RuntimeError as e:
-        revisar("deshabilitado" in str(e), "explica si el checkbox real está deshabilitado")
+        revisar("input (disabled)" in str(e), "identifica el atributo disabled del checkbox")
     else:
         revisar(False, "el checkbox deshabilitado debe detener el encendido")
     revisar(not (await plat.leer_estado("Budin de pan")).disponible,
             "el producto deshabilitado sigue apagado")
+    datos = await plat.inspeccionar("Budin de pan")
+    revisar(datos["switch_habilitado"] is False and datos["bloqueo"] == "input (disabled)",
+            "el diagnóstico informa el bloqueo sin tocar el producto")
+
+    fila = plat._fila("Budin de pan")
+    await fila.evaluate("""label => {
+        label.querySelector('input').removeAttribute('disabled');
+        label.setAttribute('aria-disabled', 'true');
+    }""")
+    datos = await plat.inspeccionar("Budin de pan")
+    revisar(datos["bloqueo"] == "label (aria-disabled)",
+            "el diagnóstico encuentra un bloqueo heredado fuera del checkbox")
     await pagina.close()
 
 

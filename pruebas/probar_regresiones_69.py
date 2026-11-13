@@ -20,7 +20,8 @@ with (patch.object(Path, "home", return_value=Path(TEMPORAL.name)),
     from app import config, cola
     from app.database import Base, engine, init_db, SessionLocal
     from app.models import Producto, EstadoItem, Operacion
-    from app.main import encolar_accion, AccionIn, cancelar, CancelarIn
+    from app.main import (_destrabar_operaciones_colgadas, encolar_accion,
+                          AccionIn, cancelar, CancelarIn)
     from app.worker import Worker, DURACION_NO_CONFIRMADA
     from plataformas.base import DuracionNoConfirmada, ResultadoEstado
     from plataformas.rappi import Rappi
@@ -81,6 +82,34 @@ class Regresiones(unittest.IsolatedAsyncioTestCase):
                         nombre_remoto="Producto de prueba", plataforma="rappi",
                         estado=EstadoItem.APAGADO_HOY,
                         operacion_id=cola.ultima_id(db, self.pid, "rappi"))
+
+    async def test_reiniciar_no_reanuda_apagados_pedidosya(self):
+        with SessionLocal() as db:
+            db.add(EstadoItem(producto_id=self.pid, plataforma="pedidosya",
+                              estado=EstadoItem.APAGANDO))
+            db.add_all([
+                Operacion(producto_id=self.pid, plataforma="pedidosya",
+                          accion="apagar_hoy", estado=Operacion.PENDIENTE, intentos=0),
+                Operacion(producto_id=self.pid, plataforma="pedidosya",
+                          accion="apagar_indef", estado=Operacion.EN_CURSO, intentos=1),
+                Operacion(producto_id=self.pid, plataforma="rappi",
+                          accion="apagar_hoy", estado=Operacion.EN_CURSO, intentos=1),
+            ])
+            db.commit()
+
+        _destrabar_operaciones_colgadas()
+        _destrabar_operaciones_colgadas()
+        with SessionLocal() as db:
+            ops = db.query(Operacion).order_by(Operacion.id).all()
+            self.assertEqual([op.estado for op in ops],
+                             [Operacion.CANCELADA, Operacion.CANCELADA, Operacion.PENDIENTE])
+            self.assertTrue(all(op.finalizada_en for op in ops[:2]))
+            est = db.query(EstadoItem).filter_by(plataforma="pedidosya").one()
+            self.assertEqual(est.estado, EstadoItem.DESCONOCIDO)
+
+        self.w._ejecutar = AsyncMock(return_value=(True, "", ""))
+        await self.w._procesar_pendientes()
+        self.w._ejecutar.assert_awaited_once_with("rappi", "apagar_hoy", "Producto de prueba")
 
     async def test_indefinido_apagado_no_inventa_ni_reabre(self):
         for clase in (Rappi, PedidosYa):

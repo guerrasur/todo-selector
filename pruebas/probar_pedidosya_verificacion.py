@@ -21,7 +21,7 @@ from app.models import EstadoItem, Operacion, Producto
 from app.worker import Worker, VERIFICACION
 from plataformas.base import PlataformaBase, ResultadoEstado
 from plataformas.pedidosya import (ApagadoSinConfirmar, PedidosYa,
-                                   VerificacionHumanaPendiente)
+                                   SwitchDeshabilitado, VerificacionHumanaPendiente)
 
 
 class Indicadores:
@@ -330,6 +330,31 @@ class VerificacionPedidosYa(unittest.IsolatedAsyncioTestCase):
         with sesiones() as db:
             op = db.query(Operacion).one()
             self.assertEqual((op.estado, op.intentos), (Operacion.ERROR, 1))
+
+    async def test_switch_deshabilitado_sale_de_la_cola_sin_reintentos(self):
+        motor = create_engine("sqlite://", poolclass=StaticPool)
+        self.addCleanup(motor.dispose)
+        Base.metadata.create_all(motor)
+        sesiones = sessionmaker(bind=motor, autoflush=False)
+        with sesiones() as db:
+            producto = Producto(nombre="Flan")
+            db.add(producto)
+            db.flush()
+            db.add(Operacion(producto_id=producto.id, plataforma="pedidosya", accion="prender"))
+            db.commit()
+
+        self.pagina.captcha = False
+        self.w._preparar = AsyncMock(return_value=(True, ""))
+        self.plat.prender = AsyncMock(side_effect=SwitchDeshabilitado("label (aria-disabled)"))
+        with patch.object(modulo_worker, "SessionLocal", sesiones):
+            await self.w._procesar_pendientes()
+            await self.w._procesar_pendientes()
+        self.plat.prender.assert_awaited_once_with("Flan")
+        with sesiones() as db:
+            op = db.query(Operacion).one()
+            self.assertEqual(op.estado, Operacion.ERROR)
+            self.assertEqual(op.detalle, "label (aria-disabled)")
+            self.assertTrue(op.reintentada)
 
     async def test_captcha_despues_de_enviar_apagado_no_repite_la_orden(self):
         self.pagina.captcha = True

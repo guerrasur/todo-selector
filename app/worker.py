@@ -128,6 +128,7 @@ MSG_NO_SE_PUDO_MIRAR = ("no se pudo leer la pestaña para saber que paso: "
 # sobre todo, no hay que clickear ninguno de los dos (ver NombreAmbiguo).
 AMBIGUO = "ambiguo"
 DURACION_NO_CONFIRMADA = "duracion_no_confirmada"
+SWITCH_DESHABILITADO = "switch_deshabilitado"
 
 # Lo que antes eran constantes hoy sale de Ajustes (app/config.py). Los
 # valores por defecto son estos mismos, asi que sin tocar nada la app se
@@ -605,12 +606,12 @@ class Worker:
             # sin gastar los 3 intentos en el mismo error. Lo mismo con un
             # nombre que apunta a dos productos: eso se arregla en la
             # pantalla Carta, no reintentando.
-            if motivo in (NO_ACTIVA, AMBIGUO, DURACION_NO_CONFIRMADA):
+            if motivo in (NO_ACTIVA, AMBIGUO, DURACION_NO_CONFIRMADA, SWITCH_DESHABILITADO):
                 op.estado = Operacion.ERROR
                 op.detalle = detalle
                 op.finalizada_en = datetime.now()
-                if motivo == DURACION_NO_CONFIRMADA:
-                    op.reintentada = True  # requiere cambiar duración en el portal
+                if motivo in (DURACION_NO_CONFIRMADA, SWITCH_DESHABILITADO):
+                    op.reintentada = True  # requiere revisar el producto en el portal
                 self._marcar_fallo(db, op.producto_id, op.plataforma, detalle)
                 # "termina aca" y no "cancelada": cancelada es lo que saca el
                 # usuario desde la pantalla, y son cosas distintas.
@@ -691,7 +692,8 @@ class Worker:
 
     async def _ejecutar_sin_turno(self, plat, plataforma, accion, nombre_remoto):
         from plataformas.base import NombreAmbiguo, DuracionNoConfirmada
-        from plataformas.pedidosya import ApagadoSinConfirmar, VerificacionHumanaPendiente
+        from plataformas.pedidosya import (ApagadoSinConfirmar, SwitchDeshabilitado,
+                                          VerificacionHumanaPendiente)
 
         # Refresca y verifica sesion justo antes de operar
         listo, motivo = await self._preparar(plataforma)
@@ -748,6 +750,8 @@ class Worker:
             return False, MSG_VERIFICACION_HUMANA, VERIFICACION
         except DuracionNoConfirmada as e:
             return False, str(e), DURACION_NO_CONFIRMADA
+        except SwitchDeshabilitado as e:
+            return False, str(e), SWITCH_DESHABILITADO
         except NombreAmbiguo as e:
             # No es un fallo del portal: es el catalogo apuntando a dos
             # productos. Reintentar clickearia uno al azar tres veces.

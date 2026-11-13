@@ -2,6 +2,13 @@
 
 [Historial de cambios](docs/cambios/README.md)
 
+## Versión 6.17.8 — cola de apagados y diagnóstico de PedidosYa
+
+Al iniciar, los apagados de PedidosYa que quedaron pendientes de una sesión
+anterior se cancelan y figuran en el historial. Los apagados pedidos en la
+sesión actual se registran en el log. Si el portal presenta un switch
+deshabilitado, la cola detalla dónde detectó el bloqueo.
+
 ## Versión 6.17.7 — encendido de productos en PedidosYa
 
 Todo Selector activa por teclado el checkbox exacto del producto y vuelve

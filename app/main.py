@@ -167,33 +167,31 @@ VERSION = _leer_version()
 
 
 def _destrabar_operaciones_colgadas():
-    """Las que quedaron EN_CURSO de una corrida anterior vuelven a la cola.
+    """Recupera la cola de la sesión anterior sin reanudar apagados de PedidosYa."""
+    with SessionLocal() as db:
+        anteriores = (db.query(Operacion)
+                       .filter(Operacion.estado.in_(Operacion.VIVAS))
+                       .all())
+        canceladas = set()
+        reanudadas = 0
+        for op in anteriores:
+            if op.plataforma == "pedidosya" and op.accion in ("apagar_hoy", "apagar_indef"):
+                op.estado = Operacion.CANCELADA
+                op.finalizada_en = datetime.now()
+                op.detalle = "apagado pendiente de PedidosYa cancelado al iniciar"
+                canceladas.add((op.producto_id, op.plataforma))
+                log.warning("op#%s: apagado de PedidosYa cancelado al iniciar", op.id)
+            elif op.estado == Operacion.EN_CURSO:
+                op.estado = Operacion.PENDIENTE
+                op.detalle = "la app se cerró mientras corría: vuelve a la cola"
+                reanudadas += 1
 
-    EN_CURSO significa "la esta ejecutando el worker ahora". Si la app se
-    cerro (o se colgo) con una adentro, nadie la termina nunca: quedaba
-    contando en el badge para siempre, el producto quedaba en "apagando…"
-    eterno y encima bloqueaba el reencolado, porque tanto
-    `_motivo_para_no_reintentar` como `cierre.planificar` saltean lo que
-    tiene un EstadoItem en curso.
-
-    Vuelven a PENDIENTE y no a ERROR: no sabemos si el cambio entro o no, y
-    la operacion sigue confirmando releyendo, asi que si ya estaba hecho
-    termina en "ya estaba apagado" sin tocar nada.
-    """
-    db = SessionLocal()
-    try:
-        colgadas = (db.query(Operacion)
-                    .filter(Operacion.estado == Operacion.EN_CURSO)
-                    .all())
-        for op in colgadas:
-            op.estado = Operacion.PENDIENTE
-            op.detalle = "la app se cerro mientras corria: vuelve a la cola"
-        if colgadas:
-            db.commit()
-            log.info("%s operacion(es) habian quedado a medias de la corrida "
-                     "anterior: vuelven a la cola", len(colgadas))
-    finally:
-        db.close()
+        db.flush()
+        for producto_id, plataforma in canceladas:
+            cola.reflejar_pendiente(db, producto_id, plataforma)
+        db.commit()
+        if reanudadas:
+            log.info("%s operación(es) de la sesión anterior vuelven a la cola", reanudadas)
 
 
 @app.on_event("startup")
